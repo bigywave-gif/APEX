@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/implementation-map.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "entries"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "scopeControl": {
+      "type": "object",
+      "required": ["changeScopeHash", "affectedVisualNodes", "allowedRuntimeTargets", "protectedVisualNodes", "protectedFiles", "implementationPolicy", "regressionPolicy"],
+      "properties": {
+        "changeScopeHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "affectedVisualNodes": { "type": "array", "minItems": 1 },
+        "allowedRuntimeTargets": { "type": "array", "minItems": 1 },
+        "protectedVisualNodes": { "type": "array" },
+        "protectedFiles": { "type": "array" },
+        "implementationPolicy": { "const": "deny-outside-change-closure" },
+        "regressionPolicy": { "const": "verify-protected-baseline-without-redesign" }
+      }
+    },
+    "motionBindings": { "type": "array" },
+    "iconBindings": { "type": "array", "items": { "type": "object", "required": ["iconId", "sourceSelectionId", "sourceType", "sourceId", "family", "variant", "api", "runtimeTarget", "selector", "size", "colorToken"], "properties": { "iconId": { "type": "string", "minLength": 1 }, "sourceSelectionId": { "type": "string", "minLength": 1 }, "sourceType": { "enum": ["existing-project", "native-web", "approved-candidate"] }, "sourceId": { "type": "string", "minLength": 1 }, "family": { "type": "string", "minLength": 1 }, "variant": { "type": "string", "minLength": 1 }, "api": { "type": "string", "minLength": 1 }, "runtimeTarget": { "type": "string", "minLength": 1 }, "selector": { "type": "string", "minLength": 1 }, "size": { "type": ["number", "string"] }, "colorToken": { "type": "string", "minLength": 1 } } } },
+    "chartBindings": { "type": "array", "items": { "type": "object", "required": ["chartId", "sourceSelectionId", "sourceType", "sourceId", "renderer", "api", "runtimeTarget", "selector", "themeSourceId", "themeId", "paletteTokens", "typographyToken", "composition"], "properties": { "chartId": { "type": "string", "minLength": 1 }, "sourceSelectionId": { "type": "string", "minLength": 1 }, "sourceType": { "enum": ["existing-project", "native-web", "approved-candidate"] }, "sourceId": { "type": "string", "minLength": 1 }, "renderer": { "enum": ["canvas", "svg", "webgl", "dom"] }, "api": { "type": "string", "minLength": 1 }, "runtimeTarget": { "type": "string", "minLength": 1 }, "selector": { "type": "string", "minLength": 1 }, "themeSourceId": { "type": "string", "minLength": 1 }, "themeId": { "type": "string", "minLength": 1 }, "paletteTokens": { "type": "array", "minItems": 1 }, "typographyToken": { "type": "string", "minLength": 1 }, "composition": { "type": "object", "minProperties": 1 } } } },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["visualNode", "stitchNode", "screenId", "runtimeTarget", "designTokens", "data", "apiContracts", "events", "permissions", "responsive", "testSelectors", "acceptance"],
+        "properties": {
+          "visualNode": { "type": "string", "minLength": 1 },
+          "stitchNode": { "type": "string", "minLength": 1 },
+          "screenId": { "type": "string", "minLength": 1 },
+          "runtimeTarget": { "type": "array", "minItems": 1 },
+          "designTokens": { "type": "array", "minItems": 1 },
+          "data": { "type": "array" },
+          "apiContracts": { "type": "array" },
+          "events": { "type": "array" },
+          "permissions": { "type": "array" },
+          "responsive": { "type": "object" },
+          "testSelectors": { "type": "array", "minItems": 1 },
+          "acceptance": { "type": "array", "minItems": 1 }
+          ,"sourceBindings": { "type": "object", "required": ["layoutSourceId", "componentSourceId", "styleSourceId", "fontSourceId", "contentSourceId", "selector", "implementation", "sourceMarker"] }
+        }
+      }
+    }
+  }
+}

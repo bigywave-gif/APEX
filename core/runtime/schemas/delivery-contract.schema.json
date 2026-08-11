@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/delivery-contract.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "capabilities", "qualityBar", "verificationRequirements"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "capabilities": { "type": "array", "minItems": 1, "items": { "enum": ["existing-baseline", "frontend", "backend", "api-contract", "data-intelligence", "chart", "motion", "stitch", "accessibility", "performance", "release"] } },
+    "qualityBar": { "type": "object", "required": ["usability", "accessibilityTarget", "performanceTarget", "visualBaseline"], "properties": { "usability": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "accessibilityTarget": { "enum": ["WCAG-2.2-A", "WCAG-2.2-AA", "WCAG-2.2-AAA"] }, "performanceTarget": { "type": "object", "required": ["lcpMs", "inpMs", "cls"], "properties": { "lcpMs": { "type": "number" }, "inpMs": { "type": "number" }, "cls": { "type": "number" } } }, "visualBaseline": { "type": "array", "minItems": 1, "items": { "type": "string" } } } },
+    "verificationRequirements": { "type": "array", "minItems": 1, "items": { "enum": ["unit", "integration", "contract", "e2e", "visual", "accessibility", "performance", "regression", "smoke"] } }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "3.0",
+  "capturedAt": "1970-01-01T00:00:00.000Z",
+  "routes": ["/replace"],
+  "screens": [{ "viewport": "desktop", "path": "evidence/current-desktop.png" }],
+  "codeEntrypoints": ["src/pages/Replace.tsx"],
+  "apiSamples": [{ "endpoint": "GET /api/replace", "request": "evidence/request.json", "response": "evidence/response.json" }],
+  "contentFacts": ["Replace with verified visible content or data fields."],
+  "protectedBoundaries": ["Replace with a function, permission, or user habit that cannot change."],
+  "impactMap": ["Replace with a component, API consumer, or shared shell dependency."],
+  "styleBaseline": {
+    "mode": "existing-platform",
+    "sources": [{ "path": "src/styles/tokens.css", "sha256": "sha256:replace-with-captured-style-source-hash" }],
+    "typography": { "families": ["Replace"], "scale": ["Replace"], "lineHeights": ["Replace"], "weights": ["Replace"] },
+    "colors": { "tokens": ["Replace"], "semanticRoles": ["Replace"] },
+    "spacing": { "scale": ["Replace"], "pageGutters": ["Replace"], "sectionGaps": ["Replace"] },
+    "geometry": { "radius": ["Replace"], "borders": ["Replace"], "shadows": ["Replace"] }
+  }
+}

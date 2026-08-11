@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "3.0",
+  "sources": [
+    { "id": "product", "path": "PRODUCT.md", "stages": ["audit", "visual"], "invalidates": ["gate1", "gate2"], "sensitive": false },
+    { "id": "design", "path": "DESIGN.md", "stages": ["site-contract", "visual", "verify"], "invalidates": ["gate2", "gate3"], "sensitive": false }
+  ]
+}

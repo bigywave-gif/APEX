@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/project-inventory.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "capturedAt", "projectRoot", "runtime", "frameworks", "packageManager", "adapterRecommendation", "scripts", "entrypoints", "routeCandidates", "testCommands", "ignoredPaths", "warnings"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" }, "capturedAt": { "type": "string", "minLength": 1 }, "projectRoot": { "type": "string", "minLength": 1 },
+    "runtime": { "type": "array", "items": { "type": "string" } }, "frameworks": { "type": "array", "items": { "type": "string" } }, "packageManager": { "type": "string", "minLength": 1 }, "adapterRecommendation": { "type": "object", "required": ["id", "path", "confidence", "reasons"], "properties": { "id": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "confidence": { "enum": ["high", "low"] }, "reasons": { "type": "array", "minItems": 1 } } }, "scripts": { "type": "object" },
+    "entrypoints": { "type": "array", "items": { "type": "string" } }, "routeCandidates": { "type": "array", "items": { "type": "string" } },
+    "testCommands": { "type": "array", "items": { "type": "object", "required": ["id", "command", "purpose"], "properties": { "id": { "type": "string" }, "command": { "type": "string" }, "purpose": { "type": "string" } } } },
+    "ignoredPaths": { "type": "array", "items": { "type": "string" } }, "warnings": { "type": "array", "items": { "type": "string" } }
+  }
+}

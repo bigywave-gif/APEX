@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://apex.local/schemas/runtime-visual-baseline.schema.json",
+  "type":"object",
+  "required":["schemaVersion","sourceLockHash","browserCapture","referenceImage","motionSamples"],
+  "properties":{
+    "schemaVersion":{"const":"3.0"},
+    "sourceLockHash":{"type":"string","pattern":"^sha256:[a-f0-9]{64}$"},
+    "browserCapture":{"type":"object","required":["path","sha256"],"properties":{"path":{"type":"string","minLength":1},"sha256":{"type":"string","pattern":"^sha256:[a-f0-9]{64}$"}}},
+    "referenceImage":{"type":"object","required":["path","sha256","viewport"],"properties":{"path":{"type":"string","minLength":1},"sha256":{"type":"string","pattern":"^sha256:[a-f0-9]{64}$"},"viewport":{"enum":["desktop","tablet","mobile"]}}},
+    "motionSamples":{"type":"array","minItems":2,"items":{"type":"object","required":["id","screenshot","timestampMs"],"properties":{"id":{"type":"string","minLength":1},"screenshot":{"type":"string","minLength":1},"timestampMs":{"type":"integer","minimum":0}}}}
+  }
+}

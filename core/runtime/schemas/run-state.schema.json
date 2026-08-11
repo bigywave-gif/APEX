@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/run-state.schema.json",
+  "title": "APEX Run State",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runId",
+    "track",
+    "scope",
+    "authorization",
+    "lifecycle",
+    "phase",
+    "gates",
+    "locks",
+    "artifacts",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "3.0"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "track": {
+      "enum": [
+        "greenfield",
+        "existing"
+      ]
+    },
+    "scope": {
+      "enum": [
+        "lite",
+        "standard",
+        "full"
+      ]
+    },
+    "authorization": {
+      "enum": [
+        "interactive",
+        "autonomous"
+      ]
+    },
+    "lifecycle": {
+      "enum": ["active", "cancelled", "handed-off"]
+    },
+    "handoff": {
+      "type": ["object", "null"],
+      "properties": {
+        "checkpoint": { "enum": ["gate1", "visual-plan", "visual", "stitch", "implementation"] },
+        "decisionId": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "receipt": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "minLength": 1 },
+        "resumePhase": { "type": "string", "minLength": 1 },
+        "resumedAt": { "type": "string", "minLength": 1 },
+        "resumeReason": { "type": "string", "minLength": 1 }
+      },
+      "required": ["checkpoint", "decisionId", "reason", "receipt", "at", "resumePhase"],
+      "additionalProperties": false
+    },
+    "phase": {
+      "type": "string",
+      "minLength": 1
+    },
+    "gates": {
+      "type": "object",
+      "required": [
+        "gate0",
+        "gate1",
+        "gate2",
+        "proof",
+        "gate3"
+      ],
+      "properties": {
+        "gate0": {
+          "$ref": "#/$defs/gate"
+        },
+        "gate1": {
+          "$ref": "#/$defs/gate"
+        },
+        "gate2": {
+          "$ref": "#/$defs/gate"
+        },
+        "proof": {
+          "$ref": "#/$defs/gate"
+        },
+        "gate3": {
+          "$ref": "#/$defs/gate"
+        }
+      }
+    },
+    "locks": {
+      "type": "object",
+      "required": [
+        "requirementsApproved",
+        "effectApproved",
+        "stitchApproved",
+        "implementationApproved",
+        "visualApproved",
+        "implementationAllowed",
+        "stitchCurrent"
+      ],
+      "properties": {
+        "requirementsApproved": {
+          "type": "boolean"
+        },
+        "effectApproved": { "type": "boolean" },
+        "stitchApproved": { "type": "boolean" },
+        "implementationApproved": { "type": "boolean" },
+        "visualApproved": {
+          "type": "boolean"
+        },
+        "implementationAllowed": {
+          "type": "boolean"
+        },
+        "stitchCurrent": {
+          "type": "boolean"
+        },
+        "stitchSkipped": {
+          "type": "boolean"
+        },
+        "visualPlanApproved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "intentBrief",
+        "deliveryContract",
+        "siteContract",
+        "visualBundle",
+        "implementationMap",
+        "verificationPlan",
+        "verificationBundle"
+      ],
+      "properties": {
+        "intentBrief": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectInventory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deliveryContract": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gate1Presentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gate1PresentationManifest": { "type": ["string", "null"] },
+        "existingBaseline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "codeReference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pageSkeleton": {
+          "type": ["string", "null"]
+        },
+        "experienceStrategy": { "type": ["string", "null"] },
+        "motionContract": { "type": ["string", "null"] },
+        "motionEvidence": { "type": ["string", "null"] },
+        "visualPlanPresentationManifest": { "type": ["string", "null"] },
+        "visualSandboxFiles": { "type": ["string", "null"] },
+        "evidenceProvenance": { "type": ["string", "null"] },
+        "industryBenchmarkEvidence": { "type": ["string", "null"] },
+        "threeDEvidence": { "type": ["string", "null"] },
+        "motionCapabilityInventory": { "type": ["string", "null"] },
+        "motionCapabilitySelection": { "type": ["string", "null"] },
+        "motionImplementationMap": { "type": ["string", "null"] },
+        "visualExecutionPlan": { "type": ["string", "null"] },
+        "runtimeDemo": { "type": ["string", "null"] },
+        "visualSourceManifest": { "type": ["string", "null"] },
+        "runtimeMaterialization": { "type": ["string", "null"] },
+        "runtimeMaterializationAudit": { "type": ["string", "null"] },
+        "materializedAssets": { "type": ["string", "null"] },
+        "materializedAssetsAudit": { "type": ["string", "null"] },
+        "domainModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "apiContract": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dataContract": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "siteContract": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "functionalFreeze": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stitchFreeze": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visualReference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stitchParityEvidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "implementationParityEvidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visualBundle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "implementationMap": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verificationPlan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verificationBundle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pageDelta": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "changeScope": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dependencyLock": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gate1VisualOutput": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "updatedAt": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "passed",
+            "failed",
+            "revoked",
+            "not-required"
+          ]
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

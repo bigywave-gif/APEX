@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/verification-plan.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "categories"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "categories": {
+      "type": "object",
+      "required": ["code", "runtime", "visual", "functional", "siteRegression", "responsive", "accessibility", "console"],
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["id", "type"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "type": { "enum": ["command", "http", "file", "evidence"] },
+            "command": { "type": "string" },
+            "url": { "type": "string" },
+            "path": { "type": "string" },
+            "expectedStatus": { "type": "integer" }
+          }
+        }
+      }
+    }
+  }
+}

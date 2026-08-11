@@ -1,0 +1,31 @@
+required_capabilities:
+  skills:
+    - name: google-design-md
+      role: design-contract-baseline
+      required: true
+    - name: impeccable
+      role: structure-and-product-grade-baseline
+      required: true
+    - name: ui-ux-pro-max-skill
+      role: page-level-visual-organization
+      required: true
+    - name: doc-coauthoring
+      role: open-source-freeform-feedback-preference-extraction
+      required: true
+  tools:
+    - name: code-read
+      required: true
+    - name: file-edit
+      required: true
+    - name: doc-read
+      required: true
+    - name: structured-execution
+      required: true
+  plugins:
+    - name: browser-control
+      required: false
+    - name: screenshot
+      required: false
+metadata:
+  policy: missing-required-blocks-formal-apex-run
+  source: apex-core

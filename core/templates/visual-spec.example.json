@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "3.0",
+  "layout": {},
+  "components": [{ "visualNode": "replace", "stitchNode": "replace", "screenId": "replace", "runtimeTarget": ["replace"], "designTokens": ["replace"], "data": [], "apiContracts": [], "events": [], "permissions": [], "responsive": {}, "testSelectors": ["[data-testid=replace]"], "acceptance": ["replace"] }],
+  "content": {},
+  "data": {},
+  "icons": [],
+  "tables": [],
+  "charts": [],
+  "diagrams": [],
+  "motion": [],
+  "interaction": [],
+  "responsive": {},
+  "acceptance": ["replace"]
+}

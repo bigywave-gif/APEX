@@ -1,0 +1,44 @@
+optional_capabilities:
+  skills:
+    - name: react
+      role: react-runtime-engineering
+    - name: heroui
+      role: heroui-component-engineering
+    - name: radix
+      role: accessible-react-primitives
+    - name: framer-motion
+      role: react-motion-engineering
+    - name: tailwind
+      role: utility-css-engineering
+    - name: storybook
+      role: component-documentation-and-testing
+    - name: stitch-design
+      role: controlled-visual-generation
+    - name: taste-skill
+      role: anti-template-taste
+    - name: better-icons
+      role: icon-system-unification
+    - name: react-bits
+      role: motion-pattern-reference
+    - name: motion-ai-kit
+      role: motion-system-reference
+    - name: andrej-karpathy-skills
+      role: engineering-discipline
+    - name: playwright
+      role: browser-automation-and-runtime-verification
+  plugins:
+    - name: stitch-mcp
+      role: stitch-project-screen-and-design-contract-exchange
+    - name: product-design
+      role: ideation-and-image-to-code-enhancement
+    - name: browser-control
+      role: runtime-page-verification
+    - name: screenshot
+      role: visual-verification
+    - name: shadcn-mcp
+      role: react-component-registry-access
+    - name: online-asset-fetch
+      role: approved-online-asset-resolution
+metadata:
+  policy: missing-optional-degrades-but-does-not-block
+  source: apex-core

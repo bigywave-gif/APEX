@@ -1,0 +1,789 @@
+schema_version: 1
+policy:
+  storage: metadata-only
+  embed_third_party_assets: false
+  official_sources_only_for_resolution: true
+  require_bundle_lock_at_gate2: true
+  prohibit_silent_substitution: true
+  inspiration_sources_cannot_be_implementation_dependencies: true
+  selection_mode: contextual-multi-factor-assessment
+  global_default_source: none
+  prohibit_source_forcing: true
+  require_selection_record: true
+  require_complete_dependency_lock: true
+  catalog_model: open-and-extensible-not-a-closed-whitelist
+
+discovery_layers:
+  icons:
+    - iconify
+  components:
+    - shadcn-registry
+    - official-ecosystem-catalogs
+  open_media:
+    - openverse-api
+    - wikimedia-commons-api
+  fonts:
+    - google-fonts
+    - fontsource
+  avatars:
+    - dicebear
+  rule: discovery layers broaden recall; implementation must resolve to a concrete source, resource ID, license and dependency lock.
+
+sources:
+  engineering:
+    candidates:
+      - id: tanstack-query
+        role: framework-agnostic-server-state-management
+        official: https://tanstack.com/query/latest/docs/framework/react/overview
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react, vue, svelte, solid]
+      - id: zod
+        role: typescript-runtime-schema-validation
+        official: https://zod.dev/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [node-js, react, vanilla-js]
+      - id: msw
+        role: browser-and-node-api-mocking
+        official: https://mswjs.io/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [node-js, browser]
+      - id: openapi-generator
+        role: api-contract-code-generation
+        official: https://openapi-generator.tech/docs/usage/
+        license: Apache-2.0
+        resolvers: [npm, official-docs]
+        runtimes: [node-js, jvm]
+      - id: vitest
+        role: unit-and-component-testing
+        official: https://vitest.dev/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [node-js]
+      - id: lighthouse-ci
+        role: web-performance-verification
+        official: https://github.com/GoogleChrome/lighthouse-ci
+        license: Apache-2.0
+        resolvers: [npm, official-source]
+        runtimes: [node-js]
+      - id: opentelemetry-js
+        role: browser-and-node-observability
+        official: https://opentelemetry.io/docs/languages/js/
+        license: Apache-2.0
+        resolvers: [npm, official-docs]
+        runtimes: [node-js, browser]
+  icons:
+    candidates:
+      - id: iconify
+        role: broad-open-icon-discovery-and-resolution
+        official: https://iconify.design/docs/api/
+        license: engine-open-source-each-icon-set-has-own-license
+        resolvers: [rest-api, web-component, npm, official-site]
+        runtimes: [vanilla-js, react, vue, svelte, web-component]
+        restrictions: [lock-concrete-icon-set-and-its-license-never-lock-only-iconify]
+      - id: lucide
+        role: restrained-product-ui-candidate
+        official: https://lucide.dev/
+        license: ISC
+        resolvers: ['skill:better-icons', npm, esm, official-site]
+        runtimes: [vanilla-js, react, vue, svelte]
+        identity_fields: [icon-name, package-version, size, stroke-width, color-token]
+    additional_candidates:
+      - id: phosphor
+        role: multi-weight-friendly-product-icons
+        official: https://phosphoricons.com/
+        license: MIT
+        resolvers: [rest-api, npm, official-site, 'skill:better-icons']
+        runtimes: [vanilla-js, react, vue]
+      - id: tabler-icons
+        role: dense-admin-and-enterprise-icons
+        official: https://tabler.io/icons
+        license: MIT
+        resolvers: [npm, official-site, 'skill:better-icons']
+        runtimes: [vanilla-js, react, vue, svelte]
+      - id: heroicons
+        role: utility-outline-solid-pairs
+        official: https://heroicons.com/
+        license: MIT
+        resolvers: [npm, official-site, 'skill:better-icons']
+        runtimes: [vanilla-js, react, vue]
+      - id: simple-icons
+        role: brand-logos-only
+        official: https://simpleicons.org/
+        license: CC0-1.0
+        resolvers: [npm, official-site]
+        runtimes: [vanilla-js, react]
+        restrictions: [verify-brand-guidelines-separately]
+      - id: material-symbols
+        role: large-variable-google-product-icon-system
+        official: https://fonts.google.com/icons
+        license: Apache-2.0
+        resolvers: [google-fonts-css, npm, official-site]
+        runtimes: [vanilla-js, react, vue, svelte]
+      - id: fluent-ui-system-icons
+        role: large-microsoft-product-icon-system
+        official: https://github.com/microsoft/fluentui-system-icons
+        license: MIT
+        resolvers: [npm, official-source]
+        runtimes: [vanilla-js, react, web-components, native-platforms]
+      - id: remix-icon
+        role: broad-neutral-product-icon-system
+        official: https://remixicon.com/
+        license: Apache-2.0
+        resolvers: [npm, official-site]
+        runtimes: [vanilla-js, react-wrapper, vue-wrapper]
+      - id: carbon-icons
+        role: enterprise-and-data-product-icons
+        official: https://carbondesignsystem.com/guidelines/icons/library/
+        license: Apache-2.0
+        resolvers: [npm, official-site]
+        runtimes: [vanilla-js, react, vue, svelte]
+
+  components:
+    candidates:
+      - id: shadcn-registry
+        role: react-tailwind-owned-component-code
+        official: https://ui.shadcn.com/docs/registry
+        license: MIT
+        resolvers: ['mcp:shadcn', cli, registry-api, 'skill:shadcn-ui-reference']
+        runtimes: [react-tailwind]
+        restrictions: [do-not-force-react-migration]
+      - id: radix-primitives
+        role: accessible-unstyled-react-primitives
+        official: https://www.radix-ui.com/primitives
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+        restrictions: [do-not-copy-react-implementation-into-vanilla]
+      - id: base-ui
+        role: accessible-unstyled-react-components
+        official: https://base-ui.com/react/overview/about
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+      - id: react-aria-components
+        role: accessibility-first-react-components
+        official: https://react-spectrum.adobe.com/react-aria/components.html
+        license: Apache-2.0
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+      - id: mui-core
+        role: comprehensive-material-react-components
+        official: https://mui.com/material-ui/
+        license: MIT-core
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+        restrictions: [separate-mui-x-community-and-commercial-features]
+      - id: ant-design
+        role: comprehensive-enterprise-react-components
+        official: https://ant.design/docs/react/introduce/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+      - id: mantine
+        role: comprehensive-customizable-react-components-and-hooks
+        official: https://mantine.dev/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+      - id: chakra-ui
+        role: accessible-token-driven-react-components
+        official: https://chakra-ui.com/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+      - id: headless-ui
+        role: accessible-unstyled-react-and-vue-components
+        official: https://headlessui.com/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react, vue]
+      - id: primevue
+        role: comprehensive-vue-component-suite
+        official: https://primevue.org/
+        license: MIT-core
+        resolvers: [npm, official-docs]
+        runtimes: [vue]
+      - id: vuetify
+        role: material-vue-component-framework
+        official: https://vuetifyjs.com/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vue]
+      - id: web-awesome
+        role: framework-agnostic-web-components
+        official: https://webawesome.com/
+        license: verify-free-and-pro-boundary
+        resolvers: [npm, official-docs]
+        runtimes: [web-components, vanilla-js, react, vue]
+    vanilla_policy:
+      role: native-semantic-html-and-project-components
+      resolvers: [existing-project-code, native-web-platform]
+      guidance: translate visual and accessibility behavior; do not import a framework solely for a component.
+
+  tables:
+    candidates:
+      - id: tanstack-table
+        role: headless-table-state-and-behavior
+        official: https://tanstack.com/table/latest
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, react, vue, svelte, solid]
+        required_spec: [columns, data-schema, sorting, filtering, pagination, selection, empty, loading, responsive]
+    additional_candidates:
+      - id: ag-grid-community
+        role: feature-rich-enterprise-grid
+        official: https://www.ag-grid.com/javascript-data-grid/
+        license: MIT-community-with-enterprise-boundary
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, react, vue, angular]
+        restrictions: [verify-feature-is-in-community-edition]
+      - id: tabulator
+        role: feature-rich-framework-agnostic-data-table
+        official: https://tabulator.info/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, react-wrapper, vue-wrapper]
+      - id: datatables
+        role: long-running-progressive-enhancement-table
+        official: https://datatables.net/
+        license: MIT
+        resolvers: [npm, official-download-builder, official-docs]
+        runtimes: [vanilla-js, jquery, react-wrapper, vue-wrapper]
+      - id: mui-x-data-grid
+        role: material-react-data-grid
+        official: https://mui.com/x/react-data-grid/
+        license: MIT-community-with-pro-premium-boundary
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+      - id: react-data-grid
+        role: performant-react-data-grid
+        official: https://github.com/adazzle/react-data-grid
+        license: MIT
+        resolvers: [npm, official-source]
+        runtimes: [react]
+
+  charts:
+    candidates:
+      - id: apache-echarts
+        role: dashboard-and-interactive-product-charts
+        official: https://echarts.apache.org/en/
+        license: Apache-2.0
+        resolvers: [npm, official-builder, official-docs]
+        runtimes: [vanilla-js, react-wrapper, vue-wrapper]
+        renderers: [canvas, svg]
+    additional_candidates:
+      - id: vega-lite
+        role: declarative-portable-chart-specification
+        official: https://vega.github.io/vega-lite/
+        license: BSD-3-Clause
+        resolvers: [npm, official-editor, official-docs]
+        runtimes: [vanilla-js]
+      - id: d3
+        role: bespoke-data-visualization
+        official: https://d3js.org/
+        license: ISC
+        resolvers: [npm, esm, official-docs]
+        runtimes: [vanilla-js]
+        restrictions: [use-only-when-standard-chart-library-is-insufficient]
+      - id: chart-js
+        role: widely-adopted-lightweight-canvas-charts
+        official: https://www.chartjs.org/
+        license: MIT
+        resolvers: [npm, official-cdn, official-docs]
+        runtimes: [vanilla-js, framework-wrappers]
+      - id: plotly-js
+        role: scientific-statistical-3d-and-map-charts
+        official: https://plotly.com/javascript/
+        license: MIT
+        resolvers: [npm, official-cdn, official-docs]
+        runtimes: [vanilla-js, react-wrapper]
+      - id: observable-plot
+        role: concise-grammar-for-exploratory-and-explanatory-charts
+        official: https://observablehq.com/plot/
+        license: ISC
+        resolvers: [npm, esm, official-docs]
+        runtimes: [vanilla-js]
+      - id: recharts
+        role: composable-react-charts
+        official: https://recharts.org/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+      - id: visx
+        role: low-level-react-visualization-components
+        official: https://airbnb.io/visx/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [react]
+
+  diagrams:
+    candidates:
+      - id: mermaid
+        role: text-defined-flow-sequence-state-and-architecture-diagrams
+        official: https://mermaid.js.org/
+        license: MIT
+        resolvers: [npm, official-live-editor, official-docs]
+        runtimes: [vanilla-js, markdown]
+    additional_candidates:
+      - id: cytoscape-js
+        role: interactive-network-and-graph-visualization
+        official: https://js.cytoscape.org/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js]
+      - id: graphviz-viz-js
+        role: graphviz-diagram-rendering-in-browser
+        official: https://viz-js.com/
+        license: MIT-wrapper-and-EPL-Graphviz-boundary
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, wasm]
+      - id: xyflow
+        role: interactive-node-based-editors-and-flows
+        official: https://xyflow.com/
+        license: MIT-core
+        resolvers: [npm, official-docs]
+        runtimes: [react, svelte]
+      - id: elk-js
+        role: automatic-graph-layout-engine
+        official: https://github.com/kieler/elkjs
+        license: EPL-2.0
+        resolvers: [npm, official-source]
+        runtimes: [vanilla-js, web-worker]
+
+  motion:
+    candidates:
+      - id: motion
+        role: production-motion-for-javascript-and-react
+        official: https://motion.dev/docs
+        license: MIT
+        resolvers: [npm, official-docs, 'skill:motion-ai-kit']
+        runtimes: [vanilla-js, react, vue]
+    additional_candidates:
+      - id: react-bits
+        role: expressive-react-pattern-reference
+        official: https://www.reactbits.dev/
+        license: verify-current-license-and-commons-clause-boundary
+        resolvers: ['skill:react-bits', official-source]
+        runtimes: [react]
+        restrictions: [translate-to-css-js-for-vanilla]
+      - id: lottie-web
+        role: authored-vector-animation-playback
+        official: https://airbnb.io/lottie/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, react-wrapper]
+        restrictions: [bundle-must-reference-the-animation-json-source-and-license]
+      - id: gsap
+        role: advanced-timeline-scroll-and-svg-animation
+        official: https://gsap.com/docs/v3/
+        license: current-GSAP-standard-license-verify-at-use
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, framework-integration]
+      - id: anime-js
+        role: lightweight-general-javascript-animation
+        official: https://animejs.com/documentation/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js]
+      - id: auto-animate
+        role: zero-config-layout-change-animation
+        official: https://auto-animate.formkit.com/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, react, vue, svelte]
+      - id: rive-runtime
+        role: interactive-state-machine-vector-animation
+        official: https://rive.app/docs/runtimes/overview
+        license: runtime-open-source-editor-and-assets-have-separate-terms
+        resolvers: [npm, official-docs]
+        runtimes: [canvas, webgl, react, vue]
+
+  photos:
+    candidates:
+      - id: unsplash-api
+        role: editorial-and-product-photography
+        official: https://unsplash.com/documentation
+        license: Unsplash-API-Terms
+        resolvers: [rest-api, official-site]
+        auth: api-key
+        restrictions: [follow-hotlinking-attribution-and-download-tracking-rules]
+    additional_candidates:
+      - id: pexels-api
+        role: stock-photo-and-video-alternative
+        official: https://www.pexels.com/api/documentation/
+        license: Pexels-API-Terms
+        resolvers: [rest-api, official-site]
+        auth: api-key
+        restrictions: [follow-attribution-rate-limit-and-use-restrictions]
+      - id: openverse-api
+        role: broad-openly-licensed-media-discovery
+        official: https://api.openverse.org/v1/
+        license: API-open-source-each-result-has-own-license
+        resolvers: [rest-api, official-site]
+        runtimes: [any]
+        restrictions: [lock-original-provider-resource-license-creator-and-attribution]
+      - id: wikimedia-commons-api
+        role: encyclopedic-open-media-repository
+        official: https://commons.wikimedia.org/w/api.php
+        license: each-resource-has-own-open-license
+        resolvers: [mediawiki-api, official-site]
+        runtimes: [any]
+        restrictions: [lock-file-page-license-author-and-attribution]
+      - id: pixabay-api
+        role: stock-photo-illustration-video-discovery
+        official: https://pixabay.com/api/docs/
+        license: Pixabay-content-license-and-API-terms
+        resolvers: [rest-api, official-site]
+        runtimes: [any]
+        restrictions: [follow-rate-limit-caching-and-content-use-rules]
+
+  illustrations:
+    candidates:
+      - id: undraw
+        role: configurable-open-illustrations
+        official: https://undraw.co/illustrations
+        license: unDraw-license
+        resolvers: [manual-official]
+        runtimes: [svg, png]
+        restrictions: [record-original-page-and-license-snapshot]
+    additional_candidates:
+      - id: imagegen
+        role: custom-project-specific-illustration
+        resolver: 'skill:imagegen'
+        license: generated-output-policy
+        restrictions: [retain-generation-brief-and-output-identity-in-bundle]
+
+  fonts:
+    candidates:
+      - id: google-fonts
+        role: open-web-font-catalog-and-metadata-api
+        official: https://developers.google.com/fonts/docs/developer_api
+        license: per-family-open-font-license
+        resolvers: [rest-api, css-api, official-site]
+        auth: api-key-for-developer-api
+        required_spec: [family, weights, styles, subsets, loading-strategy, fallback-stack]
+      - id: fontsource
+        role: npm-packaged-open-font-distribution
+        official: https://fontsource.org/
+        license: per-font-license
+        resolvers: [npm, official-api, official-site]
+        runtimes: [vanilla-js, react, vue, svelte]
+
+  avatars:
+    candidates:
+      - id: dicebear
+        role: deterministic-open-avatar-api
+        official: https://www.dicebear.com/how-to-use/http-api/
+        license: package-MIT-each-avatar-style-has-own-license
+        resolvers: [rest-api, npm, official-site]
+        runtimes: [any]
+        restrictions: [lock-style-seed-options-version-and-style-license]
+
+  maps:
+    candidates:
+      - id: maplibre-gl-js
+        role: open-source-vector-map-rendering
+        official: https://maplibre.org/maplibre-gl-js/docs/
+        license: BSD-3-Clause
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, framework-wrappers]
+        restrictions: [map-renderer-does-not-include-tile-provider-or-data-license]
+      - id: leaflet
+        role: lightweight-interactive-web-maps
+        official: https://leafletjs.com/
+        license: BSD-2-Clause
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, framework-wrappers]
+        restrictions: [lock-tile-provider-data-license-and-attribution]
+
+  three_d:
+    candidates:
+      - id: three-js
+        role: general-webgl-3d-rendering
+        official: https://threejs.org/
+        license: MIT
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js, react-wrapper]
+      - id: babylon-js
+        role: full-featured-web-3d-engine
+        official: https://www.babylonjs.com/
+        license: Apache-2.0
+        resolvers: [npm, official-docs]
+        runtimes: [vanilla-js]
+
+selection:
+  dimensions:
+    - visual-fit
+    - functional-coverage
+    - runtime-fit
+    - accessibility
+    - performance
+    - maintenance-and-stability
+    - license-and-governance
+    - resolver-availability
+    - design-to-code-fidelity
+  required_record:
+    - candidatesConsidered
+    - selectedBecause
+    - rejectedBecause
+    - selectionDate
+    - runtimeTarget
+  rule: select the best-fit candidate for the current task; list order and candidate grouping are discovery aids only and never mandatory.
+
+dependency_completeness:
+  required:
+    - resolved-version-or-api-version
+    - package-or-service-entrypoint
+    - required-modules-and-plugins
+    - peer-dependencies
+    - style-font-image-worker-wasm-dependencies
+    - runtime-and-browser-requirements
+    - credentials-rate-limit-and-network-policy
+    - license-and-service-terms-snapshot
+    - integrity-revision-or-resource-id
+    - fallback-compatibility
+  unresolved: block-gate2-and-evaluate-another-candidate
+
+catalog_completeness:
+  required_categories: [icons, components, tables, charts, diagrams, motion, photos, illustrations, fonts, avatars, maps, three_d]
+  coverage_rule: every category must have multiple concrete candidates or one broad discovery layer plus concrete implementation candidates.
+  expansion_rule: when no registered candidate satisfies the task, search official sources, evaluate the new candidate, append it to this registry, then continue selection.
+  freshness_rule: popularity, version, maintenance and license signals are resolved at selection time rather than frozen as permanent rankings.
+
+resolver_catalog:
+  tanstack-query:
+    packages: ['@tanstack/react-query', '@tanstack/vue-query', '@tanstack/svelte-query']
+    resolve_at_use: [exact-framework-adapter, exact-version, query-client-policy, hydration-requirements]
+  zod:
+    packages: [zod]
+    resolve_at_use: [exact-version, schema-boundaries, error-formatting, generated-type-policy]
+  msw:
+    packages: [msw]
+    resolve_at_use: [exact-version, browser-worker, node-server, handler-source, production-disablement]
+  openapi-generator:
+    packages: ['@openapitools/openapi-generator-cli']
+    resolve_at_use: [exact-version, generator, source-contract, output-directory, generated-code-policy]
+  vitest:
+    packages: [vitest]
+    resolve_at_use: [exact-version, environment, coverage-provider, browser-or-node-mode]
+  lighthouse-ci:
+    packages: ['@lhci/cli']
+    resolve_at_use: [exact-version, collect-settings, assertion-policy, upload-policy]
+  opentelemetry-js:
+    package_pattern: '@opentelemetry/*'
+    resolve_at_use: [exact-packages, exporter, sampling, privacy-policy, browser-or-node-instrumentation]
+  iconify:
+    packages: [iconify-icon, '@iconify/json', '@iconify/utils']
+    api: https://api.iconify.design/
+    resolve_at_use: [api-or-package-version, collection-prefix, icon-name, collection-license, svg-data, web-component-or-inline-mode]
+  lucide:
+    packages: [lucide, lucide-static, lucide-react, lucide-vue-next, lucide-svelte]
+    metadata: https://lucide.dev/llms.txt
+    resolve_at_use: [exact-package-version, selected-framework-package, svg-viewbox, stroke-parameters]
+  phosphor:
+    packages: ['@phosphor-icons/web', '@phosphor-icons/react', '@phosphor-icons/vue']
+    api: https://api.phosphoricons.com/docs
+    resolve_at_use: [exact-package-version, icon-version, weight, framework-entrypoint]
+  tabler-icons:
+    packages: ['@tabler/icons', '@tabler/icons-react', '@tabler/icons-vue', '@tabler/icons-svelte']
+    resolve_at_use: [exact-package-version, framework-entrypoint, icon-name]
+  heroicons:
+    packages: ['@heroicons/react', '@heroicons/vue']
+    vanilla_resolver: official-svg-source
+    resolve_at_use: [exact-package-version-or-svg-revision, style-variant, icon-name]
+  simple-icons:
+    packages: [simple-icons]
+    resolve_at_use: [exact-package-version, brand-slug, brand-guideline-check]
+  material-symbols:
+    packages: ['material-symbols', '@material-symbols/font-400']
+    service: https://fonts.googleapis.com/
+    resolve_at_use: [package-or-css-revision, icon-name, axes, subset, font-or-svg-mode]
+  fluent-ui-system-icons:
+    packages: ['@fluentui/svg-icons', '@fluentui/react-icons', '@fluentui/react-icons-mdl2']
+    resolve_at_use: [exact-package-version, icon-name, size-variant, filled-or-regular, framework-entrypoint]
+  remix-icon:
+    packages: [remixicon]
+    resolve_at_use: [exact-package-version, icon-name, line-or-fill, css-or-svg-mode]
+  carbon-icons:
+    packages: ['@carbon/icons', '@carbon/icons-react', '@carbon/icons-vue', '@carbon/icons-svelte']
+    resolve_at_use: [exact-package-version, icon-name, size, framework-entrypoint]
+  shadcn-registry:
+    mcp: official-shadcn-mcp
+    cli: shadcn
+    registry_schema: https://ui.shadcn.com/schema/registry-item.json
+    resolve_at_use: [cli-version, registry-namespace, registry-item, files, dependencies, registry-dependencies, css-vars]
+  radix-primitives:
+    package_pattern: '@radix-ui/react-*'
+    resolve_at_use: [exact-component-packages, exact-versions, react-peer-range, portal-and-focus-behavior]
+  base-ui:
+    packages: ['@base-ui-components/react']
+    resolve_at_use: [exact-version, component-entrypoints, react-peer-range, portals, floating-ui-and-style-dependencies]
+  react-aria-components:
+    packages: [react-aria-components]
+    resolve_at_use: [exact-version, react-peer-range, component-entrypoints, locale-and-ssr-requirements]
+  mui-core:
+    packages: ['@mui/material', '@emotion/react', '@emotion/styled']
+    resolve_at_use: [exact-compatible-versions, react-peer-range, styling-engine, icons-if-used, theme-and-css-baseline]
+  ant-design:
+    packages: [antd, '@ant-design/icons']
+    resolve_at_use: [exact-compatible-versions, react-peer-range, css-in-js-runtime, locale, date-library]
+  mantine:
+    packages: ['@mantine/core', '@mantine/hooks']
+    resolve_at_use: [exact-compatible-versions, react-peer-range, styles-imports, optional-package-dependencies]
+  chakra-ui:
+    packages: ['@chakra-ui/react', '@emotion/react']
+    resolve_at_use: [exact-compatible-versions, react-peer-range, provider, styling-runtime, icons-if-used]
+  headless-ui:
+    packages: ['@headlessui/react', '@headlessui/vue']
+    resolve_at_use: [exact-framework-package-version, framework-peer-range, portal-and-transition-behavior]
+  primevue:
+    packages: [primevue, '@primeuix/themes', primeicons]
+    resolve_at_use: [exact-compatible-versions, vue-peer-range, theme-mode, css-and-icon-dependencies]
+  vuetify:
+    packages: [vuetify]
+    resolve_at_use: [exact-version, vue-peer-range, vite-or-bundler-plugin, styles, icon-set, locale]
+  web-awesome:
+    packages: ['@awesome.me/webawesome']
+    resolve_at_use: [exact-version, free-or-pro-component-boundary, css-theme, asset-path, web-component-polyfills]
+  tanstack-table:
+    packages: ['@tanstack/table-core', '@tanstack/react-table', '@tanstack/vue-table', '@tanstack/svelte-table', '@tanstack/solid-table']
+    resolve_at_use: [exact-adapter, exact-version, framework-peer-range, row-models, virtualization-if-used]
+  ag-grid-community:
+    packages: [ag-grid-community, ag-grid-react, ag-grid-vue3, ag-grid-angular]
+    resolve_at_use: [exact-version, framework-adapter, community-feature-boundary, theme-css, registered-modules]
+  tabulator:
+    packages: [tabulator-tables]
+    resolve_at_use: [exact-version, css-theme, modules, data-mode, framework-wrapper-if-used]
+  datatables:
+    packages: [datatables.net, datatables.net-dt]
+    resolve_at_use: [exact-core-version, styling-integration, extensions, jquery-requirement-if-applicable, css]
+  mui-x-data-grid:
+    packages: ['@mui/x-data-grid']
+    resolve_at_use: [exact-version, mui-core-compatible-version, react-peer-range, community-feature-boundary, styling-engine]
+  react-data-grid:
+    packages: [react-data-grid]
+    resolve_at_use: [exact-version, react-peer-range, css-import, virtualization-and-editor-dependencies]
+  apache-echarts:
+    packages: [echarts]
+    resolve_at_use: [exact-version, core-entrypoint, chart-modules, component-modules, renderer, locale, dataset-transforms]
+  vega-lite:
+    packages: [vega, vega-lite, vega-embed]
+    resolve_at_use: [compatible-version-triad, schema-version, transforms, renderer, actions-policy]
+  d3:
+    packages: [d3]
+    modular_packages: ['d3-selection', 'd3-scale', 'd3-shape', 'd3-axis', 'd3-transition']
+    resolve_at_use: [exact-version, selected-modules, browser-target, svg-canvas-dependencies]
+  chart-js:
+    packages: [chart.js]
+    resolve_at_use: [exact-version, registered-controllers-elements-scales-plugins, date-adapter-if-used, canvas-and-responsiveness]
+  plotly-js:
+    packages: [plotly.js-dist-min, plotly.js-basic-dist-min]
+    resolve_at_use: [exact-build-version, full-or-partial-bundle, webgl-and-map-dependencies, locale, csp]
+  observable-plot:
+    packages: ['@observablehq/plot']
+    resolve_at_use: [exact-version, d3-peer-or-transitive-dependencies, marks, transforms, css-and-fonts]
+  recharts:
+    packages: [recharts]
+    resolve_at_use: [exact-version, react-peer-range, responsive-container, animation-and-accessibility-options]
+  visx:
+    package_pattern: '@visx/*'
+    resolve_at_use: [exact-selected-packages-and-versions, react-peer-range, d3-submodules, tooltip-and-responsive-dependencies]
+  mermaid:
+    packages: [mermaid]
+    resolve_at_use: [exact-version, diagram-type, security-level, theme-variables, renderer-dependencies]
+  cytoscape-js:
+    packages: [cytoscape]
+    resolve_at_use: [exact-version, layouts, extensions, stylesheet, renderer-budget]
+  graphviz-viz-js:
+    packages: ['@viz-js/viz']
+    resolve_at_use: [exact-version, wasm-resource, graphviz-engine, worker-strategy, EPL-license-boundary]
+  xyflow:
+    packages: ['@xyflow/react', '@xyflow/svelte']
+    resolve_at_use: [exact-framework-package-version, framework-peer-range, stylesheet, node-edge-types, layout-engine-if-used]
+  elk-js:
+    packages: [elkjs]
+    resolve_at_use: [exact-version, bundled-or-worker-entrypoint, layout-options, worker-file]
+  motion:
+    packages: [motion]
+    resolve_at_use: [exact-version, vanilla-or-framework-entrypoint, feature-set, reduced-motion, browser-target]
+  react-bits:
+    resolver: skill-or-official-source-copy
+    resolve_at_use: [source-revision, component-files, npm-dependencies, peer-dependencies, css-and-assets, license-boundary]
+  lottie-web:
+    packages: [lottie-web]
+    resolve_at_use: [exact-version, animation-json-resource, renderer, image-assets, fonts, expressions-policy]
+  gsap:
+    packages: [gsap]
+    resolve_at_use: [exact-version, plugins, license-snapshot, registration, framework-context, reduced-motion]
+  anime-js:
+    packages: [animejs]
+    resolve_at_use: [exact-version, entrypoint, modules, browser-target, reduced-motion]
+  auto-animate:
+    packages: ['@formkit/auto-animate']
+    resolve_at_use: [exact-version, framework-adapter, browser-support, reduced-motion]
+  rive-runtime:
+    packages: ['@rive-app/canvas', '@rive-app/webgl2', '@rive-app/react-canvas']
+    resolve_at_use: [exact-runtime-version, rive-file-resource-id, renderer, wasm-path, state-machine-inputs, asset-license]
+  unsplash-api:
+    service: https://api.unsplash.com/
+    resolve_at_use: [api-version, application-id, access-key-secret-reference, resource-id, attribution, hotlink-url, download-tracking]
+  pexels-api:
+    service: https://api.pexels.com/
+    resolve_at_use: [api-version, api-key-secret-reference, resource-id, attribution, rate-limit, selected-size-url]
+  openverse-api:
+    service: https://api.openverse.org/v1/
+    resolve_at_use: [api-version, result-id, original-provider, creator, license, license-version, attribution, source-url, media-url]
+  wikimedia-commons-api:
+    service: https://commons.wikimedia.org/w/api.php
+    resolve_at_use: [api-module-version, file-title, revision, canonical-file-url, author, license-template, attribution]
+  pixabay-api:
+    service: https://pixabay.com/api/
+    resolve_at_use: [api-version, api-key-secret-reference, resource-id, resource-type, selected-size-url, rate-limit, content-license]
+  undraw:
+    resolver: official-site-manual
+    resolve_at_use: [illustration-page, asset-revision, color-parameters, license-snapshot, svg-or-png]
+  imagegen:
+    resolver: skill:imagegen
+    resolve_at_use: [generation-id, prompt-contract, output-path-or-resource-id, dimensions, transparency, policy-record]
+  google-fonts:
+    services: [developer-api, css-api]
+    resolve_at_use: [api-version, family, axes-or-weights, styles, subsets, css-url, font-license, fallback-stack, display-strategy]
+  fontsource:
+    package_pattern: '@fontsource/* or @fontsource-variable/*'
+    api: https://api.fontsource.org/
+    resolve_at_use: [exact-package-version, family, weights-or-axes, styles, subsets, css-entrypoints, font-files, font-license, fallback-stack]
+  dicebear:
+    packages: ['@dicebear/core', '@dicebear/collection']
+    api: https://api.dicebear.com/
+    resolve_at_use: [api-or-package-version, style, seed, options, output-format, style-license, attribution]
+  maplibre-gl-js:
+    packages: [maplibre-gl]
+    resolve_at_use: [exact-version, css, style-json, tile-provider, data-sources, workers, webgl-support, attribution]
+  leaflet:
+    packages: [leaflet]
+    resolve_at_use: [exact-version, css, marker-assets, tile-provider, data-sources, plugins, attribution]
+  three-js:
+    packages: [three]
+    resolve_at_use: [exact-version, addons, loaders, model-texture-environment-assets, renderer, webgl-budget, asset-licenses]
+  babylon-js:
+    packages: ['@babylonjs/core', '@babylonjs/loaders']
+    resolve_at_use: [exact-compatible-versions, selected-modules, loaders, model-texture-environment-assets, renderer, webgl-budget, asset-licenses]
+
+resolution_gate:
+  process:
+    - discover-current-resolver-capability
+    - query-official-manifest-or-api
+    - resolve-exact-version-and-transitive-requirements
+    - validate-runtime-license-auth-and-network-policy
+    - write-dependency-lock-to-visual-bundle
+    - render-smoke-test-before-gate2
+  guarantee: a source is selectable only after all dependency_completeness fields resolve successfully for the current environment.
+
+fallback_policy:
+  unresolved_asset: block-gate2
+  source_unavailable_after_gate2: re-resolve-from-declared-fallback-and-repeat-visual-verification
+  license_unclear: reject-source
+  framework_mismatch: translate-or-select-compatible-source-never-force-runtime-migration

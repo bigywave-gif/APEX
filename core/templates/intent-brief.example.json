@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "3.0",
+  "sourceRequest": "Replace with the user's short request.",
+  "trackRecommendation": "existing",
+  "goals": ["Replace with a measurable user outcome."],
+  "successCriteria": ["Replace with a user-confirmable success criterion."],
+  "knownFacts": ["Replace with a verified project fact."],
+  "assumptions": [{ "statement": "Replace with an explicitly labelled assumption.", "risk": "medium" }],
+  "openDecisions": ["Replace with a decision that requires confirmation."],
+  "designIntent": { "formality": "professional", "visualIntensity": "controlled", "motionIntensity": "purposeful", "informationDensity": "task-appropriate", "brandPosture": "replace" },
+  "acceptance": ["Replace with a testable acceptance criterion."]
+}

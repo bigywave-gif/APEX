@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "3.0",
+  "categories": {
+    "code": [{ "id": "code-check", "type": "command", "command": "node --check public/app.js" }],
+    "runtime": [{ "id": "health", "type": "http", "url": "http://127.0.0.1:3000/api/health", "expectedStatus": 200 }],
+    "visual": [{ "id": "visual-evidence", "type": "evidence", "path": "verification/visual.json" }],
+    "functional": [{ "id": "functional-evidence", "type": "evidence", "path": "verification/functional.json" }],
+    "siteRegression": [{ "id": "site-evidence", "type": "evidence", "path": "verification/site-regression.json" }],
+    "responsive": [{ "id": "responsive-evidence", "type": "evidence", "path": "verification/responsive.json" }],
+    "accessibility": [{ "id": "accessibility-evidence", "type": "evidence", "path": "verification/accessibility.json" }],
+    "console": [{ "id": "console-evidence", "type": "evidence", "path": "verification/console.json" }],
+    "performance": [{ "id": "performance-evidence", "type": "evidence", "path": "verification/performance.json" }],
+    "contract": [{ "id": "contract-evidence", "type": "evidence", "path": "verification/contract.json" }]
+  }
+}

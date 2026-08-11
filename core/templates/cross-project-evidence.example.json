@@ -1,0 +1,1 @@
+{"schemaVersion":"1.1","note":"Template only. Replace every field with three distinct real completed APEX runs. Each project needs id, projectRoot, adapterId, runDir, project-inventory/existing-baseline/gate3/evidence-provenance artifact paths, hashes and adapter checks. This file intentionally cannot pass verification.","projects":[]}

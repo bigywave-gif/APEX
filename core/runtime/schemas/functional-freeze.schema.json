@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/functional-freeze.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "page", "items"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "page": { "type": "string", "minLength": 1 },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "disposition", "dom", "event", "api", "state", "permission", "refreshRecovery", "regression"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "disposition": { "enum": ["preserve", "reorder", "restyle", "remove-approved", "add", "change-approved"] },
+          "dom": { "type": "array" },
+          "event": { "type": "array" },
+          "api": { "type": "array" },
+          "state": { "type": "array" },
+          "permission": { "type": "array" },
+          "refreshRecovery": { "type": "array" },
+          "regression": { "type": "array" },
+          "approvalId": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

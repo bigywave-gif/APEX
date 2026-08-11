@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "3.0",
+  "version": "v1",
+  "endpoints": [{ "method": "GET", "path": "/api/replace", "requestSchema": "schemas/replace-request.json", "responseSchema": "schemas/replace-response.json" }],
+  "errors": ["UNAUTHORIZED", "VALIDATION_ERROR"],
+  "authentication": ["session"]
+}

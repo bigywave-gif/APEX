@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "3.0",
+  "projectId": "projects/replace",
+  "canvasUrl": "https://stitch.withgoogle.com/projects/replace",
+  "approval": { "id": "replace", "scope": "screen", "approvedAt": "1970-01-01T00:00:00.000Z" },
+  "approvedScreens": [{ "screenId": "replace", "route": "/", "viewport": "desktop", "state": "default" }],
+  "excludedScreens": [],
+  "generationInput": {
+    "mode": "image+text",
+    "origin": "apex-visual",
+    "transport": "stitch-ui-automation",
+    "promptHash": "sha256:replace",
+    "contentLock": {
+      "locale": "zh-CN",
+      "sourceHash": "sha256:replace",
+      "protectedText": ["成长报告", "年级视角"],
+      "protectedTableHeaders": ["学科", "正确率", "稳定性"]
+    },
+    "layoutLock": {
+      "mode": "strict",
+      "sourceHash": "sha256:replace",
+      "protectedStructures": ["顶部标题和筛选区", "12 列桌面网格", "三列表格"]
+    },
+    "analyticsLock": {
+      "sourceHash": "sha256:replace",
+      "charts": [{ "id": "growth-trend", "type": "trend", "metric": "综合正确率", "dimension": "报告日期", "encoding": "蓝色折线与目标虚线", "fallback": "样本不足时不预测" }]
+    },
+    "references": [{ "id": "baseline-desktop", "sha256": "sha256:replace", "role": "layout", "fidelity": "high" }]
+  }
+}

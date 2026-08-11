@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/experience-quality-evidence.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "strategyHash", "status", "score", "threshold", "dimensions", "criticalFailures", "checkedAt"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "strategyHash": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["passed", "failed"] },
+    "score": { "type": "integer" },
+    "threshold": { "const": 85 },
+    "dimensions": { "type": "array", "minItems": 8, "items": { "type": "object", "required": ["id", "score", "max", "findings"], "properties": { "id": { "type": "string", "minLength": 1 }, "score": { "type": "integer" }, "max": { "type": "integer" }, "findings": { "type": "array" } } } },
+    "criticalFailures": { "type": "array" },
+    "checkedAt": { "type": "string", "minLength": 1 }
+  }
+}

@@ -1,0 +1,652 @@
+{
+  "schemaVersion": "3.0",
+  "auditedAt": "2026-08-11T04:06:12.964Z",
+  "status": "passed",
+  "checks": [
+    {
+      "id": "release-version",
+      "status": "passed",
+      "detail": "{\"status\":\"bumped\",\"from\":\"4.14.0\",\"version\":\"4.15.0\",\"level\":\"minor\",\"reason\":\"materially extended APEX runtime capability or contract\",\"changed\":[\"scripts/apex-validate.mjs\",\"scripts/scope-boundary-contract-test.mjs\",\"scripts/scope-boundary.mjs\",\"scripts/stability-evidence.mjs\"]}"
+    },
+    {
+      "id": "global-bridge-published",
+      "status": "passed",
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"d5631319d1b4926596431b1154b0301fb4df092d181cb68a364d9d4f02abf55f\"}"
+    },
+    {
+      "id": "manifest-semver",
+      "status": "passed",
+      "detail": "manifest version must be a valid semantic version"
+    },
+    {
+      "id": "manifest-yaml",
+      "status": "passed",
+      "detail": "manifest is valid YAML"
+    },
+    {
+      "id": "manifest-entrypoints",
+      "status": "passed",
+      "detail": "133 manifest paths present"
+    },
+    {
+      "id": "global-bridge-present",
+      "status": "passed",
+      "detail": "/Users/fredyw/.codex/skills/apex/SKILL.md"
+    },
+    {
+      "id": "global-bridge-synchronized",
+      "status": "passed",
+      "detail": "global bridge must equal canonical bridge"
+    },
+    {
+      "id": "public-pdf-generated",
+      "status": "passed",
+      "detail": "/Users/fredyw/.codex/apex/APEX/output/pdf/APEX-3.0-Product-Design-and-Technical-Architecture.pdf"
+    },
+    {
+      "id": "public-pdf-version",
+      "status": "passed",
+      "detail": "APEX 版本 4.15.0 的独立系统说明；便携渲染版"
+    },
+    {
+      "id": "public-pdf-renderable",
+      "status": "passed",
+      "detail": "portable PDF first page rendered"
+    },
+    {
+      "id": "capability-registry",
+      "status": "passed",
+      "detail": "35 capability entrypoints present"
+    },
+    {
+      "id": "router-guard:analyze_requirement",
+      "status": "passed",
+      "detail": "1 scripts guarded"
+    },
+    {
+      "id": "router-guard:generate_visual",
+      "status": "passed",
+      "detail": "6 scripts guarded"
+    },
+    {
+      "id": "router-guard:collect_existing_baseline",
+      "status": "passed",
+      "detail": "4 scripts guarded"
+    },
+    {
+      "id": "router-guard:sync_stitch",
+      "status": "passed",
+      "detail": "3 scripts guarded"
+    },
+    {
+      "id": "router-guard:observe_stitch",
+      "status": "passed",
+      "detail": "1 scripts guarded"
+    },
+    {
+      "id": "router-guard:validate_stitch",
+      "status": "passed",
+      "detail": "3 scripts guarded"
+    },
+    {
+      "id": "router-guard:prepare_workspace",
+      "status": "passed",
+      "detail": "1 scripts guarded"
+    },
+    {
+      "id": "router-guard:compile_visual_bundle",
+      "status": "passed",
+      "detail": "10 scripts guarded"
+    },
+    {
+      "id": "router-guard:implement",
+      "status": "passed",
+      "detail": "2 scripts guarded"
+    },
+    {
+      "id": "router-guard:verify",
+      "status": "passed",
+      "detail": "14 scripts guarded"
+    },
+    {
+      "id": "router-guard:record_context",
+      "status": "passed",
+      "detail": "2 scripts guarded"
+    },
+    {
+      "id": "router-guard:recover",
+      "status": "passed",
+      "detail": "1 scripts guarded"
+    },
+    {
+      "id": "documentation-router-path",
+      "status": "passed",
+      "detail": "no direct guarded runtime commands documented"
+    },
+    {
+      "id": "syntax:adapter-coverage.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-action.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-recover.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-release-version.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-router.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-run.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-runtime-guard.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-validate.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-workspace.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:asset-materializer-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:asset-materializer.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:asset-resolver.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:baseline-collector.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:browser-capture.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:bundle-compiler.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:context-compiler.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:contract-recorder.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:contract-verifier.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:evidence-provenance.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:existing-code-reference.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:experience-evaluator.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:implementation-audit.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:industry-benchmark.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:motion-capability.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:motion-contract.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:project-intake.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:quality-evidence.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:release-audit.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:router-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:run-migrate.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:runtime-materializer-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:runtime-materializer.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:runtime-visual-baseline-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:runtime-visual-baseline.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:scope-boundary-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:scope-boundary.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:stability-evidence.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:stitch-sync.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:stitch-ui-importer.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:strict-replica.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:structure-contract.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:sync-codex-bridge.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:three-d-evidence.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:trajectory-evaluator.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:verification-orchestrator.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:verification-planner.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-execution-plan.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-parity.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-reference-compiler.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-sandbox-dependency.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-sandbox-writer-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-sandbox-writer.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-source-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-source.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "json:api-contract.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:approval-receipt.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:asset-selection.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:canvas-selection.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:change-scope.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:code-reference.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:context-sources.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:delivery-contract.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:dependency-lock.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:design-candidates.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:domain-model.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:evidence-provenance.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:existing-baseline.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:experience-quality-evidence.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:experience-strategy.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:functional-freeze.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:implementation-map.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:implementation-parity-evidence.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:industry-benchmark-evidence.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:industry-benchmark-review.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:intent-brief.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:motion-capability-inventory.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:motion-capability-selection.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:motion-contract.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:motion-evidence.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:motion-implementation-map.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:page-delta.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:page-skeleton.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:project-inventory.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:run-state.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:runtime-source-lock.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:runtime-state-matrix.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:runtime-visual-baseline.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:site-contract.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:stitch-freeze.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:stitch-parity-evidence.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:three-d-evidence.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:verification-bundle.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:verification-plan.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:visual-bundle.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:visual-execution-plan.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:visual-reference.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:visual-source-manifest.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:visual-spec.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "router-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":44}"
+    },
+    {
+      "id": "visual-sandbox-writer-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":5}"
+    },
+    {
+      "id": "runtime-visual-baseline-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":5}"
+    },
+    {
+      "id": "visual-source-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":4}"
+    },
+    {
+      "id": "asset-materializer-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":4}"
+    },
+    {
+      "id": "runtime-materializer-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":3}"
+    },
+    {
+      "id": "scope-boundary-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"cases\":[\"localized-schema\",\"affected-node-closure\",\"source-selection-closure\",\"protected-file-hash\",\"protected-visual-zero-diff\"]}"
+    }
+  ]
+}

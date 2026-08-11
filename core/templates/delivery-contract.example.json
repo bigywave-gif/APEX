@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "3.0",
+  "capabilities": ["frontend", "accessibility"],
+  "qualityBar": {
+    "usability": ["Define the user task and a success measurement."],
+    "accessibilityTarget": "WCAG-2.2-AA",
+    "performanceTarget": { "lcpMs": 2500, "inpMs": 200, "cls": 0.1 },
+    "visualBaseline": ["Approved Stitch screen set", "Approved effect image", "DESIGN.md"]
+  },
+  "verificationRequirements": ["unit", "e2e", "accessibility"]
+}

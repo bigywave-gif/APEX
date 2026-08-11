@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/asset-selection.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "items"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["assetRef", "kind", "source", "version", "runtime", "fallback"],
+        "properties": {
+          "assetRef": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["npm", "url", "api", "mcp"] },
+          "source": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 },
+          "entrypoints": { "type": "array" },
+          "runtime": { "type": "object" },
+          "license": { "type": "object" },
+          "fallback": { "type": "object" }
+        }
+      }
+    }
+  }
+}

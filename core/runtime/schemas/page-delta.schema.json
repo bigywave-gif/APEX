@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/page-delta.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "page", "family", "mode", "inherits", "preserve", "reorder", "add", "remove", "functionalChanges", "overrides", "affectedConsumers"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "page": { "type": "string", "minLength": 1 },
+    "family": { "type": "string", "minLength": 1 },
+    "mode": { "enum": ["incremental", "full-rewrite"] },
+    "inherits": { "type": "object", "required": ["siteContractVersion", "siteContractHash"] },
+    "preserve": { "type": "array" },
+    "reorder": { "type": "array" },
+    "add": { "type": "array" },
+    "remove": { "type": "array" },
+    "functionalChanges": { "type": "array" },
+    "overrides": { "type": "array" },
+    "affectedConsumers": { "type": "array" }
+  }
+}

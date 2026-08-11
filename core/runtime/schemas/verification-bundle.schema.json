@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/verification-bundle.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "code", "runtime", "visual", "functional", "siteRegression", "responsive", "accessibility", "console", "performance", "contract", "unverified", "gate3"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "code": { "type": "array" },
+    "runtime": { "type": "array" },
+    "visual": { "type": "array" },
+    "functional": { "type": "array" },
+    "siteRegression": { "type": "array" },
+    "responsive": { "type": "array" },
+    "accessibility": { "type": "array" },
+    "console": { "type": "array" },
+    "performance": { "type": "array" },
+    "contract": { "type": "array" },
+    "unverified": { "type": "array" },
+    "gate3": { "enum": ["pending", "passed", "failed"] }
+  }
+}

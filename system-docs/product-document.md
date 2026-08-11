@@ -1,0 +1,283 @@
+# APEX 产品文档
+
+## 文档登记
+
+- 产品名称：APEX Agentic Delivery System
+- 正式简称：APEX
+- 展开名：Agentic Product EXperience
+- 当前版本：4.15.0
+- 文档类型：系统级产品主文档
+- 适用对象：产品、设计、研发、交付、平台治理人员
+
+## 文档目的
+
+本文件说明 APEX 这套系统本身是什么、解决什么问题、适用于哪些任务、输出什么结果、有哪些边界，以及为什么它既能支撑从 0 到 1 的新项目，也能支撑对现有产品的整改和升级。
+
+本文件是 APEX 本体的产品主文档，不绑定某个具体业务项目。
+
+## 产品定义
+
+APEX 是一套通用的 Agentic Delivery System。
+
+它的核心价值不是“写一份方法论文档”，而是把复杂的前端、UI、视觉、UX 与真实落地交付过程，收敛成一套：
+
+- 可调用
+- 可执行
+- 可审计
+- 可恢复
+- 可迁移
+- 可验收
+
+的系统。
+
+## 3.0 产品升级
+
+本文件描述的是 `manifest.yaml` 所登记的当前 APEX Core，而不是历史版本能力的集合。当前版本在早期通用 Core、connector 和 adapter 基础上，持续强化了：
+
+- `Greenfield / Existing` 双轨：新项目从产品、技术和 Site Contract 建立起步；已有项目先核对真实基线、冻结功能并分析影响范围。
+- `Lite / Standard / Full` 范围与 `Interactive / Autonomous` 授权的正交分流。
+- 需求拆解与视觉效果描述后的固定 Visual 流：视觉方案确认后直接生成并确认严格运行时效果图；随后用户选择独立的 Stitch 确认或直接代码实施。两者均保留 Gate 与冻结。
+- Site Contract、Functional Freeze、Stitch Freeze、Visual Bundle、Implementation Map、Page Delta、Dependency Lock 与 Verification Bundle 等结构化交付物。
+- 可执行 Gate 2、实现权限锁、代表页 Proof、整站回归和 Gate 3 真实验收。
+- Checkpoint 与内容哈希驱动的增量恢复，避免中断后无条件重跑。
+- Router-first 调用治理：每个新 session 新建独立 run；同一 session 只能恢复自己的 run；跨 session 默认不续接。
+- 自动全局 Skill 发布：每次 APEX Router 调用都会从唯一主目录发布最新 Bridge 到全局 Skill，失败即阻断，避免旧规则继续执行。
+- 项目级执行隔离：项目中间产物仅位于 `<project-root>/.apex/`，审批、授权、事件、证据和缓存不进入 APEX Core。
+
+## 产品目标
+
+APEX 要解决的核心问题有五类：
+
+1. 需求进入后容易直接跳到写代码，缺少结构化分析
+2. 设计、视觉、前端实现和验证之间经常断链
+3. 多份规则、技能、规范分散，导致执行时遗漏或互相冲突
+4. 会话中途被打断后，流程容易跳步或走偏
+5. 不同项目复用同一套高质量交付方法时缺少统一接入机制
+
+## 适用任务
+
+APEX 默认适用于以下任务：
+
+- 前端改造
+- UI / UX 升级
+- 视觉设计与视觉整改
+- 页面结构重排
+- 设计系统与组件体系统一
+- 页面家族标准化
+- 信息架构优化
+- 前端代码真实落地与验收
+
+## 非适用任务
+
+以下情况不应把 APEX 误当成目标系统：
+
+- 单纯业务 API 平台
+- 后端领域模型设计系统
+- 数据平台建模框架
+- 只提供静态视觉稿的设计资产库
+
+## 核心产品能力
+
+### 1. 结构化准入
+
+需求进入 APEX 后，必须先判断：
+
+- 任务类型
+- 项目级别
+- 当前阶段
+- 页面家族 / archetype
+- 风险与边界
+
+### 2. 多维评估
+
+APEX 强制要求在实现前完成：
+
+- 产品评估
+- 视觉评估
+- UX 评估
+- 风险评估
+
+### 3. Gate 驱动交付
+
+APEX 不允许直接从需求跳到实现。无论选择效果图还是直接代码路线，都必须经过需求拆解、视觉效果描述、用户确认与以下 Gate：
+
+- Gate 1：产品、基线、功能与改造边界确认
+- Gate 2：所选视觉基线、Visual Bundle编译和实现权限确认
+- Proof Gate：代表页真实可实现性确认
+- Gate 3：视觉、功能、运行时与整站真实落地确认
+
+### 4. 真实落地验证
+
+APEX 把“代码已改”与“交付已完成”严格区分开。
+
+只有同时通过：
+
+- 代码层
+- 运行时层
+- 页面层
+- 交互层
+- 整站与页面族回归层
+
+验收后，才算真正完成。
+
+### 5. 可迁移接入
+
+APEX 不是某个项目私有规则，而是一套可迁移系统。新项目可以通过：
+
+- connector
+- adapter
+
+接入 APEX，而不需要复制一整套零散提示词和临时经验。
+
+### 6. 增强层能力池
+
+为了支撑“体验卓越、功能完善、规范统一、设计专业、视觉高级、交互流畅、质量稳定、性能高效、持续可演进”的高标准交付，APEX 当前已经明确采用以下增强层能力：
+
+- `google-design-md`：设计规范表达层与 agent 可读约束基线
+- `shadcn-ui`：可选择并转存精确生成组件源码的组件来源
+- `radix-primitives`：可选择并安装精确运行时版本的可访问交互来源
+- `lucide`：可选择并转存精确 SVG 源码的图标来源
+- `motion`：可选择并安装精确运行时版本、锁定 pattern 文件的动效来源
+- `storybook`：组件文档化、状态展示与可视化验证参考层
+- `axe-core`：无障碍自动检测与质量门参考层
+
+同时保留以下执行层或灵感层能力：
+
+- `impeccable`
+- `ui-ux-pro-max-skill`
+- `taste-skill`
+- `better-icons`
+- `react-bits`
+- `motion-ai-kit`
+- `andrej-karpathy-skills`
+
+说明：
+
+- 前一组是可执行来源；一旦被视觉方案选中，必须在效果图运行时真实加载，并在项目中以精确包或精确文件落地、验收，不能只作为参考。
+- 后一组更偏“执行层能力与辅助增强层”
+
+补充说明：
+
+- `google-design-md` 是 APEX 默认设计契约基线，负责把视觉与交互要求沉淀为 agent 可读、可复用、可验收的设计约束
+- 当前 APEX 已将 `google-design-md` 进一步包装为本地可调用 skill，用于确保后续 session 可以显式加载，而不是只停留在规范引用层
+- `product design` 插件属于可选设计执行增强层，适合用于 brief 澄清、视觉提案、样例页探索与 image-to-code 类实现辅助
+- 插件缺失不影响 APEX 主流程；缺失时必须退回本地 adopted 规则与本地 skill 继续执行
+
+### 7. 会话与交付可靠性
+
+APEX 的执行可靠性不依赖聊天记忆。Router 将项目、run、session、Gate、审批、动作授权和
+状态哈希绑定在一起：任何状态变更都会使旧授权失效；项目代码修改还必须持有 mutation
+lease。底层运行脚本只能经 Action Gateway 调用，不能由 Skill 或文档示例直接绕过。
+
+对用户而言，这意味着：新 session 不会串入旧项目的运行态；Existing 改造不会脱离真实
+代码、页面和保护边界；视觉冻结或 Stitch 更新会撤销过期的实现权限，而不是让旧方案继续落地。
+
+## 产品分级
+
+### Lite
+
+适合：
+
+- 单卡片
+- 单模块
+- 单交互点
+- 单一视觉问题修复
+
+### Standard
+
+适合：
+
+- 单页整改
+- 单页重构
+- 局部设计系统统一
+
+### Full
+
+适合：
+
+- 整站升级
+- 页面家族统一
+- 系统级前端、视觉、UX 改造
+
+### Existing 局部变更原则
+
+局部页面、组件或数据展示改造采用受影响闭包确认：只展示和确认本次调整项，未调整内容保持 Existing 基线且不重复输出。Lite、Standard、Full 只决定执行深度，不会自动扩大页面范围。
+
+## 产品输入
+
+APEX 的标准输入不是“我要你随便改一版”，而是结构化任务：
+
+- 任务
+- 范围
+- 目标
+- 阶段要求
+- 约束
+
+调用格式以运行时调用协议为准。
+
+## 产品输出
+
+APEX 的标准输出不是单一文案，而是一整套阶段性交付结果：
+
+- 准入判断
+- 评估结果
+- 整改方案
+- 视觉方向
+- 真实实现
+- 验证结论
+- 经验沉淀
+
+## 关键产品边界
+
+### APEX 负责什么
+
+- 定义交付主流程
+- 定义技能和规范如何接入
+- 定义项目如何接入系统
+- 定义验收门和恢复方式
+
+### APEX 不负责什么
+
+- 替项目生成真实业务代码真相源
+- 替项目定义业务产品目标
+- 替项目承担运行环境和部署实体
+- 代替具体项目的产品文档和技术架构文档
+
+## 版本边界
+
+1.0 与 2.0 的发布状态只作为历史参考，见 `../core/runtime/release-notes.md` 与 `../core/runtime/release-audit-v1.md`。当前任务、流程裁决和交付验收必须以本 3.0 文档集及其 `core/` 真相源为准。
+
+## 更新边界
+
+APEX 支持持续更新，但更新只允许作用于增强层：
+
+- 专项能力增强
+- 效果增强
+- 约束增强
+- 规范增强
+
+不允许在使用中漂移以下内容：
+
+- 核心状态机
+- Gate 语义
+- 主调用链
+- 项目 adapter 真相源
+
+## 成功标准
+
+一套 APEX 交付是否成功，至少看以下结果：
+
+1. 任务是否准确命中正确流程
+2. 是否没有跳步
+3. 是否完成 Gate 确认
+4. 是否做到真实落地
+5. 是否能在其他项目复用
+6. 是否不因增强层更新破坏核心系统
+7. 是否能在设计、组件、图标、动效、无障碍和验证层面维持统一标准
+
+## 交叉引用
+
+- [README.md](https://github.com/bigywave-gif/APEX/blob/main/README.md)
+- [technical-architecture.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/technical-architecture.md)
+- [deployment-and-integration.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/deployment-and-integration.md)
+- [../core/framework/APEX.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/APEX.md)

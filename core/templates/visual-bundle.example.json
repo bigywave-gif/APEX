@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "3.0",
+  "siteContract": { "version": "replace", "hash": "replace" },
+  "stitchFreeze": { "path": "stitch-freeze.json", "screenSetHash": "replace" },
+  "layout": {},
+  "components": [],
+  "content": {},
+  "data": {},
+  "assets": [],
+  "icons": [],
+  "tables": [],
+  "charts": [],
+  "diagrams": [],
+  "motion": [],
+  "interaction": [],
+  "responsive": {},
+  "implementationMap": [{ "visualNode": "replace", "stitchNode": "replace", "screenId": "replace", "runtimeTarget": ["replace"], "designTokens": ["replace"], "data": [], "apiContracts": [], "events": [], "permissions": [], "responsive": {}, "testSelectors": ["[data-testid=replace]"], "acceptance": ["replace"] }],
+  "acceptance": ["replace"]
+}

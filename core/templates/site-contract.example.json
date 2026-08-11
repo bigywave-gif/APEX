@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "3.0",
+  "version": "replace",
+  "hash": "replace",
+  "product": {},
+  "shell": {},
+  "tokens": {},
+  "typography": {},
+  "spacing": {},
+  "components": {},
+  "icons": {},
+  "tables": {},
+  "charts": {},
+  "motion": {},
+  "responsive": {},
+  "pageFamilies": {},
+  "protectedFunctions": [],
+  "overrides": []
+}

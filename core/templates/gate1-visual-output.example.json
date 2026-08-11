@@ -1,0 +1,38 @@
+{
+  "source": "gate1-visual",
+  "referenceImage": {
+    "path": "evidence/gate1/report-desktop.png",
+    "viewport": "desktop"
+  },
+  "contentLock": {
+    "locale": "zh-CN",
+    "protectedText": ["成长报告"],
+    "protectedTableHeaders": ["日期", "正确率"]
+  },
+  "layoutLock": {
+    "mode": "strict",
+    "protectedStructures": ["报告头部", "趋势区"],
+    "nodes": [
+      { "id": "report-header", "marker": "report-header", "kind": "section", "order": 1 },
+      { "id": "trend-panel", "marker": "trend-panel", "kind": "section", "order": 2 }
+    ]
+  },
+  "analyticsLock": {
+    "charts": [
+      {
+        "id": "accuracy-trend",
+        "marker": "accuracy-trend",
+        "type": "trend",
+        "metric": "正确率",
+        "dimension": "日期",
+        "encoding": "折线"
+      }
+    ]
+  },
+  "designTokens": {
+    "colorPrimary": "#0f172a"
+  },
+  "componentContracts": [
+    { "id": "accuracy-chart", "marker": "accuracy-chart", "kind": "chart" }
+  ]
+}

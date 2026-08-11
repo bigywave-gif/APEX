@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/existing-baseline.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "capturedAt", "routes", "screens", "codeEntrypoints", "apiSamples", "contentFacts", "protectedBoundaries", "impactMap", "codeReference", "displayEvidence", "styleBaseline"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "capturedAt": { "type": "string", "minLength": 1 },
+    "routes": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "screens": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["viewport", "path"], "properties": { "viewport": { "type": "string" }, "path": { "type": "string" } } } },
+    "codeEntrypoints": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "codeReference": { "type": "object", "required": ["path", "sourceTreeHash", "sourceFileCount", "complete", "pageSkeletonPath", "pageSkeletonHash"], "properties": { "path": { "type": "string", "minLength": 1 }, "sourceTreeHash": { "type": "string", "minLength": 1 }, "sourceFileCount": { "type": "integer", "minimum": 1 }, "complete": { "const": true }, "pageSkeletonPath": { "type": "string", "minLength": 1 }, "pageSkeletonHash": { "type": "string", "minLength": 1 } } },
+    "displayEvidence": { "type": "object", "required": ["path", "hash", "capturedRoutes"], "properties": { "path": { "type": "string", "minLength": 1 }, "hash": { "type": "string", "minLength": 1 }, "capturedRoutes": { "type": "array", "minItems": 1, "items": { "type": "string" } } } },
+    "apiSamples": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["endpoint", "request", "response"], "properties": { "endpoint": { "type": "string" }, "request": { "type": "string" }, "response": { "type": "string" } } } },
+    "contentFacts": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "protectedBoundaries": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "impactMap": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "styleBaseline": { "$ref": "#/$defs/styleBaseline" }
+  },
+  "$defs": {
+    "styleBaseline": { "type": "object", "required": ["mode", "sources", "typography", "colors", "spacing", "geometry"], "properties": {
+      "mode": { "const": "existing-platform" },
+      "sources": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["path", "sha256"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } } } },
+      "typography": { "type": "object", "required": ["families", "scale", "lineHeights", "weights"], "properties": { "families": { "type": "array", "minItems": 1 }, "scale": { "type": "array", "minItems": 3 }, "lineHeights": { "type": "array", "minItems": 2 }, "weights": { "type": "array", "minItems": 2 } } },
+      "colors": { "type": "object", "required": ["tokens", "semanticRoles"], "properties": { "tokens": { "type": "array", "minItems": 3 }, "semanticRoles": { "type": "array", "minItems": 3 } } },
+      "spacing": { "type": "object", "required": ["scale", "pageGutters", "sectionGaps"], "properties": { "scale": { "type": "array", "minItems": 3 }, "pageGutters": { "type": "array", "minItems": 1 }, "sectionGaps": { "type": "array", "minItems": 1 } } },
+      "geometry": { "type": "object", "required": ["radius", "borders", "shadows"], "properties": { "radius": { "type": "array", "minItems": 1 }, "borders": { "type": "array", "minItems": 1 }, "shadows": { "type": "array", "minItems": 1 } } }
+    } }
+  }
+}

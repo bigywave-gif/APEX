@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "3.0",
+  "page": "replace-page",
+  "items": [{
+    "id": "replace-id",
+    "name": "replace-name",
+    "disposition": "preserve",
+    "dom": [],
+    "event": [],
+    "api": [],
+    "state": [],
+    "permission": [],
+    "refreshRecovery": [],
+    "regression": [],
+    "approvalId": null
+  }]
+}

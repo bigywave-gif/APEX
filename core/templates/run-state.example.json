@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "3.0",
+  "runId": "example-run",
+  "revision": 0,
+  "track": "existing",
+  "scope": "standard",
+  "authorization": "interactive",
+  "lifecycle": "active",
+  "handoff": null,
+  "phase": "E-01 BASELINE",
+  "gates": {
+    "gate0": {
+      "status": "passed",
+      "at": null,
+      "evidence": []
+    },
+    "gate1": {
+      "status": "pending",
+      "at": null,
+      "evidence": []
+    },
+    "gate2": {
+      "status": "pending",
+      "at": null,
+      "evidence": []
+    },
+    "proof": {
+      "status": "pending",
+      "at": null,
+      "evidence": []
+    },
+    "gate3": {
+      "status": "pending",
+      "at": null,
+      "evidence": []
+    }
+  },
+  "locks": {
+    "requirementsApproved": false,
+    "effectApproved": false,
+    "stitchApproved": false,
+    "implementationApproved": false,
+    "visualApproved": false,
+    "implementationAllowed": false,
+    "stitchCurrent": false,
+    "stitchSkipped": false
+    ,"visualPlanApproved": false
+  },
+  "artifacts": {
+    "intentBrief": null,
+    "projectInventory": null,
+    "deliveryContract": null,
+    "gate1Presentation": null,
+    "gate1PresentationManifest": null,
+    "existingBaseline": null,
+    "codeReference": null,
+    "pageSkeleton": null,
+    "experienceStrategy": null,
+    "experienceQualityEvidence": null,
+    "motionContract": null,
+    "motionEvidence": null,
+    "visualExecutionPlan": null,
+    "visualPlanPresentation": null,
+    "visualPlanPresentationManifest": null,
+    "visualSandboxFiles": null,
+    "runtimeDemo": null,
+    "designCandidates": null,
+    "domainModel": null,
+    "apiContract": null,
+    "dataContract": null,
+    "siteContract": null,
+    "functionalFreeze": null,
+    "stitchFreeze": null,
+    "visualReference": null,
+    "stitchParityEvidence": null,
+    "implementationParityEvidence": null,
+    "visualBundle": null,
+    "implementationMap": null,
+    "runtimeStateMatrix": null,
+    "verificationPlan": null,
+    "verificationBundle": null,
+    "pageDelta": null,
+    "changeScope": null,
+    "dependencyLock": null,
+    "gate1VisualOutput": null
+  },
+  "checkpoints": [],
+  "updatedAt": "1970-01-01T00:00:00.000Z"
+}

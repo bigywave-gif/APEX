@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/code-reference.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "capturedAt", "projectRoot", "complete", "scope", "sourceFileCount", "totalBytes", "sourceTreeHash", "files", "excludedDirectories"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "capturedAt": { "type": "string", "minLength": 1 },
+    "projectRoot": { "type": "string", "minLength": 1 },
+    "complete": { "const": true },
+    "scope": { "type": "object", "required": ["routes", "entrypoints", "mode"], "properties": { "routes": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "entrypoints": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "mode": { "const": "target-entrypoints-and-transitive-project-dependencies" } } },
+    "sourceFileCount": { "type": "integer", "minimum": 1 },
+    "totalBytes": { "type": "integer", "minimum": 1 },
+    "sourceTreeHash": { "type": "string", "minLength": 1 },
+    "excludedDirectories": { "type": "array", "items": { "type": "string" } },
+    "files": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["path", "sha256", "bytes", "copyPath"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "minLength": 1 }, "bytes": { "type": "integer", "minimum": 0 }, "copyPath": { "type": "string", "minLength": 1 }, "language": { "type": "string" } } } }
+  }
+}

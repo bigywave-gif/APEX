@@ -1,0 +1,130 @@
+skills:
+  - name: design-director
+    role: user-intent-compilation-and-quality-baseline
+    contract: apex/core/roles/design-director.md
+    optional_for: [intent-compilation, visual-direction, design-contract]
+  - name: doc-coauthoring
+    role: open-source-freeform-feedback-preference-extraction
+    contract: https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring
+    install_path: /Users/fredyw/.codex/skills/doc-coauthoring
+    license: verify-upstream-skill-license-before-redistribution
+    optional_for: [unconfirmed-user-adjustment, preference-extraction, iterative-artifact-revision]
+  - name: react
+    role: react-runtime-engineering
+    contract: registry/frontend-dependencies.yaml
+    optional_for: [react-implementation, react-review, react-migration]
+  - name: heroui
+    role: heroui-component-engineering
+    contract: registry/frontend-dependencies.yaml
+    optional_for: [react-component-system]
+  - name: radix
+    role: accessible-react-primitives
+    contract: registry/frontend-dependencies.yaml
+    optional_for: [react-component-system, accessibility]
+  - name: framer-motion
+    role: react-motion-engineering
+    contract: registry/frontend-dependencies.yaml
+    optional_for: [motion]
+  - name: tailwind
+    role: utility-css-engineering
+    contract: registry/frontend-dependencies.yaml
+    optional_for: [tailwind-implementation, design-tokens]
+  - name: storybook
+    role: component-documentation-and-testing
+    contract: registry/frontend-dependencies.yaml
+    optional_for: [component-documentation, component-testing]
+  - name: google-design-md
+    role: design-contract-baseline
+    contract: apex/registry/skills/google-design-md.md
+    optional_for:
+      - design-contract
+      - visual-consistency
+  - name: impeccable
+    role: structure-and-product-grade-baseline
+    contract: apex/registry/skills/impeccable.md
+    optional_for:
+      - frontend-redesign
+      - visual-upgrade
+  - name: ui-ux-pro-max-skill
+    role: page-level-visual-organization
+    contract: apex/registry/skills/ui-ux-pro-max-skill.md
+    optional_for:
+      - page-redesign
+      - system-visual-direction
+  - name: taste-skill
+    role: anti-template-taste
+    contract: apex/registry/skills/taste-skill.md
+    optional_for:
+      - premium-visual-polish
+  - name: better-icons
+    role: icon-system-unification
+    contract: apex/registry/skills/better-icons.md
+    optional_for:
+      - icon-upgrade
+  - name: react-bits
+    role: motion-pattern-reference
+    contract: apex/registry/skills/react-bits.md
+    optional_for:
+      - motion
+  - name: motion-ai-kit
+    role: motion-system-reference
+    contract: apex/registry/skills/motion-ai-kit.md
+    optional_for:
+      - motion
+  - name: shadcn-ui-reference
+    role: open-source-component-language
+    contract: apex/registry/skills/shadcn-ui-reference.md
+    optional_for:
+      - component-language
+  - name: andrej-karpathy-skills
+    role: engineering-discipline
+    contract: apex/registry/skills/andrej-karpathy-skills.md
+    optional_for:
+      - implementation
+  - name: playwright
+    role: browser-automation-and-runtime-verification
+    contract: apex/registry/skills/playwright.md
+    optional_for:
+      - browser-verification
+      - interaction-verification
+  - name: stitch-design
+    role: controlled-visual-generation
+    contract: apex/connectors/google-stitch/connector.md
+    optional_for:
+      - high-fidelity-visual-exploration
+      - same-structure-variants
+      - interactive-prototype
+routing:
+  default_order:
+    - react
+    - heroui
+    - radix
+    - tailwind
+    - storybook
+    - framer-motion
+    - google-design-md
+    - impeccable
+    - ui-ux-pro-max-skill
+    - stitch-design
+    - taste-skill
+    - better-icons
+    - react-bits
+    - motion-ai-kit
+    - shadcn-ui-reference
+    - andrej-karpathy-skills
+    - playwright
+    - doc-coauthoring
+conflicts:
+  - when: project-fact-pack-or-design-contract-missing
+    block:
+      - stitch-design
+  - when: structure-not-confirmed
+    block:
+      - taste-skill
+      - react-bits
+      - motion-ai-kit
+reasoning:
+  - design-contract-before-visual-exploration
+  - structural-skills-before-aesthetic-skills
+  - aesthetic-skills-before-motion-skills
+  - engineering-discipline-required-for-implementation

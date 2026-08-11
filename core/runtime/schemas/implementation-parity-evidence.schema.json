@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/implementation-parity-evidence.schema.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "baseline",
+    "runtimeImageHash",
+    "checks",
+    "unmatched",
+    "strictPixelMatch",
+    "structuralVerification",
+    "textVerification"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "3.0"
+    },
+    "status": {
+      "const": "passed"
+    },
+    "baseline": {
+      "type": "object",
+      "required": ["kind", "imageHash"],
+      "properties": {
+        "kind": { "enum": ["stitch", "effect-image"] },
+        "imageHash": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stitchImageHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtimeImageHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "checks": {
+      "type": "object",
+      "required": [
+        "content",
+        "layout",
+        "analytics",
+        "style"
+      ],
+      "properties": {
+        "content": {
+          "const": "passed"
+        },
+        "layout": {
+          "const": "passed"
+        },
+        "analytics": {
+          "const": "passed"
+        },
+        "style": {
+          "const": "passed"
+        }
+      }
+    },
+    "unmatched": {
+      "type": "array"
+    },
+    "strictPixelMatch": {
+      "const": true
+    },
+    "structuralVerification": {
+      "type": "object",
+      "required": [
+        "source",
+        "sourceImageHash",
+        "contractPath",
+        "contractHash"
+      ],
+      "properties": {
+        "source": {
+          "enum": [
+            "stitch-screen-export",
+            "runtime-dom-export"
+          ]
+        },
+        "sourceImageHash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contractPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contractHash": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "textVerification": {
+      "type": "object",
+      "required": [
+        "source",
+        "ocr"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ocr": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

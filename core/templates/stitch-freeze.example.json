@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "3.0",
+  "projectId": "projects/replace",
+  "canvasUrl": "https://stitch.withgoogle.com/replace",
+  "approval": { "id": "approval-replace", "scope": "screen", "approvedAt": "1970-01-01T00:00:00.000Z" },
+  "approvedScreens": [{ "screenId": "replace", "route": "/", "viewport": "desktop", "state": "default", "htmlHash": "replace", "imageHash": "replace", "htmlPath": "evidence/stitch/screens/screen-id/00-html.html", "imagePath": "evidence/stitch/screens/screen-id/01-image.png" }],
+  "excludedScreens": [],
+  "fingerprints": { "screenSetHash": "replace", "designSystemHash": "replace" },
+  "syncedAt": "1970-01-01T00:00:00.000Z"
+}

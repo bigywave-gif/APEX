@@ -1,0 +1,281 @@
+sources:
+  - name: iso-iec-ieee-29148-2018
+    type: requirements-engineering-standard
+    status: referenced
+    homepage: https://www.iso.org/standard/72089.html
+    version: ISO/IEC/IEEE 29148:2018
+    source_kind: external-standard
+    adoption_required: false
+    local_adoption_doc: apex/system-docs/apex-3.0-complete-specification.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: copyrighted-standard-metadata-only
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: iso-iec-25010-2023
+    type: software-quality-model-standard
+    status: referenced
+    homepage: https://www.iso.org/standard/78176.html
+    version: ISO/IEC 25010:2023
+    source_kind: external-standard
+    adoption_required: false
+    local_adoption_doc: apex/system-docs/apex-3.0-complete-specification.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: copyrighted-standard-metadata-only
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: iso-iec-ieee-42010-2022
+    type: architecture-description-standard
+    status: referenced
+    homepage: https://www.iso.org/standard/74393.html
+    version: ISO/IEC/IEEE 42010:2022
+    source_kind: external-standard
+    adoption_required: false
+    local_adoption_doc: apex/system-docs/apex-3.0-complete-specification.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: copyrighted-standard-metadata-only
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: iso-iec-ieee-12207-2026
+    type: software-life-cycle-standard
+    status: referenced
+    homepage: https://www.iso.org/standard/63712.html
+    version: ISO/IEC/IEEE 12207:2026
+    source_kind: external-standard
+    adoption_required: false
+    local_adoption_doc: apex/system-docs/apex-3.0-complete-specification.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: copyrighted-standard-metadata-only
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: wcag-2-2
+    type: accessibility-standard
+    status: referenced
+    homepage: https://www.w3.org/TR/WCAG22/
+    version: W3C Recommendation 2024-12-12
+    source_kind: external-standard
+    adoption_required: true
+    local_adoption_doc: apex/core/runtime/quality-bar.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: W3C-document-use-rules
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: nist-ssdf
+    type: secure-software-development-framework
+    status: referenced
+    homepage: https://csrc.nist.gov/projects/ssdf
+    version: current-framework-reference
+    source_kind: external-standard
+    adoption_required: false
+    local_adoption_doc: apex/system-docs/apex-3.0-complete-specification.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: public-framework-reference
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: google-design-md
+    type: design-standard
+    status: referenced
+    homepage: https://github.com/google-labs-code/design.md
+    version: 0.3.0
+    source_kind: external-standard
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: scheduled-manual-review
+    license_status: Apache-2.0
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: shadcn-ui
+    type: component-language
+    status: referenced
+    homepage: https://ui.shadcn.com/
+    version: shadcn@4.13.0
+    source_kind: open-source-library
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: MIT
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: radix-primitives
+    type: accessibility-primitive-library
+    status: referenced
+    homepage: https://www.radix-ui.com/primitives
+    version: upstream-current
+    source_kind: open-source-library
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: MIT
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: lucide
+    type: icon-system-library
+    status: referenced
+    homepage: https://lucide.dev/
+    version: upstream-current
+    source_kind: open-source-library
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: ISC
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: motion
+    type: motion-library
+    status: referenced
+    homepage: https://motion.dev/
+    version: upstream-current
+    source_kind: open-source-library
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: MIT
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: storybook
+    type: component-workshop
+    status: referenced
+    homepage: https://storybook.js.org/
+    version: upstream-current
+    source_kind: open-source-library
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: MIT
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: axe-core
+    type: accessibility-test-engine
+    status: referenced
+    homepage: https://github.com/dequelabs/axe-core
+    version: upstream-current
+    source_kind: open-source-library
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: high
+    update_policy: scheduled-manual-review
+    license_status: MPL-2.0
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-ready
+  - name: impeccable
+    type: ui-workflow-skill
+    status: referenced
+    homepage: host-codex-skill
+    version: host-installed
+    source_kind: skill
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: host-managed-review
+    license_status: host-environment-managed
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-blocked
+  - name: ui-ux-pro-max-skill
+    type: page-visual-organization-skill
+    status: referenced
+    homepage: host-codex-skill
+    version: host-installed
+    source_kind: skill
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: host-managed-review
+    license_status: host-environment-managed
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-blocked
+  - name: taste-skill
+    type: design-taste-skill
+    status: referenced
+    homepage: host-codex-skill
+    version: host-installed
+    source_kind: skill
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: host-managed-review
+    license_status: host-environment-managed
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-blocked
+  - name: react-bits
+    type: motion-reference
+    status: referenced
+    homepage: https://www.reactbits.dev/
+    version: upstream-current
+    source_kind: open-source-library
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: scheduled-manual-review
+    license_status: MIT + Commons Clause
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-blocked
+  - name: motion-ai-kit
+    type: motion-toolkit
+    status: referenced
+    homepage: host-codex-skill
+    version: host-installed
+    source_kind: skill
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: host-managed-review
+    license_status: host-environment-managed
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-blocked
+  - name: better-icons
+    type: icon-system-reference
+    status: referenced
+    homepage: host-codex-skill
+    version: host-installed
+    source_kind: skill
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: host-managed-review
+    license_status: host-environment-managed
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-blocked
+  - name: andrej-karpathy-skills
+    type: engineering-discipline-skill
+    status: referenced
+    homepage: host-codex-skill
+    version: host-installed
+    source_kind: skill
+    adoption_required: true
+    local_adoption_doc: apex/references/adopted/adopted-design-rules.md
+    stability: medium
+    update_policy: host-managed-review
+    license_status: host-environment-managed
+    packaging_mode: metadata-only
+    release_embedded: false
+    oss_readiness: oss-blocked

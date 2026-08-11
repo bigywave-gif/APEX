@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "3.0",
+  "page": "replace",
+  "family": "replace",
+  "mode": "full-rewrite",
+  "inherits": { "siteContractVersion": "replace", "siteContractHash": "replace" },
+  "preserve": [],
+  "reorder": [],
+  "add": [],
+  "remove": [],
+  "functionalChanges": [],
+  "overrides": [],
+  "affectedConsumers": []
+}

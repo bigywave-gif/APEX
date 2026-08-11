@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/page-skeleton.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "sourceTreeHash", "skeletonHash", "entrypoints", "nodes"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "sourceTreeHash": { "type": "string", "minLength": 1 },
+    "skeletonHash": { "type": "string", "minLength": 1 },
+    "entrypoints": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "nodes": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "sourcePath", "marker", "kind"], "properties": { "id": { "type": "string", "minLength": 1 }, "sourcePath": { "type": "string", "minLength": 1 }, "marker": { "type": "string", "minLength": 1 }, "kind": { "type": "string", "minLength": 1 } } } }
+  }
+}

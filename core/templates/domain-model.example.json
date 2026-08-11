@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "3.0",
+  "entities": [{ "name": "ReplaceEntity", "fields": ["id", "status"] }],
+  "rules": ["Replace with a deterministic business rule."],
+  "states": ["loading", "empty", "error", "ready"],
+  "permissions": ["Replace with a role or resource boundary."]
+}

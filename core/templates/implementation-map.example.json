@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "3.0",
+  "entries": [{
+    "visualNode": "replace",
+    "stitchNode": "replace",
+    "screenId": "replace",
+    "runtimeTarget": ["replace"],
+    "designTokens": ["replace"],
+    "data": [],
+    "apiContracts": [],
+    "events": [],
+    "permissions": [],
+    "responsive": {},
+    "testSelectors": ["[data-testid=replace]"],
+    "acceptance": ["replace"]
+  }]
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/design-candidates.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "strategyHash", "candidates", "selectedCandidateId", "selectionRationale"],
+  "properties": {
+    "schemaVersion": { "const": "3.0" },
+    "strategyHash": { "type": "string", "minLength": 1 },
+    "candidates": { "type": "array", "minItems": 2, "items": { "type": "object", "required": ["id", "image", "informationArchitecture", "dataExpression", "visualDirection", "tradeoffs"], "properties": { "id": { "type": "string", "minLength": 1 }, "image": { "type": "object", "required": ["path", "sha256"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "minLength": 1 } } }, "informationArchitecture": { "type": "string", "minLength": 1 }, "dataExpression": { "type": "string", "minLength": 1 }, "visualDirection": { "type": "string", "minLength": 1 }, "tradeoffs": { "type": "array", "minItems": 1 } } } },
+    "selectedCandidateId": { "type": "string", "minLength": 1 },
+    "selectionRationale": { "type": "string", "minLength": 1 }
+  }
+}

@@ -1,0 +1,70 @@
+schema_version: 1
+ownership:
+  apex_root: ~/.codex/apex/APEX
+  codex_global_skills: ~/.codex/skills
+  project_rule: target projects must not receive unused parallel runtimes, skills, tools, scripts, caches, or node_modules
+capabilities:
+  - name: React
+    kind: codex-global-skill-backed-runtime
+    skill_location: ~/.codex/skills/react/SKILL.md
+    apex_location: connectors/react-saas
+    install_policy: resolve per React target project; never install into a Vanilla target merely because APEX supports React
+  - name: HeroUI
+    kind: codex-global-skill-backed-component-library
+    skill_location: ~/.codex/skills/heroui/SKILL.md
+    apex_location: registry/assets
+    install_policy: resolve exact packages and peer dependencies only for an approved React implementation
+  - name: Radix
+    kind: codex-global-skill-backed-component-primitives
+    skill_location: ~/.codex/skills/radix/SKILL.md
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: resolve selected @radix-ui/react-* packages only for an approved React implementation
+  - name: Framer Motion
+    kind: codex-global-skill-backed-motion-library
+    skill_location: ~/.codex/skills/framer-motion/SKILL.md
+    apex_location: registry/assets/online-sources.yaml
+    skill_routes: [motion-ai-kit, react-bits]
+    install_policy: resolve the current Motion package only when the approved runtime needs it
+  - name: Tailwind
+    kind: codex-global-skill-backed-styling-toolchain
+    skill_location: ~/.codex/skills/tailwind/SKILL.md
+    apex_location: adapters and approved target-project configuration
+    install_policy: install only in an approved Tailwind target; never maintain a parallel Tailwind entry
+  - name: Storybook
+    kind: codex-global-skill-backed-component-documentation-tool
+    skill_location: ~/.codex/skills/storybook/SKILL.md
+    apex_location: core/runtime/plugin-capability-inventory.md
+    install_policy: optional per componentized target; otherwise use an equivalent state matrix or visual documentation
+  - name: Playwright
+    kind: codex-global-skill
+    skill_location: ~/.codex/skills/playwright/SKILL.md
+    apex_contract: registry/skills/playwright.md
+    install_policy: use the global skill; do not copy the skill or its runtime artifacts into target projects
+  - name: TanStack Query
+    kind: server-state-runtime
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: select only for approved React or framework adapter implementations that consume remote server state
+  - name: Zod
+    kind: runtime-schema-validation
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: use for approved API contracts, form validation, or untrusted boundary validation; do not duplicate an existing project validator without a migration decision
+  - name: Mock Service Worker
+    kind: api-mocking-runtime
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: use only when the Delivery Contract requires a mock or contract-compatible frontend integration path
+  - name: OpenAPI Generator
+    kind: api-contract-code-generation
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: use only after the API Contract is approved; generated clients remain derived artifacts and must not replace the source contract
+  - name: Vitest
+    kind: unit-and-component-test-runtime
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: use the project's established test runner where present; select Vitest only for compatible approved targets
+  - name: Lighthouse CI
+    kind: performance-verification
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: add only when the Delivery Contract requires performance evidence and no equivalent project tooling exists
+  - name: OpenTelemetry
+    kind: observability-runtime
+    apex_location: registry/assets/online-sources.yaml
+    install_policy: use only for approved release/operations scope; never add telemetry without a data and privacy decision

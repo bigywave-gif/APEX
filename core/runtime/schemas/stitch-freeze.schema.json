@@ -1,0 +1,349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/stitch-freeze.schema.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "canvasUrl",
+    "approval",
+    "approvedScreens",
+    "excludedScreens",
+    "fingerprints",
+    "syncedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "3.0"
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canvasUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approval": {
+      "type": "object",
+      "required": [
+        "id",
+        "scope",
+        "approvedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "enum": [
+            "screen",
+            "page-family",
+            "project"
+          ]
+        },
+        "approvedAt": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "approvedScreens": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "screenId",
+          "route",
+          "viewport",
+          "state",
+          "htmlHash",
+          "imageHash",
+          "htmlPath",
+          "imagePath"
+        ],
+        "properties": {
+          "screenId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "route": {
+            "type": "string"
+          },
+          "viewport": {
+            "enum": [
+              "desktop",
+              "tablet",
+              "mobile",
+              "agnostic"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1
+          },
+          "htmlHash": {
+            "type": "string",
+            "minLength": 1
+          },
+          "imageHash": {
+            "type": "string",
+            "minLength": 1
+          },
+          "htmlPath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "imagePath": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "excludedScreens": {
+      "type": "array"
+    },
+    "generationInput": {
+      "type": "object",
+      "required": [
+        "mode",
+        "promptHash"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "text",
+            "image+text"
+          ]
+        },
+        "origin": {
+          "enum": [
+            "apex-visual",
+            "project-baseline",
+            "user-provided"
+          ]
+        },
+        "transport": {
+          "enum": [
+            "mcp-native",
+            "stitch-ui-automation"
+          ]
+        },
+        "promptHash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contentLock": {
+          "type": "object",
+          "required": [
+            "locale",
+            "sourceHash",
+            "protectedText"
+          ],
+          "properties": {
+            "locale": {
+              "const": "zh-CN"
+            },
+            "sourceHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "protectedText": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "protectedTableHeaders": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "layoutLock": {
+          "type": "object",
+          "required": [
+            "mode",
+            "sourceHash",
+            "protectedStructures"
+          ],
+          "properties": {
+            "mode": {
+              "const": "strict"
+            },
+            "sourceHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "protectedStructures": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "allowedDeviations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "analyticsLock": {
+          "type": "object",
+          "required": [
+            "sourceHash",
+            "charts"
+          ],
+          "properties": {
+            "sourceHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "charts": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "type",
+                  "metric",
+                  "dimension",
+                  "encoding"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "enum": [
+                      "trend",
+                      "progress",
+                      "radar",
+                      "distribution",
+                      "bar",
+                      "line",
+                      "area",
+                      "table"
+                    ]
+                  },
+                  "metric": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "dimension": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "encoding": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fallback": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "sha256",
+              "role",
+              "fidelity"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "enum": [
+                  "layout",
+                  "visual-style",
+                  "component",
+                  "content"
+                ]
+              },
+              "fidelity": {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "image+text"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "origin",
+              "transport",
+              "references",
+              "contentLock",
+              "layoutLock",
+              "analyticsLock"
+            ],
+            "properties": {
+              "references": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fingerprints": {
+      "type": "object",
+      "required": [
+        "screenSetHash",
+        "designSystemHash"
+      ],
+      "properties": {
+        "screenSetHash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "designSystemHash": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "syncedAt": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

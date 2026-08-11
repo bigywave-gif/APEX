@@ -1,0 +1,180 @@
+name: APEX User-Intent-Driven Full-Stack Delivery System
+version: 4.15.0
+type: agentic-delivery-system
+scope:
+  - frontend
+  - ui
+  - visual-design
+  - ux
+  - interaction
+  - implementation
+  - verification
+entrypoints:
+  readme: README.md
+  index: INDEX.md
+  preflight: runtime/preflight.md
+  codex_discovery: runtime/codex-discovery.md
+  bridge_skill: runtime/host-bridges/codex-skill/SKILL.md
+  system_docs: system-docs/README.md
+  product_document: system-docs/product-document.md
+  technical_architecture_document: system-docs/technical-architecture.md
+  deployment_integration_document: system-docs/deployment-and-integration.md
+  packaging: PACKAGING.md
+  package_contents: core/runtime/package-contents.md
+  framework: core/framework/APEX.md
+  state_machine: core/framework/state-machine.md
+  tracks: core/framework/tracks.md
+  authorization: core/framework/authorization.md
+  gates: core/framework/gates.md
+  invocation: core/runtime/invocation-spec.md
+  executable_gates: core/runtime/executable-gates.md
+  contracts_recording: core/runtime/contracts-recording.md
+  remediation_method: core/runtime/remediation-method.md
+  run_directory: core/runtime/run-directory.md
+  run_state_schema: core/runtime/schemas/run-state.schema.json
+  approval_receipt_schema: core/runtime/schemas/approval-receipt.schema.json
+  intent_brief_schema: core/runtime/schemas/intent-brief.schema.json
+  delivery_contract_schema: core/runtime/schemas/delivery-contract.schema.json
+  existing_baseline_schema: core/runtime/schemas/existing-baseline.schema.json
+  experience_strategy_schema: core/runtime/schemas/experience-strategy.schema.json
+  experience_quality_evidence_schema: core/runtime/schemas/experience-quality-evidence.schema.json
+  design_candidates_schema: core/runtime/schemas/design-candidates.schema.json
+  runtime_state_matrix_schema: core/runtime/schemas/runtime-state-matrix.schema.json
+  motion_contract_schema: core/runtime/schemas/motion-contract.schema.json
+  motion_evidence_schema: core/runtime/schemas/motion-evidence.schema.json
+  three_d_evidence_schema: core/runtime/schemas/three-d-evidence.schema.json
+  motion_capability_inventory_schema: core/runtime/schemas/motion-capability-inventory.schema.json
+  motion_capability_selection_schema: core/runtime/schemas/motion-capability-selection.schema.json
+  motion_implementation_map_schema: core/runtime/schemas/motion-implementation-map.schema.json
+  visual_source_manifest_schema: core/runtime/schemas/visual-source-manifest.schema.json
+  visual_execution_plan_schema: core/runtime/schemas/visual-execution-plan.schema.json
+  project_inventory_schema: core/runtime/schemas/project-inventory.schema.json
+  domain_model_schema: core/runtime/schemas/domain-model.schema.json
+  api_contract_schema: core/runtime/schemas/api-contract.schema.json
+  site_contract_schema: core/runtime/schemas/site-contract.schema.json
+  functional_freeze_schema: core/runtime/schemas/functional-freeze.schema.json
+  stitch_freeze_schema: core/runtime/schemas/stitch-freeze.schema.json
+  visual_reference_schema: core/runtime/schemas/visual-reference.schema.json
+  stitch_parity_evidence_schema: core/runtime/schemas/stitch-parity-evidence.schema.json
+  implementation_parity_evidence_schema: core/runtime/schemas/implementation-parity-evidence.schema.json
+  canvas_selection_schema: core/runtime/schemas/canvas-selection.schema.json
+  visual_bundle_schema: core/runtime/schemas/visual-bundle.schema.json
+  visual_spec_schema: core/runtime/schemas/visual-spec.schema.json
+  implementation_map_schema: core/runtime/schemas/implementation-map.schema.json
+  page_delta_schema: core/runtime/schemas/page-delta.schema.json
+  change_scope_schema: core/runtime/schemas/change-scope.schema.json
+  dependency_lock_schema: core/runtime/schemas/dependency-lock.schema.json
+  asset_selection_schema: core/runtime/schemas/asset-selection.schema.json
+  verification_bundle_schema: core/runtime/schemas/verification-bundle.schema.json
+  evidence_provenance_schema: core/runtime/schemas/evidence-provenance.schema.json
+  industry_benchmark_evidence_schema: core/runtime/schemas/industry-benchmark-evidence.schema.json
+  industry_benchmark_review_schema: core/runtime/schemas/industry-benchmark-review.schema.json
+  verification_plan_schema: core/runtime/schemas/verification-plan.schema.json
+  context_sources_schema: core/runtime/schemas/context-sources.schema.json
+  gate_validator: scripts/apex-validate.mjs
+  run_controller: scripts/apex-run.mjs
+  router: scripts/apex-router.mjs
+  action_gateway: scripts/apex-action.mjs
+  router_contract_test: scripts/router-contract-test.mjs
+  codex_bridge_sync: scripts/sync-codex-bridge.mjs
+  stitch_sync: scripts/stitch-sync.mjs
+  visual_reference_compiler: scripts/visual-reference-compiler.mjs
+  visual_parity_runner: scripts/visual-parity.mjs
+  structure_contract_exporter: scripts/structure-contract.mjs
+  strict_replica_orchestrator: scripts/strict-replica.mjs
+  stitch_ui_importer: scripts/stitch-ui-importer.mjs
+  bundle_compiler: scripts/bundle-compiler.mjs
+  asset_resolver: scripts/asset-resolver.mjs
+  asset_materializer: scripts/asset-materializer.mjs
+  runtime_materializer: scripts/runtime-materializer.mjs
+  verification_orchestrator: scripts/verification-orchestrator.mjs
+  baseline_collector: scripts/baseline-collector.mjs
+  existing_code_reference: scripts/existing-code-reference.mjs
+  project_intake: scripts/project-intake.mjs
+  adapter_coverage: scripts/adapter-coverage.mjs
+  contract_recorder: scripts/contract-recorder.mjs
+  contract_verifier: scripts/contract-verifier.mjs
+  verification_planner: scripts/verification-planner.mjs
+  quality_evidence: scripts/quality-evidence.mjs
+  evidence_provenance: scripts/evidence-provenance.mjs
+  industry_benchmark: scripts/industry-benchmark.mjs
+  motion_contract: scripts/motion-contract.mjs
+  motion_capability: scripts/motion-capability.mjs
+  visual_source: scripts/visual-source.mjs
+  runtime_visual_baseline: scripts/runtime-visual-baseline.mjs
+  visual_sandbox_writer: scripts/visual-sandbox-writer.mjs
+  visual_execution_plan: scripts/visual-execution-plan.mjs
+  three_d_evidence: scripts/three-d-evidence.mjs
+  browser_capture: scripts/browser-capture.mjs
+  implementation_audit: scripts/implementation-audit.mjs
+  release_audit_runner: scripts/release-audit.mjs
+  release_version_policy: scripts/apex-release-version.mjs
+  public_pdf_generator: scripts/generate-public-pdf.py
+  context_compiler: scripts/context-compiler.mjs
+  existing_baseline_guide: core/runtime/existing-baseline.md
+  experience_strategy_contract: core/runtime/experience-strategy-contract.md
+  quality_bar: core/runtime/quality-bar.md
+  recovery_controller: scripts/apex-recover.mjs
+  run_migration: scripts/run-migrate.mjs
+  workspace_controller: scripts/apex-workspace.mjs
+  trajectory_evaluator: scripts/trajectory-evaluator.mjs
+  experience_evaluator: scripts/experience-evaluator.mjs
+  stability_evidence: scripts/stability-evidence.mjs
+  admission_rules: core/policies/admission-rules.md
+  priority_model: core/policies/priority-model.md
+  accessibility_gate: core/policies/accessibility-gate.md
+  install_and_migration: core/runtime/install-and-migration.md
+  tooling_matrix: core/runtime/tooling-matrix.md
+  host_capability_governance: core/runtime/host-capability-governance.md
+  audit_spec: core/runtime/apex-audit-spec.md
+  plugin_capability_inventory: core/runtime/plugin-capability-inventory.md
+  online_asset_registry: registry/assets/online-sources.yaml
+  online_asset_contract: registry/assets/contract.md
+  frontend_dependencies: registry/frontend-dependencies.yaml
+  system_requirements: core/runtime/system-requirements.md
+  release_checklist: core/runtime/release-checklist.md
+  release_audit: core/runtime/release-audit-v2.md
+  release_notes: core/runtime/release-notes.md
+  adapter_example: adapters/examples/generic-saas/adapter.md
+modules:
+  - core/framework
+  - core/runtime
+  - runtime
+  - core/policies
+  - core/roles
+  - core/templates
+  - registry
+  - registry/skills
+  - references
+  - connectors
+  - adapters
+  - scripts
+required_capabilities:
+  - structured-step-execution
+  - gate-control
+  - code-baseline-audit
+  - consistency-audit
+  - visual-audit
+  - verification
+optional_capabilities:
+  - subagent-routing
+  - browser-verification
+  - motion-design
+  - icon-system-upgrade
+external_references_manifest: references/external/sources.yaml
+external_update_policy: references/external/continuous-update-policy.md
+required_capabilities_registry: registry/required-capabilities.yaml
+optional_capabilities_registry: registry/optional-capabilities.yaml
+registration_record_example: registry/registration-record.example.yaml
+skills_manifest: registry/skills/manifest.yaml
+skill_activation_matrix: registry/skills/activation-matrix.md
+capability_registry: registry/capability-registry.json
+skill_conflict_matrix: registry/skills/conflict-matrix.md
+connectors:
+  - connectors/google-stitch/connector.md
+  - connectors/generic-web-app/connector.md
+  - connectors/react-saas/connector.md
+  - connectors/vue-admin/connector.md
+  - connectors/vanilla-js-app/connector.md
+adapters:
+  - adapters/examples/generic-saas/adapter.md

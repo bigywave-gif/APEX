@@ -1,0 +1,24 @@
+host:
+  name: codex
+  apex_root: ~/.codex/apex/APEX
+  scanned_at: 2026-07-06T00:00:00Z
+registration:
+  skills:
+    - name: google-design-md
+      status: ready
+      source: host-skill-root
+    - name: impeccable
+      status: ready
+      source: host-skill-root
+  plugins:
+    - name: browser-control
+      status: optional-missing
+  tools:
+    - name: code-read
+      status: ready
+    - name: file-edit
+      status: ready
+result:
+  level: pass-with-risks
+  notes:
+    - optional visual verification capability missing
