@@ -155,6 +155,19 @@ function clearSessionHistory(root, sessionId, reason) {
   return previous;
 }
 const gate1Artifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton', 'experienceStrategy', 'experienceQualityEvidence', 'domainModel', 'apiContract', 'dataContract', 'siteContract', 'functionalFreeze'];
+// Formal Existing evidence remains valid when the user refines the requested
+// product behavior.  Everything derived from that behavior must be rebuilt;
+// otherwise an approved Gate 1 receipt can silently describe an older scope.
+const gate1DerivedArtifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'gate1PresentationManifest', 'experienceStrategy', 'experienceQualityEvidence', 'domainModel', 'apiContract', 'dataContract', 'siteContract', 'functionalFreeze', 'changeScope'];
+const visualAndImplementationArtifacts = ['motionContract', 'motionEvidence', 'visualExecutionPlan', 'visualPlanPresentation', 'visualPlanPresentationManifest', 'visualSandboxFiles', 'runtimeDemo', 'runtimeSourceLock', 'runtimeVisualBaseline', 'runtimeMaterialization', 'runtimeMaterializationAudit', 'materializedAssets', 'materializedAssetsAudit', 'designCandidates', 'visualSourceManifest', 'visualReference', 'gate1VisualOutput', 'stitchFreeze', 'stitchParityEvidence', 'implementationParityEvidence', 'visualBundle', 'implementationMap', 'runtimeStateMatrix', 'verificationPlan', 'verificationBundle', 'pageDelta', 'dependencyLock'];
+function clearArtifactReferences(state, names) {
+  const cleared = [];
+  for (const name of names) {
+    if (state.artifacts?.[name]) cleared.push(name);
+    if (state.artifacts && name in state.artifacts) state.artifacts[name] = null;
+  }
+  return cleared;
+}
 function inheritGate1Context(source, target) {
   const sourceState = stateOf(source.runDir);
   const targetState = stateOf(target.runDir);
@@ -527,6 +540,47 @@ function executionDirective(state, runDir = null) {
     prohibitedUserPrompts: action === 'plan_visual' ? ['continue', 'generate-visual-plan', 'confirm-runtime-demo', 'poll-for-progress'] : ['continue', 'confirm-visual-plan', 'confirm-runtime-demo', 'poll-for-progress']
   };
 }
+function terminalResponseContract(state, runDir = null) {
+  const automatic = executionDirective(state, runDir);
+  if (automatic) return {
+    allowed: false,
+    allowedKinds: [],
+    exactLabels: [],
+    mustContinueAction: automatic.action,
+    recheckRouterBeforeEndingTurn: true,
+    forbiddenLabels: ['确认', '继续'],
+    forbiddenClaims: ['已开始改造', '已进入代码改造', '已进入实施冻结', '下一步将生成', '等待用户继续'],
+    reason: `the authorized ${automatic.action} chain has not produced its required user-visible result`
+  };
+  const decision = nextRequiredDecision(state);
+  if (decision) return {
+    allowed: true,
+    allowedKinds: ['delivery-route-choice'],
+    exactLabels: Object.values(decision.optionLabels),
+    recheckRouterBeforeEndingTurn: true,
+    requiredPresentation: 'runtime-demo-before-complete-route-choice',
+    forbiddenLabels: ['确认', '继续'],
+    reason: 'the registered runtime Demo must be shown with both complete route choices'
+  };
+  const interaction = userInteractionDirective(state, runDir);
+  if (interaction.confirmation) return {
+    allowed: true,
+    allowedKinds: ['named-confirmation'],
+    exactLabels: [interaction.confirmation.label],
+    recheckRouterBeforeEndingTurn: true,
+    requiredPresentation: interaction.confirmation.presentation?.renderPolicy,
+    forbiddenLabels: ['确认', '继续'],
+    reason: `only the complete ${interaction.confirmation.label} checkpoint may end this turn`
+  };
+  return {
+    allowed: false,
+    allowedKinds: [],
+    exactLabels: [],
+    recheckRouterBeforeEndingTurn: true,
+    forbiddenLabels: ['确认', '继续'],
+    reason: 'no generated and validated user decision is available'
+  };
+}
 function nextRequiredDecision(state) {
   if (state.lifecycle === 'active' && state.locks?.effectApproved && !state.locks?.stitchApproved && !state.locks?.stitchSkipped && !state.deliveryRoute) {
     return {
@@ -622,7 +676,7 @@ function routerState(root, run, sessionId) {
   const state = run.state || stateOf(run.runDir);
   const baseline = existingVisualBaselineStatus(run.runDir, state);
   const sessionContext = sessionContextStatus(root, sessionId);
-  return { schemaVersion: '3.3', apexVersion: apexVersion(), bridgeHash: hashFile(bridgeSource), projectId: projectId(root), projectRoot: root, runId: run.runId, runDir: run.runDir, sessionId: sessionId || null, sessionContext, track: state.track, scope: state.scope, authorization: state.authorization, lifecycle: state.lifecycle || 'active', phase: state.phase, gates: Object.fromEntries(Object.entries(state.gates || {}).map(([key, value]) => [key, value.status])), handoff: state.handoff || null, existingVisualBaseline: state.track === 'existing' ? baseline : null, allowedActions: allowedActions(state, run.runDir), nextRequiredAction: nextRequiredAction(state, run.runDir), nextRequiredDecision: nextRequiredDecision(state), responsePolicy: responsePolicy(state, run.runDir), executionDirective: executionDirective(state, run.runDir), capabilityExecution: capabilityExecutionDirective(), operatingConstraints: operatingConstraints(), userInteraction: userInteractionDirective(state, run.runDir), nextRequiredGate: ['cancelled', 'handed-off'].includes(state.lifecycle) ? null : state.gates?.gate1?.status !== 'passed' ? 'gate1' : state.gates?.gate2?.status !== 'passed' ? 'gate2' : state.gates?.gate3?.status !== 'passed' ? 'gate3' : null };
+  return { schemaVersion: '3.4', apexVersion: apexVersion(), bridgeHash: hashFile(bridgeSource), projectId: projectId(root), projectRoot: root, runId: run.runId, runDir: run.runDir, sessionId: sessionId || null, sessionContext, track: state.track, scope: state.scope, authorization: state.authorization, lifecycle: state.lifecycle || 'active', phase: state.phase, gates: Object.fromEntries(Object.entries(state.gates || {}).map(([key, value]) => [key, value.status])), handoff: state.handoff || null, existingVisualBaseline: state.track === 'existing' ? baseline : null, allowedActions: allowedActions(state, run.runDir), nextRequiredAction: nextRequiredAction(state, run.runDir), nextRequiredDecision: nextRequiredDecision(state), responsePolicy: responsePolicy(state, run.runDir), executionDirective: executionDirective(state, run.runDir), terminalResponseContract: terminalResponseContract(state, run.runDir), capabilityExecution: capabilityExecutionDirective(), operatingConstraints: operatingConstraints(), userInteraction: userInteractionDirective(state, run.runDir), nextRequiredGate: ['cancelled', 'handed-off'].includes(state.lifecycle) ? null : state.gates?.gate1?.status !== 'passed' ? 'gate1' : state.gates?.gate2?.status !== 'passed' ? 'gate2' : state.gates?.gate3?.status !== 'passed' ? 'gate3' : null };
 }
 function leaseDirectory(root) { return path.join(root, '.apex', 'locks', 'project-mutation.lock'); }
 function leaseFile(root) { return path.join(leaseDirectory(root), 'lease.json'); }
@@ -858,15 +912,33 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
   const state = stateOf(run.runDir);
   const allowed = ['gate1', 'visual-plan', 'visual', 'stitch', 'implementation'];
   if (!allowed.includes(checkpoint) || !['visible', 'implementation-only', 'non-baseline'].includes(impact) || !reason) fail('revision requires gate1|visual-plan|visual|stitch|implementation, visible|implementation-only|non-baseline, and a reason');
-  if (checkpoint === 'gate1' && state.gates?.gate1?.status === 'passed') fail('Gate 1 is already confirmed; use restart for a requirements or copy change');
   if (['visual-plan', 'visual'].includes(checkpoint) && state.gates?.gate1?.status !== 'passed') fail('visual prompt revision requires Gate 1');
   if (checkpoint === 'stitch' && !state.locks?.effectApproved) fail('Stitch prompt revision requires confirmed effect image');
   if (checkpoint === 'implementation' && !state.locks?.stitchCurrent && !state.locks?.stitchSkipped) fail('implementation prompt revision requires sealed or explicitly skipped Stitch');
   const gate2Open = state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed === true;
   if (impact === 'non-baseline') {
     appendEvent(run.runDir, { type: 'prompt-revision-no-baseline-change', sessionId, checkpoint, reason, preserved: ['approvals', 'gate2', 'implementation-authority'] });
+  } else if (checkpoint === 'gate1') {
+    const previouslyApproved = state.gates?.gate1?.status === 'passed';
+    const invalidated = invalidateVisualIntermediates(run.runDir, 'prompt-revision-gate1');
+    const cleared = clearArtifactReferences(state, [...gate1DerivedArtifacts, ...visualAndImplementationArtifacts]);
+    state.gates.gate1 = { status: previouslyApproved ? 'revoked' : 'pending', at: now(), evidence: [`prompt-revision:gate1`, reason] };
+    state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:gate1'] };
+    state.gates.gate3 = { status: 'pending', at: null, evidence: [] };
+    state.locks.requirementsApproved = false;
+    state.locks.visualPlanApproved = false;
+    state.locks.effectApproved = false;
+    state.locks.visualApproved = false;
+    state.locks.stitchApproved = false;
+    state.locks.stitchSkipped = false;
+    state.locks.stitchCurrent = false;
+    state.locks.implementationApproved = false;
+    state.locks.implementationAllowed = false;
+    state.deliveryRoute = null;
+    state.phase = state.track === 'greenfield' ? 'G-01 PRODUCT' : 'E-05 IMPACT';
+    appendEvent(run.runDir, { type: 'gate1-reopened-for-material-revision', sessionId, reason, previouslyApproved, preserved: state.track === 'existing' ? ['projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton'] : [], cleared, invalidated });
   } else if (checkpoint === 'visual-plan' || checkpoint === 'visual' || (checkpoint === 'implementation' && impact === 'visible')) {
-    const invalidated = invalidateVisualIntermediates(run.runDir, `prompt-revision-${checkpoint}`); state.locks.visualPlanApproved = false; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: [`prompt-revision:${checkpoint}`] }; for (const artifact of ['visualExecutionPlan', 'designCandidates', 'visualReference', 'gate1VisualOutput', 'stitchFreeze', 'stitchParityEvidence', 'visualBundle', 'implementationMap']) state.artifacts[artifact] = null; state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; appendEvent(run.runDir, { type: 'visual-reset', reason: `prompt-revision:${checkpoint}`, invalidated });
+    const invalidated = invalidateVisualIntermediates(run.runDir, `prompt-revision-${checkpoint}`); state.locks.visualPlanApproved = false; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.gates.gate2 = { status: 'revoked', at: now(), evidence: [`prompt-revision:${checkpoint}`] }; const cleared = clearArtifactReferences(state, visualAndImplementationArtifacts); state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; appendEvent(run.runDir, { type: 'visual-reset', reason: `prompt-revision:${checkpoint}`, invalidated, cleared });
   } else if (checkpoint === 'stitch') {
     state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:stitch'] }; state.phase = state.track === 'greenfield' ? 'G-06 SYNC_FREEZE' : 'E-08 SYNC_FREEZE';
   } else if (checkpoint === 'implementation' && !gate2Open) {

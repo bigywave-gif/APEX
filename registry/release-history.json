@@ -1324,6 +1324,18 @@
         "scripts/portable-install-contract-test.mjs"
       ],
       "releasedAt": "2026-08-11T10:49:56.082Z"
+    },
+    {
+      "from": "4.16.1",
+      "to": "4.16.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-11T14:44:07.166Z"
     }
   ]
 }

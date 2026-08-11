@@ -1,5 +1,5 @@
 name: APEX User-Intent-Driven Full-Stack Delivery System
-version: 4.16.1
+version: 4.16.2
 type: agentic-delivery-system
 scope:
   - frontend

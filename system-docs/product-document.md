@@ -5,7 +5,7 @@
 - 产品名称：APEX Agentic Delivery System
 - 正式简称：APEX
 - 展开名：Agentic Product EXperience
-- 当前版本：4.16.1
+- 当前版本：4.16.2
 - 文档类型：系统级产品主文档
 - 适用对象：产品、设计、研发、交付、平台治理人员
 
