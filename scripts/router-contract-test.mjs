@@ -16,7 +16,7 @@ const runController = path.join(apexRoot, 'scripts', 'apex-run.mjs');
 const baselineCollector = path.join(apexRoot, 'scripts', 'baseline-collector.mjs');
 const projectIntake = path.join(apexRoot, 'scripts', 'project-intake.mjs');
 const contractRecorder = path.join(apexRoot, 'scripts', 'contract-recorder.mjs');
-const core = '/Users/fredyw/.codex/apex/APEX';
+const core = path.resolve(path.join(process.env.CODEX_HOME || path.join(process.env.HOME || '', '.codex'), 'apex', 'APEX'));
 function run(script, args, env = {}) { return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { ...process.env, ...env } }); }
 function expect(result, message) { if (result.status !== 0) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); return JSON.parse(result.stdout); }
 function reject(result, fragment, message) { const output = `${result.stderr || ''}\n${result.stdout || ''}`; if (result.status === 0 || !output.includes(fragment)) throw new Error(`${message}: ${output.trim()}`); }

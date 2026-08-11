@@ -35,7 +35,7 @@ checkpoints/
 Router 初始化时还会创建项目级 `.apex/project.json`（项目身份）、run 内
 `events.ndjson`（调用审计）、`artifacts/`、`approvals/`、`evidence/` 和
 `locks/`。确认点跳过决策写入 `decisions/skip-<checkpoint>-<decision-id>.json`，
-不会覆盖既有工件或批准回执。这些均为目标项目运行产物；`/Users/fredyw/.codex/apex/APEX` 只能
+不会覆盖既有工件或批准回执。这些均为目标项目运行产物；`~/.codex/apex/APEX` 只能
 保存 APEX Core、Schema、脚本、Skill、规范和系统自身正式输出。
 
 文件路径必须写入 `state.json.artifacts`。敏感数据、API Key、真实用户数据和第三方素材副本不得进入运行目录或版本库。

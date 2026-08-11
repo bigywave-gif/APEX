@@ -10,13 +10,17 @@
 
 - `README.md`
 - `INDEX.md`
+- `LICENSE`
 - `manifest.yaml`
+- `package.json`
 - `system-docs/`
 - `core/`
 - `runtime/`
 - `registry/`
 - `references/`
 - `connectors/`
+- `scripts/`
+- `skills/`
 
 可选包含：
 
@@ -42,12 +46,12 @@
 
 ### 项目内迁移包
 
-具体业务项目的 Adapter 与参考实现只能在获得相应项目授权后随项目私有迁移，不进入 APEX 通用公开包。
+具体项目的私有 Adapter 应由项目单独保存，不进入 APEX 通用发布包。
 
 ## 接入新项目步骤
 
-1. 复制 `apex/`
-2. 阅读 [README.md](https://github.com/bigywave-gif/APEX/blob/main/README.md) 与 [INDEX.md](https://github.com/bigywave-gif/APEX/blob/main/INDEX.md)
+1. 运行 `npm run install:apex`，再运行 `npm run preflight`
+2. 阅读 [README.md](README.md) 与 [INDEX.md](INDEX.md)
 3. 选择合适的 connector
 4. 基于 `adapters/examples/` 新建项目 adapter
 5. 映射产品、设计、代码入口、验收链路
@@ -56,7 +60,7 @@
 
 发布前至少完成：
 
-1. 运行 [release-checklist.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/release-checklist.md)
+1. 运行 [release-checklist.md](core/runtime/release-checklist.md)
 2. 检查第三方来源与 adopted 规则是否一致
 3. 检查 manifest 是否覆盖当前入口
 4. 检查 examples 是否仍可用
@@ -71,19 +75,22 @@ apex/
   INDEX.md
   PACKAGING.md
   manifest.yaml
+  package.json
   system-docs/
   core/
   runtime/
   registry/
   references/
   connectors/
+  scripts/
+  skills/
   adapters/
 ```
 
 其中：
 
 - `adapters/examples/` 适合一起发布
-- 具体业务项目 Adapter 默认排除，仅随已授权的项目私有迁移
+- 具体项目 Adapter 不进入通用包
 
 ## 不应混入通用包的内容
 
@@ -102,3 +109,4 @@ apex/
 2. 新建项目 `adapter`
 3. 更新项目入口文档，指向 `apex/README.md`
 4. 用一条真实需求跑完 `APEX -> Gate 1 -> Gate 2 -> Gate 3`
+5. 执行 `npm test`，证明跨用户安装与 Router 合同均通过

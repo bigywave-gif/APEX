@@ -11,7 +11,7 @@
 
 当前技能真相源：
 
-- [manifest.yaml](https://github.com/bigywave-gif/APEX/blob/main/registry/skills/manifest.yaml)
+- [manifest.yaml](manifest.yaml)
 
 当前默认设计契约 skill：
 
@@ -23,7 +23,7 @@
 补充说明：
 
 - 当前 APEX 已采用一批更稳定的开源增强层底座，见：
-  - [../references/adopted/adopted-design-rules.md](https://github.com/bigywave-gif/APEX/blob/main/references/adopted/adopted-design-rules.md)
-  - [../references/external/source-review-records.md](https://github.com/bigywave-gif/APEX/blob/main/references/external/source-review-records.md)
+  - [../references/adopted/adopted-design-rules.md](../../references/adopted/adopted-design-rules.md)
+  - [../references/external/source-review-records.md](../../references/external/source-review-records.md)
 - 这意味着 skill 层不再单独承担全部设计、图标、动效、无障碍和组件文档化职责
 - skill 负责执行强化，增强层底座负责提供更稳定的规范参考

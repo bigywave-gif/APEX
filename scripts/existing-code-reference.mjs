@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes the complete code closure for the Existing change scope, not the entire site. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }

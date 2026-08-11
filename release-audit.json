@@ -1,17 +1,17 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-08-11T04:06:12.964Z",
+  "auditedAt": "2026-08-11T12:12:42.535Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"bumped\",\"from\":\"4.14.0\",\"version\":\"4.15.0\",\"level\":\"minor\",\"reason\":\"materially extended APEX runtime capability or contract\",\"changed\":[\"scripts/apex-validate.mjs\",\"scripts/scope-boundary-contract-test.mjs\",\"scripts/scope-boundary.mjs\",\"scripts/stability-evidence.mjs\"]}"
+      "detail": "{\"status\":\"current\",\"version\":\"4.16.1\",\"changed\":[]}"
     },
     {
       "id": "global-bridge-published",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"d5631319d1b4926596431b1154b0301fb4df092d181cb68a364d9d4f02abf55f\"}"
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"2b7f973a9869e082817ae8798df2dec14582817875750df56f833e0985f9fff4\"}"
     },
     {
       "id": "manifest-semver",
@@ -26,7 +26,7 @@
     {
       "id": "manifest-entrypoints",
       "status": "passed",
-      "detail": "133 manifest paths present"
+      "detail": "139 manifest paths present"
     },
     {
       "id": "global-bridge-present",
@@ -46,7 +46,7 @@
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.15.0 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.16.1 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",
@@ -124,12 +124,27 @@
       "detail": "no direct guarded runtime commands documented"
     },
     {
+      "id": "documentation-links",
+      "status": "passed",
+      "detail": "116 Markdown files have resolvable local links"
+    },
+    {
+      "id": "public-documentation-portability",
+      "status": "passed",
+      "detail": "public documentation contains no maintainer path or private adapter reference"
+    },
+    {
       "id": "syntax:adapter-coverage.mjs",
       "status": "passed",
       "detail": "ok"
     },
     {
       "id": "syntax:apex-action.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:apex-paths.mjs",
       "status": "passed",
       "detail": "ok"
     },
@@ -239,12 +254,27 @@
       "detail": "ok"
     },
     {
+      "id": "syntax:install.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
       "id": "syntax:motion-capability.mjs",
       "status": "passed",
       "detail": "ok"
     },
     {
       "id": "syntax:motion-contract.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:portable-install-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:preflight.mjs",
       "status": "passed",
       "detail": "ok"
     },
@@ -647,6 +677,41 @@
       "id": "scope-boundary-contract",
       "status": "passed",
       "detail": "{\"status\":\"passed\",\"cases\":[\"localized-schema\",\"affected-node-closure\",\"source-selection-closure\",\"protected-file-hash\",\"protected-visual-zero-diff\"]}"
+    },
+    {
+      "id": "portable-install-contract",
+      "status": "passed",
+      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":44}"
+    },
+    {
+      "id": "package-manifest",
+      "status": "passed",
+      "detail": "package.json must expose install, preflight, test and release audit commands"
+    },
+    {
+      "id": "executable-preflight",
+      "status": "passed",
+      "detail": "scripts/preflight.mjs must be present"
+    },
+    {
+      "id": "host-skill-dependencies",
+      "status": "passed",
+      "detail": "required host Skills must have machine-readable sources and install commands"
+    },
+    {
+      "id": "resolver-support",
+      "status": "passed",
+      "detail": "resolver support levels must be machine-readable"
+    },
+    {
+      "id": "license-declaration",
+      "status": "passed",
+      "detail": "public distribution must declare its license before release"
+    },
+    {
+      "id": "portable-script-paths",
+      "status": "passed",
+      "detail": "no maintainer-specific script paths"
     }
   ]
 }

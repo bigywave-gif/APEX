@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes the pre-image visual, motion, and dependency plan for user review. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,6 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { assertExistingPlanScope } from './scope-boundary.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 function die(message) { console.error(`Visual execution plan failed: ${message}`); process.exit(1); }
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
 function write(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }

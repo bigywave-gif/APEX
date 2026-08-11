@@ -509,6 +509,6 @@
 
 ## 相关链接
 
-- [continuous-update-policy.md](https://github.com/bigywave-gif/APEX/blob/main/references/external/continuous-update-policy.md)
-- [sources.yaml](https://github.com/bigywave-gif/APEX/blob/main/references/external/sources.yaml)
-- [adopted-design-rules.md](https://github.com/bigywave-gif/APEX/blob/main/references/adopted/adopted-design-rules.md)
+- [continuous-update-policy.md](continuous-update-policy.md)
+- [sources.yaml](sources.yaml)
+- [adopted-design-rules.md](../adopted/adopted-design-rules.md)

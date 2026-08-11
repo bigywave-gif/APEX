@@ -10,7 +10,7 @@
 
 ### APEX 当前完整规范（以 manifest.version 为准）
 
-- [apex-3.0-complete-specification.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/apex-3.0-complete-specification.md)
+- [apex-3.0-complete-specification.md](apex-3.0-complete-specification.md)
 
 说明：
 
@@ -19,7 +19,7 @@
 
 ### 产品文档
 
-- [product-document.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/product-document.md)
+- [product-document.md](product-document.md)
 
 说明：
 
@@ -27,7 +27,7 @@
 
 ### 技术架构文档
 
-- [technical-architecture.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/technical-architecture.md)
+- [technical-architecture.md](technical-architecture.md)
 
 说明：
 
@@ -36,7 +36,7 @@
 
 ### 部署与接入文档
 
-- [deployment-and-integration.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/deployment-and-integration.md)
+- [deployment-and-integration.md](deployment-and-integration.md)
 
 说明：
 
@@ -48,9 +48,9 @@
 
 现有对外契约能力主要体现在：
 
-- 调用协议：[../core/runtime/invocation-spec.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/invocation-spec.md)
-- 恢复协议：[../core/runtime/recovery-spec.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/recovery-spec.md)
-- 准入规则：[../core/policies/admission-rules.md](https://github.com/bigywave-gif/APEX/blob/main/core/policies/admission-rules.md)
+- 调用协议：[../core/runtime/invocation-spec.md](../core/runtime/invocation-spec.md)
+- 恢复协议：[../core/runtime/recovery-spec.md](../core/runtime/recovery-spec.md)
+- 准入规则：[../core/policies/admission-rules.md](../core/policies/admission-rules.md)
 
 这些协议仍然是底层真相源，但由于它们属于核心运行规则，继续保留在 `core/` 中，不抽成单独“接口文档”类目。
 
@@ -58,22 +58,22 @@
 
 ### 首次理解 APEX
 
-1. [product-document.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/product-document.md)
-2. [technical-architecture.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/technical-architecture.md)
-3. [deployment-and-integration.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/deployment-and-integration.md)
+1. [product-document.md](product-document.md)
+2. [technical-architecture.md](technical-architecture.md)
+3. [deployment-and-integration.md](deployment-and-integration.md)
 
 ### 准备迁移到新项目
 
-1. [deployment-and-integration.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/deployment-and-integration.md)
-2. [../connectors/connector-selection.md](https://github.com/bigywave-gif/APEX/blob/main/connectors/connector-selection.md)
-3. [../adapters/README.md](https://github.com/bigywave-gif/APEX/blob/main/adapters/README.md)
+1. [deployment-and-integration.md](deployment-and-integration.md)
+2. [../connectors/connector-selection.md](../connectors/connector-selection.md)
+3. [../adapters/README.md](../adapters/README.md)
 
 ### 准备修改核心规则
 
-1. [technical-architecture.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/technical-architecture.md)
-2. [../core/framework/APEX.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/APEX.md)
-3. [../core/framework/state-machine.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/state-machine.md)
-4. [../core/framework/gates.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/gates.md)
+1. [technical-architecture.md](technical-architecture.md)
+2. [../core/framework/APEX.md](../core/framework/APEX.md)
+3. [../core/framework/state-machine.md](../core/framework/state-machine.md)
+4. [../core/framework/gates.md](../core/framework/gates.md)
 
 ## 文档层边界
 

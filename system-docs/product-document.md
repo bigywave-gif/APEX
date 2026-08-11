@@ -5,7 +5,7 @@
 - 产品名称：APEX Agentic Delivery System
 - 正式简称：APEX
 - 展开名：Agentic Product EXperience
-- 当前版本：4.15.0
+- 当前版本：4.16.1
 - 文档类型：系统级产品主文档
 - 适用对象：产品、设计、研发、交付、平台治理人员
 
@@ -277,7 +277,7 @@ APEX 支持持续更新，但更新只允许作用于增强层：
 
 ## 交叉引用
 
-- [README.md](https://github.com/bigywave-gif/APEX/blob/main/README.md)
-- [technical-architecture.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/technical-architecture.md)
-- [deployment-and-integration.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/deployment-and-integration.md)
-- [../core/framework/APEX.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/APEX.md)
+- [README.md](../README.md)
+- [technical-architecture.md](technical-architecture.md)
+- [deployment-and-integration.md](deployment-and-integration.md)
+- [../core/framework/APEX.md](../core/framework/APEX.md)

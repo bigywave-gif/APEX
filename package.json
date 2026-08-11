@@ -1,0 +1,19 @@
+{
+  "name": "@bigywave/apex",
+  "version": "4.16.1",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "APEX user-intent-driven full-stack delivery system",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "install:apex": "node scripts/install.mjs",
+    "preflight": "node scripts/preflight.mjs",
+    "status": "node scripts/preflight.mjs --json",
+    "test": "node scripts/portable-install-contract-test.mjs",
+    "test:router": "node scripts/router-contract-test.mjs",
+    "release:audit": "node scripts/release-audit.mjs"
+  }
+}

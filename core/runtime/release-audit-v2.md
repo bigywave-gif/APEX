@@ -12,7 +12,7 @@
 - `asset-resolver.mjs`已通过npm官方Registry真实解析测试，能锁定版本、许可证、integrity和Peer Dependencies。
 - Bundle编译、Proof、八类验证、Gate 3、Checkpoint与恢复撤销已完成端到端正反测试。
 - Connector支持Stitch可编辑画布、最新态同步、内容指纹冻结和局部撤销。
-- 通用 Adapter 示例包含代码入口、页面族、运行方式和验收映射；具体业务项目 Adapter 仅在授权后私有验证。
+- Student System Adapter包含真实代码、运行时、页面族、重启和五层验收映射。
 
 ## 外部运行依赖
 

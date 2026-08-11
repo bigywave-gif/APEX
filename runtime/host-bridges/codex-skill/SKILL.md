@@ -7,9 +7,9 @@ description: Use for every frontend, UI, visual-design, UX, interaction, page-vi
 
 ## 唯一主目录
 
-所有新建、继续和恢复中的 Codex session 只允许使用：
+所有新建、继续和恢复中的 Codex session 只允许使用当前用户的 Codex 主目录：
 
-`/Users/fredyw/.codex/apex/APEX`
+`<CODEX_HOME>/apex/APEX`；未设置 `CODEX_HOME` 时固定为 `$HOME/.codex/apex/APEX`，即默认 `~/.codex/apex/APEX`。
 
 不得将工作区、项目内或其他目录中的 `APEX/` 副本作为 APEX 运行根、规则真相源或升级目标。若该目录不可读或其 `manifest.yaml` 不是 4.x，停止并报告主目录问题；不得回退到副本。
 
@@ -17,17 +17,18 @@ description: Use for every frontend, UI, visual-design, UX, interaction, page-vi
 
 ## 主目录识别约束
 
-当用户询问“APEX 项目”“当前 APEX 版本”或 APEX 本体的需求、状态、审计、发布与能力时，默认审查对象是唯一主目录 `/Users/fredyw/.codex/apex/APEX`，而非当前终端工作区。只有用户明确提供了另一个业务项目路径、仓库或部署地址时，才将其视为 APEX 所服务的目标项目。
+当用户询问“APEX 项目”“当前 APEX 版本”或 APEX 本体的需求、状态、审计、发布与能力时，默认审查对象是上述当前用户的唯一主目录，而非当前终端工作区。只有用户明确提供了另一个业务项目路径、仓库或部署地址时，才将其视为 APEX 所服务的目标项目。
 
 若当前工作区为空、仅含 `.apex/` 运行产物，或未包含可识别的业务项目入口，不得据此判断 APEX 本体不存在、不可审计或未满足需求；必须先检查主目录中的 `manifest.yaml`、系统文档与 `release-audit.json`。APEX Core 本身不得作为 Router 的项目根，因为项目运行产物禁止写入 Core；对 Core 的审查应采用只读发布审计与版本检查。
 
 ## 默认执行顺序
 
-1. 读取 `/Users/fredyw/.codex/apex/APEX/manifest.yaml`。
+1. 解析当前用户的 `<CODEX_HOME>`，读取 `<CODEX_HOME>/apex/APEX/manifest.yaml`。
 2. 验证其 `version` 为 4.x。
-3. 读取 `/Users/fredyw/.codex/apex/APEX/runtime/preflight.md`。
-4. 读取 `/Users/fredyw/.codex/apex/APEX/core/runtime/invocation-spec.md`。
-5. 通过 Preflight 后，先向用户说明 APEX 会带来的 Gate、工件与确认开销；仅在用户明确确认调用 APEX 后，才调用 `/Users/fredyw/.codex/apex/APEX/scripts/apex-router.mjs` 创建或恢复该项目的当前 APEX 运行态。
+3. 执行 `node <CODEX_HOME>/apex/APEX/scripts/preflight.mjs`；不得用文字检查冒充可执行预检。
+4. 读取 `<CODEX_HOME>/apex/APEX/runtime/preflight.md`。
+5. 读取 `<CODEX_HOME>/apex/APEX/core/runtime/invocation-spec.md`。
+6. 通过 Preflight 后，先向用户说明 APEX 会带来的 Gate、工件与确认开销；仅在用户明确确认调用 APEX 后，才调用 `<CODEX_HOME>/apex/APEX/scripts/apex-router.mjs` 创建或恢复该项目的当前 APEX 运行态。
 
 每次 APEX Router 调用都会先从主目录自动发布本 Bridge 到全局 Skill，并校验两者哈希
 完全同步；发布失败时 Router 必须阻断，不得允许已发布文件本身处于旧版本。

@@ -1,5 +1,7 @@
 # APEX 在线素材能力契约
 
+Resolver 的可执行状态以 `resolver-support.json` 为准。候选池中的 `skill`、`official-site`、`api` 或 `mcp` 标签不是“已经可调用”的证明：`skill` 和 `official-site` 仅作发现/决策输入；`api` 与 `mcp` 只有在当前宿主真实注册相应适配器并返回资源 ID、精确版本、许可与完整性后才可锁定。核心 `asset-resolver.mjs` 只直接执行 `npm` 与 `url`，其他类型无适配器时必须失败关闭。
+
 ## 目的
 
 APEX 不把第三方素材复制进本地包，而是维护可审计、可替换、可由 skill / MCP / API / 包管理器 / 官方 CDN 调用的在线能力注册表。本契约保证 Stitch、其他视觉生成器与 Implement 消费同一素材身份和参数，而不是分别寻找“相似素材”。

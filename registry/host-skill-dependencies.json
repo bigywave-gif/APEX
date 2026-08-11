@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "policy": "required-host-skills-must-be-present-and-readable-before-formal-apex-run",
+  "skills": [
+    {
+      "name": "google-design-md",
+      "role": "design-contract-baseline",
+      "required": true,
+      "source": "apex-bundled-bridge",
+      "installFrom": "skills/google-design-md",
+      "license": "APEX-project-license",
+      "upstreamReference": "https://github.com/google-labs-code/design.md"
+    },
+    {
+      "name": "impeccable",
+      "role": "structure-and-product-grade-baseline",
+      "required": true,
+      "source": "github",
+      "repository": "pbakaus/impeccable",
+      "minimumVersion": "3.8.0",
+      "license": "Apache-2.0",
+      "installCommand": "npx skills add pbakaus/impeccable --all -g -y"
+    },
+    {
+      "name": "ui-ux-pro-max-skill",
+      "aliases": ["ui-ux-pro-max"],
+      "role": "page-level-visual-organization",
+      "required": true,
+      "source": "github",
+      "repository": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "minimumVersion": "2.5.0",
+      "license": "MIT",
+      "installCommand": "npx skills add nextlevelbuilder/ui-ux-pro-max-skill --all -g -y"
+    },
+    {
+      "name": "doc-coauthoring",
+      "role": "freeform-feedback-preference-extraction",
+      "required": true,
+      "source": "github",
+      "repository": "anthropics/skills",
+      "license": "upstream-terms-apply",
+      "installCommand": "npx skills add anthropics/skills --skill doc-coauthoring -g -y"
+    }
+  ]
+}

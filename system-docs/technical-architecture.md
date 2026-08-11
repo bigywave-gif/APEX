@@ -3,7 +3,7 @@
 ## 文档登记
 
 - 文档名称：APEX 技术架构文档
-- 当前版本：4.15.0
+- 当前版本：4.16.1
 - 文档类型：系统级技术架构主文档
 - 适用对象：架构、研发、平台治理、交付负责人
 
@@ -99,7 +99,7 @@ flowchart LR
 ```
 
 Router 是项目 run、session、阶段、审批和动作授权的唯一代码化入口。每次调用先把
-`/Users/fredyw/.codex/apex/APEX` 中的 Bridge 自动发布至全局 `apex` Skill，再校验哈希。
+`~/.codex/apex/APEX` 中的 Bridge 自动发布至全局 `apex` Skill，再校验哈希。
 新 session 必须新建 run；同一 session 只能恢复自己的 run；项目级 mutation lease 防止不同
 run 同时修改同一项目。所有项目中间产物保存在 `<project-root>/.apex/`，不进入 APEX Core。
 
@@ -374,9 +374,9 @@ Adapter 不能把整套 Core 复制一遍，否则后续会失去统一升级能
 
 ## 交叉引用
 
-- [README.md](https://github.com/bigywave-gif/APEX/blob/main/README.md)
-- [product-document.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/product-document.md)
-- [deployment-and-integration.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/deployment-and-integration.md)
-- [../core/framework/APEX.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/APEX.md)
-- [../core/framework/state-machine.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/state-machine.md)
-- [../core/framework/gates.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/gates.md)
+- [README.md](../README.md)
+- [product-document.md](product-document.md)
+- [deployment-and-integration.md](deployment-and-integration.md)
+- [../core/framework/APEX.md](../core/framework/APEX.md)
+- [../core/framework/state-machine.md](../core/framework/state-machine.md)
+- [../core/framework/gates.md](../core/framework/gates.md)

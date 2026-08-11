@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 /** Creates one detached Git worktree per APEX run without moving run artifacts. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 function die(message) { console.error(`APEX workspace failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 const [command, runArg, projectArg] = process.argv.slice(2);

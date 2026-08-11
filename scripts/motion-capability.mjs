@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes the motion capabilities that the visual stage is allowed to use. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,6 @@ import { spawnSync } from 'node:child_process';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage']);
 const supported = new Set(['motion', 'framer-motion', 'gsap', 'lottie-web', '@rive-app/canvas', '@formkit/auto-animate', 'animejs', 'three', '@react-three/fiber', '@react-three/drei', '@babylonjs/core', '@babylonjs/loaders']);
 function die(message) { console.error(`Motion capability failed: ${message}`); process.exit(1); }

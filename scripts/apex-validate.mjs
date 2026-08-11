@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,7 +8,6 @@ import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schemas = path.join(root, 'core/runtime/schemas');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 
 function fail(message) {
   console.error(`APEX validation failed: ${message}`);

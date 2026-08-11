@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 const endpoint = process.env.STITCH_HOST || 'https://stitch.googleapis.com/mcp';
 const RPC_TIMEOUT_MS = Number(process.env.APEX_STITCH_RPC_TIMEOUT_MS || 20000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.APEX_STITCH_DOWNLOAD_TIMEOUT_MS || 15000);

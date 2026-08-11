@@ -10,11 +10,11 @@
 
 新项目或新宿主接入 APEX 时，至少同时阅读：
 
-1. [apex/README.md](https://github.com/bigywave-gif/APEX/blob/main/README.md)
-2. [apex/core/runtime/invocation-spec.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/invocation-spec.md)
-3. [apex/core/policies/admission-rules.md](https://github.com/bigywave-gif/APEX/blob/main/core/policies/admission-rules.md)
-4. [apex/core/policies/priority-model.md](https://github.com/bigywave-gif/APEX/blob/main/core/policies/priority-model.md)
-5. [apex/core/runtime/tooling-matrix.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/tooling-matrix.md)
+1. [apex/README.md](../../README.md)
+2. [apex/core/runtime/invocation-spec.md](invocation-spec.md)
+3. [apex/core/policies/admission-rules.md](../policies/admission-rules.md)
+4. [apex/core/policies/priority-model.md](../policies/priority-model.md)
+5. [apex/core/runtime/tooling-matrix.md](tooling-matrix.md)
 6. 本文件
 
 ## 宿主必须提供的基础能力
@@ -40,7 +40,7 @@
 ## Skill 治理
 
 - Skill 只能作为 APEX 的增强层，不能替代状态机、确认门和最终裁决
-- Skill 是否启用，以 [apex/registry/skills/manifest.yaml](https://github.com/bigywave-gif/APEX/blob/main/registry/skills/manifest.yaml) 与 [apex/registry/skills/activation-matrix.md](https://github.com/bigywave-gif/APEX/blob/main/registry/skills/activation-matrix.md) 为准
+- Skill 是否启用，以 [apex/registry/skills/manifest.yaml](../../registry/skills/manifest.yaml) 与 [apex/registry/skills/activation-matrix.md](../../registry/skills/activation-matrix.md) 为准
 - 未完成结构确认前，不启用审美强化和动效强化类 skill
 - 未进入实现前，不让工程纪律类 skill 主导视觉判断
 
@@ -59,7 +59,7 @@
 - 插件 / 工具只解决能力问题，不负责流程裁决
 - 任何插件能力都不能绕过 APEX 准入、步骤锁和确认门
 - 插件不可用时，必须显式走降级策略，不能假装已验收
-- 是否需要某类插件能力，以 [apex/core/runtime/tooling-matrix.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/tooling-matrix.md) 为准
+- 是否需要某类插件能力，以 [apex/core/runtime/tooling-matrix.md](tooling-matrix.md) 为准
 
 ## Connector 治理
 

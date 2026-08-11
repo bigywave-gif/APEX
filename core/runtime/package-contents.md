@@ -8,6 +8,7 @@
 - `INDEX.md`
 - `PACKAGING.md`
 - `manifest.yaml`
+- `package.json`
 - `system-docs/`
 - `core/`
 - `references/`
@@ -15,6 +16,10 @@
 - `skills/`
 - `connectors/`
 - `scripts/apex-validate.mjs`
+- `scripts/apex-paths.mjs`
+- `scripts/install.mjs`
+- `scripts/preflight.mjs`
+- `scripts/portable-install-contract-test.mjs`
 - `scripts/apex-run.mjs`
 - `scripts/stitch-sync.mjs`
 - `scripts/visual-reference-compiler.mjs`
@@ -42,10 +47,11 @@
 ## 推荐附带
 
 - `adapters/examples/`
+- 至少一个匿名、可公开、可执行的跨用户安装测试夹具
 
-## 项目专属附带
+## 项目专属内容
 
-具体业务项目的 Adapter 与参考实现仅在获得相应项目授权后随项目私有迁移，不进入通用公开包。
+具体项目 Adapter、运行态和业务代码由项目自身保存，不进入 APEX 通用安装包。
 
 ## 不建议放入通用包的内容
 

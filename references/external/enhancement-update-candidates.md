@@ -258,6 +258,6 @@
 
 ## 相关链接
 
-- [latest-best-capability-assessment.md](https://github.com/bigywave-gif/APEX/blob/main/references/external/latest-best-capability-assessment.md)
-- [continuous-update-policy.md](https://github.com/bigywave-gif/APEX/blob/main/references/external/continuous-update-policy.md)
-- [sources.yaml](https://github.com/bigywave-gif/APEX/blob/main/references/external/sources.yaml)
+- [latest-best-capability-assessment.md](latest-best-capability-assessment.md)
+- [continuous-update-policy.md](continuous-update-policy.md)
+- [sources.yaml](sources.yaml)

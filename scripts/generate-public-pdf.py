@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import os
 import shutil
 import subprocess
 import sys
@@ -28,8 +29,32 @@ from reportlab.platypus import (
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "manifest.yaml"
 OUTPUT = ROOT / "output/pdf/APEX-3.0-Product-Design-and-Technical-Architecture.pdf"
-DIAGRAM_FONT = "/System/Library/Fonts/Hiragino Sans GB.ttc"
-TEXT_FONT = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+def first_font(env_name: str, candidates: list[str]) -> str:
+    requested = os.environ.get(env_name)
+    if requested:
+        if Path(requested).is_file():
+            return requested
+        raise RuntimeError(f"{env_name} does not point to a readable font: {requested}")
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            return candidate
+    raise RuntimeError(
+        f"No portable CJK font found for {env_name}; set {env_name} to a readable TTF/TTC/OTF file"
+    )
+
+
+DIAGRAM_FONT = first_font("APEX_DIAGRAM_FONT", [
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+])
+TEXT_FONT = first_font("APEX_TEXT_FONT", [
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+])
 TEXT_FONT_NAME = "APEXText"
 
 
@@ -93,8 +118,8 @@ def table(rows, widths, styles, header=True):
 
 def workflow_visual(styles):
     rows = [
-        ["用户短需求", "轨道判断", "Gate 1", "方案确认后直接生成效果图"],
-        ["意图提炼", "Greenfield / Existing", "范围与合同确认", "效果图登记后选择 Stitch / 直接代码"],
+        ["用户短需求", "轨道判断", "Gate 1", "方案确认后直接生成运行时 Demo"],
+        ["意图提炼", "Greenfield / Existing", "范围与合同确认", "运行时 Demo登记后选择 Stitch / 直接代码"],
         ["Gate 2", "前后端实施", "Proof / 回归", "Gate 3"],
         ["视觉冻结", "Implementation Map", "真实运行证据", "Verification Bundle"],
     ]
@@ -130,7 +155,7 @@ def architecture_visual(styles):
 def prototype_visual(styles):
     rows = [
         ["需求导演台", "视觉冻结台", "交付验收台"],
-        ["用户意图：专业、高级的成长报告<br/>已提炼：目标 / 假设 / 风险<br/>待确认：业务范围与质量线<br/>当前 Gate：Gate 1", "Visual：方案确认后直接出图<br/>效果图登记后：Stitch 或直接代码<br/>Stitch：单独生成与单独确认<br/>当前 Gate：Gate 2", "实现映射：组件 / API / 权限<br/>真实证据：浏览器 / 契约 / 性能<br/>回归状态：页面家族通过<br/>当前 Gate：Gate 3"],
+        ["用户意图：专业、高级的成长报告<br/>已提炼：目标 / 假设 / 风险<br/>待确认：业务范围与质量线<br/>当前 Gate：Gate 1", "Visual：方案确认后自动生成 Demo<br/>Demo 登记后：Stitch 或直接代码<br/>Stitch：单独生成与单独确认<br/>当前阶段：视觉冻结", "实现映射：组件 / API / 权限<br/>真实证据：浏览器 / 契约 / 性能<br/>回归状态：页面家族通过<br/>当前 Gate：Gate 3"],
         ["下一步：受控推进", "下一步：受控推进", "下一步：受控推进"],
     ]
     visual = Table([[p(cell, styles["table"]) for cell in row] for row in rows], colWidths=[56.7*mm]*3, rowHeights=[12*mm, 50*mm, 11*mm])
@@ -144,9 +169,10 @@ def prototype_visual(styles):
 
 
 def _font(size, bold=False):
-    # Hiragino is present on the supported macOS runner and retains Chinese labels
-    # in the portable, rasterized final PDF.
-    return ImageFont.truetype(DIAGRAM_FONT, size, index=1 if bold else 0)
+    # Hiragino's TTC exposes its bold face at index 1. Portable fallback fonts
+    # use index 0; synthetic weight is preferable to selecting a wrong CJK face.
+    bold_index = 1 if bold and Path(DIAGRAM_FONT).name == "Hiragino Sans GB.ttc" else 0
+    return ImageFont.truetype(DIAGRAM_FONT, size, index=bold_index)
 
 
 def _center(draw, box, text, font, fill, spacing=8):
@@ -252,7 +278,7 @@ def create_visual_assets(directory: Path):
     image, draw = _canvas("端到端交付工作流图", "每个阶段都有明确输入、机器前置、用户确认与可追溯产物；变化会撤销后续失效结论")
     nodes = [
         (75, "01", "Intake", "短需求 → Intent Brief"), (345, "02", "事实勘测", "Greenfield / Existing Baseline"),
-        (615, "G1", "需求确认", "Delivery Contract"), (885, "03", "Visual", "方案确认 → 直接生成效果图 → 确认"),
+        (615, "G1", "需求确认", "Delivery Contract"), (885, "03", "Visual", "视觉确认 → 自动生成并登记 Demo"),
         (1155, "G2", "视觉冻结", "Visual Bundle"), (1425, "04", "受控实施", "前后端 / 映射 / 依赖锁"),
         (1695, "G3", "真实验收", "Verification Bundle"),
     ]
@@ -267,8 +293,8 @@ def create_visual_assets(directory: Path):
         _center(draw, (x+20, 580, x+200, 625), detail, _font(19), "#526173")
         if index < len(nodes)-1: _arrow(draw, (x+225, 525), (x+265, 525), "#64748B", 5)
     draw.rounded_rectangle((155, 760, 2025, 950), radius=28, fill="#102A4A")
-    _center(draw, (190, 785, 1990, 915), "变化控制：效果图、Stitch、接口、权限、运行时或质量合同发生实质变化 → 受影响 Gate、批准、授权与验证证据自动失效 → 回到对应阶段重算。", _font(32, True), "white", 14)
-    draw.text((75, 1090), "责任分配：用户在 Gate 1、Gate 2、Gate 3 确认业务与视觉事实；机器在每个 Gate 前验证工件完整性与运行证据。", font=_font(25), fill="#334155")
+    _center(draw, (190, 785, 1990, 915), "变化控制：运行时 Demo、Stitch、接口、权限、运行时或质量合同发生实质变化 → 受影响 Gate、批准、授权与验证证据自动失效 → 回到对应阶段重算。", _font(32, True), "white", 14)
+    draw.text((75, 1090), "责任分配：用户只在定义的确认阀门确认方案与冻结；机器 Gate 2 / Gate 3 校验实施许可与真实交付证据。", font=_font(25), fill="#334155")
     assets["workflow"] = directory / "delivery-workflow.png"; image.save(assets["workflow"], quality=96)
 
     # Detailed control flow: separates user confirmations from machine gates.
@@ -276,7 +302,7 @@ def create_visual_assets(directory: Path):
     stages = [
         ("01", "需求拆解确认", "Intent / Contract / Strategy", "用户确认"),
         ("02", "视觉实施方案确认", "布局 / 色彩 / 动效 / 依赖", "用户确认"),
-        ("03", "效果图生成与登记", "候选图 / 骨架映射 / 来源", "机器工件"),
+        ("03", "运行时 Demo生成与登记", "可访问页面 / DOM / 来源 / 浏览器证据", "机器工件"),
         ("04", "Stitch 确认", "画布 / 保真 / 可编辑原型", "用户确认"),
         ("05", "实施冻结确认", "Bundle / Map / Dependency Lock", "用户确认"),
         ("G2", "机器 Gate 2", "冻结完整性 / 可实现性 / 依赖锁", "机器放行代码与安装"),
@@ -300,7 +326,7 @@ def create_visual_assets(directory: Path):
 
     # Evidence lifecycle: a compact traceability figure, showing operational completeness.
     image, draw = _canvas("证据与可追溯性闭环图", "每项结论都应能回溯到来源事实、确认记录、运行证据与版本化的状态")
-    ring = [(1080, 370, "项目事实", "代码 / 页面 / API / 数据"), (1510, 555, "设计事实", "效果图 / Stitch / Token"), (1510, 900, "实施映射", "组件 / 事件 / 权限 / 测试"), (650, 900, "验证证据", "浏览器 / 契约 / 性能 / A11y"), (650, 555, "用户确认", "Gate / 审批 / 风险接受")]
+    ring = [(1080, 370, "项目事实", "代码 / 页面 / API / 数据"), (1510, 555, "设计事实", "运行时 Demo / Stitch / Token"), (1510, 900, "实施映射", "组件 / 事件 / 权限 / 测试"), (650, 900, "验证证据", "浏览器 / 契约 / 性能 / A11y"), (650, 555, "用户确认", "Gate / 审批 / 风险接受")]
     draw.ellipse((805, 540, 1395, 950), fill="#102A4A")
     _center(draw, (870, 630, 1330, 860), "APEX Run State\n\nrevision · artifact hash\nauthorization · checkpoint\nmutation lease", _font(35, True), "white", 14)
     for index, (x, y, title, detail) in enumerate(ring):
@@ -366,7 +392,7 @@ class WorkflowDiagram(Flowable):
         c, navy, blue = self.canv, colors.HexColor("#102A4A"), colors.HexColor("#2563EB")
         c.translate(0, -self.height)
         c.setFont(TEXT_FONT_NAME, 8)
-        steps = [("用户短需求", "意图提炼"), ("Existing /\nGreenfield", "轨道判断"), ("Gate 1", "范围与合同"), ("Visual", "方案确认 → 直接出图 → 登记"), ("Stitch / 直接代码", "效果图登记后选择"), ("前后端实施", "实现映射"), ("Proof / 回归", "真实运行"), ("Gate 3", "证据交付")]
+        steps = [("用户短需求", "意图提炼"), ("Existing /\nGreenfield", "轨道判断"), ("Gate 1", "范围与合同"), ("Visual", "方案确认 → Demo → 登记"), ("Stitch / 直接代码", "运行时 Demo登记后选择"), ("前后端实施", "实现映射"), ("Proof / 回归", "真实运行"), ("Gate 3", "证据交付")]
         positions = [(i * 42.5 * mm, 49 * mm) for i in range(4)] + [(i * 42.5 * mm, 11 * mm) for i in range(4)]
         for i, ((title, sub), (x, y)) in enumerate(zip(steps, positions)):
             fill = colors.HexColor("#E8F0FE") if "Gate" not in title else colors.HexColor("#DBEAFE")
@@ -425,7 +451,7 @@ class PrototypeBoard(Flowable):
         c = self.canv
         c.translate(0, -self.height)
         self.panel(c, 0, "需求导演台", colors.HexColor("#2563EB"), [("用户意图", "专业、高级的成长报告"), ("已提炼", "目标 / 假设 / 风险"), ("待确认", "业务范围与质量线"), ("当前 Gate", "Gate 1")])
-        self.panel(c, 59*mm, "视觉冻结台", colors.HexColor("#7C3AED"), [("视觉基线", "效果图 + Stitch"), ("设计契约", "Token / 动效 / 响应式"), ("差异状态", "最新画布已同步"), ("当前 Gate", "Gate 2")])
+        self.panel(c, 59*mm, "视觉冻结台", colors.HexColor("#7C3AED"), [("视觉基线", "运行时 Demo + Stitch"), ("设计契约", "Token / 动效 / 响应式"), ("差异状态", "最新画布已同步"), ("当前 Gate", "Gate 2")])
         self.panel(c, 118*mm, "交付验收台", colors.HexColor("#059669"), [("实现映射", "组件 / API / 权限"), ("真实证据", "浏览器 / 契约 / 性能"), ("回归状态", "页面家族通过"), ("当前 Gate", "Gate 3")])
         c.setFillColor(colors.HexColor("#334155")); c.setFont(TEXT_FONT_NAME, 8); c.drawString(0, 101*mm, "原型示意：APEX 的三个关键工作台共享同一 run、同一视觉事实和同一验收合同。")
 
@@ -476,7 +502,7 @@ def build(version: str):
         ["文档属性", "内容"],
         ["正式版本", version], ["文档状态", "独立对外说明；与 APEX Core 发布同步"],
         ["覆盖范围", "产品设计、UI/UX、前端、后端接口、验证、运行治理"],
-        ["唯一主目录", "/Users/fredyw/.codex/apex/APEX"],
+        ["唯一主目录", "~/.codex/apex/APEX"],
         ["发布日期", str(date.today())],
     ], [42 * mm, 128 * mm], styles))
     story += [Spacer(1, 15 * mm), p(f"阅读说明：本文件完整说明 APEX {version} 的目标、流程、视觉冻结、工程实施、验收、接入与治理；它不要求读者跳转到其他文档才能理解核心机制。", styles["small"]), PageBreak()]
@@ -500,7 +526,7 @@ def build(version: str):
     section("执行摘要", [
         "APEX 是将不完整产品需求转化为可确认、可实现、可验证交付的企业级 Agentic Delivery System。它统一产品分析、视觉设计、Stitch 可编辑画布、前后端实施和真实验收，解决 AI 交付常见的跳流程、视觉偏差、Existing 系统脱离事实、会话串扰和证据缺失问题。",
         "本白皮书面向业务负责人、产品与设计负责人、架构与研发负责人、平台治理与交付负责人。读者可据此判断 APEX 的适用范围、系统边界、实施路径、质量门和治理责任。",
-    ], ["业务价值：把模糊需求转化为经确认的 Delivery Contract，减少重复澄清与返工。", "体验价值：以效果图、Stitch 和设计契约共同冻结视觉事实，缩小从设计到代码的偏差。", "工程价值：用 Router、授权、run/session 隔离和真实 Gate 3 证据约束交付过程。", "治理价值：将版本、文档、PDF、发布审计和全局 Skill 同步纳入可复核的发布闭环。"])
+    ], ["业务价值：把模糊需求转化为经确认的 Delivery Contract，减少重复澄清与返工。", "体验价值：以运行时 Demo、Stitch 和设计契约共同冻结视觉事实，缩小从设计到代码的偏差。", "工程价值：用 Router、授权、run/session 隔离和真实 Gate 3 证据约束交付过程。", "治理价值：将版本、文档、PDF、发布审计和全局 Skill 同步纳入可复核的发布闭环。"])
 
     section("问题陈述、受众与非目标", [
         "企业级交付常见的问题是：业务描述短而不完整，设计与代码分别演进，Existing 改造没有读取真实系统，会话可能复用错误上下文，最终验收只有页面截图而没有功能、性能、无障碍和接口证据。APEX 的设计目标是减少这些断点，而不是代替业务负责人决定业务优先级。",
@@ -509,7 +535,7 @@ def build(version: str):
     section("产品简介与系统边界", ["APEX 是一个技术型交付编排产品，不是单一 Agent、设计工具或代码生成器。它位于用户需求、项目真实系统、设计工具、工程工具和验收工具之间：向上接收自然语言与组织规范，向下以可审计的 run 驱动产品分析、设计冻结、实现与验证。"], rows=[
         ["边界对象", "APEX 负责", "APEX 不负责"],
         ["需求", "提炼、冲突识别、合同、确认与追踪", "替业务方决定商业优先级或不可逆业务决策"],
-        ["设计", "效果图、Stitch、设计契约、保真校验", "将未确认的审美偏好视为最终规格"],
+        ["设计", "运行时 Demo、Stitch、设计契约、保真校验", "将未确认的审美偏好视为最终规格"],
         ["工程", "实施映射、受控动作、验证计划与证据", "替项目托管生产业务运行时"],
         ["治理", "run/session 隔离、审批、授权、审计、恢复", "绕过宿主权限、组织安全制度或发布责任"],
     ], widths=[31*mm, 70*mm, 69*mm])
@@ -518,7 +544,7 @@ def build(version: str):
         ["功能域", "核心能力", "关键产物 / 结果"],
         ["需求准入", "短需求提炼、轨道识别、范围与风险判断", "Intent Brief、Delivery Contract、Gate 1"],
         ["Existing 勘测", "代码、路由、页面、接口、规范与保护边界读取", "Project Inventory、Existing Baseline、Functional Freeze"],
-        ["视觉工程", "视觉方案确认后直接生成效果图并确认；其后 Stitch 单独确认或直接代码实施", "Visual Reference、直接代码实施方案或 Stitch Freeze、Site Contract、Visual Bundle"],
+        ["视觉工程", "视觉方案确认后自动生成并登记运行时 Demo，不追加 Demo 确认；其后 Stitch 单独确认或进入直接代码路线", "Visual Reference、直接代码实施方案或 Stitch Freeze、Site Contract、Visual Bundle"],
         ["实施编排", "设计节点到组件、API、权限、事件与测试映射", "Implementation Map、Dependency Lock、受控实施授权"],
         ["质量验证", "浏览器、契约、视觉、无障碍、性能、回归验证", "Verification Plan、Evidence、Verification Bundle、Gate 3"],
         ["运行治理", "Router、审批、session、授权、lease、恢复、版本发布", "Run State、事件、授权回执、Checkpoint、Release Audit"],
@@ -551,28 +577,28 @@ def build(version: str):
         ["1. 准入", "创建新 run，识别 Greenfield / Existing、范围、授权", "Router 校验 session；不复用跨 session run"],
         ["2. 分析", "提炼意图、收集规范；Existing 读取真实基线", "影响业务语义、权限、外部依赖的事项请求确认"],
         ["3. Gate 1", "冻结需求、质量、风险、Existing 保护边界", "用户确认后才允许正式视觉"],
-        ["4. 视觉", "确认视觉描述与实施方案后直接生成并登记效果图", "效果图登记后才选择 Stitch 的独立确认或直接代码；两者均冻结同一效果图；变化撤销旧 Gate 2"],
+        ["4. 视觉", "确认视觉描述与实施方案后直接生成并登记运行时 Demo", "运行时 Demo登记后才选择 Stitch 的独立确认或直接代码；两者均冻结同一运行时 Demo；变化撤销旧 Gate 2"],
         ["5. Gate 2 / 实施", "编译 Visual Bundle、实现映射与依赖锁", "机器验证通过后开放项目写入授权"],
         ["6. 验证 / Gate 3", "执行真实浏览器、契约、质量与回归证据", "证据完整且通过才形成交付结论"],
     ], widths=[27*mm, 79*mm, 64*mm])
 
     section("1. 系统定位与价值", [
         "APEX 是面向产品、设计、研发与交付团队的 Agentic Delivery System。它将用户不完整的自然语言需求，转化为可确认的交付合同，再将视觉事实、代码实现与真实验收证据连接为可恢复、可审计的闭环。",
-        "它不把“生成页面”视为交付完成，而把产品意图、Existing 系统事实、效果图、Stitch 画布、设计契约、实施映射与 Gate 3 证据的一致性视为完成条件。",
-    ], ["防止短需求直接跳到代码，先形成事实、假设、范围、风险与质量合同。", "防止设计稿与落地代码分离，通过效果图、Stitch、DESIGN.md 和 Implementation Map 形成追踪。", "防止会话中断、并发改造和旧上下文造成跳流程，通过 Router、run、session、审批和授权治理。", "支持 Greenfield 0-1 落地与 Existing 系统迭代改造，不牺牲真实业务边界。"])
+        "它不把“生成页面”视为交付完成，而把产品意图、Existing 系统事实、运行时 Demo、Stitch 画布、设计契约、实施映射与 Gate 3 证据的一致性视为完成条件。",
+    ], ["防止短需求直接跳到代码，先形成事实、假设、范围、风险与质量合同。", "防止设计稿与落地代码分离，通过运行时 Demo、Stitch、DESIGN.md 和 Implementation Map 形成追踪。", "防止会话中断、并发改造和旧上下文造成跳流程，通过 Router、run、session、审批和授权治理。", "支持 Greenfield 0-1 落地与 Existing 系统迭代改造，不牺牲真实业务边界。"])
 
     section("2. 适用场景与范围分级", ["APEX 的入口判断不依赖用户是否写出完整 PRD 或关键词。只要任务涉及可见页面、UI、UX、视觉、交互、响应式、无障碍、截图还原或页面验收，即应进入 APEX。"], rows=[
         ["维度", "Greenfield", "Existing"],
         ["起点", "用户意图、业务目标、领域与体验方向", "真实项目代码、页面、路由、接口、已有规范与保护边界"],
         ["强制前置", "Intent Brief、Delivery Contract", "Project Inventory、Existing Baseline、Functional Freeze"],
-        ["视觉前提", "Gate 1 产品与质量确认", "先完成只读基线；否则不得正式出效果图或 Stitch"],
+        ["视觉前提", "Gate 1 产品与质量确认", "先完成只读基线；否则不得正式出运行时 Demo或 Stitch"],
         ["交付结果", "新能力的前后端实现与验证", "保留既有事实并完成可追踪的改造与回归"],
     ], widths=[32*mm, 69*mm, 69*mm])
     story += [p("Lite 适合单模块或单交互点；Standard 适合单页整改与局部系统统一；Full 适合整站、页面家族、前后端与视觉系统级交付。范围影响产物深度，不允许降低 Gate 语义。", styles["body"])]
 
     subsection("2.1 双轨判断：Greenfield 与 Existing", ["双轨不是用户主观选择的标签，而是 Router 在准入期根据项目事实完成的硬判断。只要待交付能力需要读取、保留、替换或验证一个既有系统中的任意事实，就进入 Existing 轨道；只有不存在可复用的既有系统事实时，才进入 Greenfield 轨道。"], rows=[
         ["判断信号", "判定", "系统必须执行的动作"],
-        ["存在代码仓库、可运行页面、路由、接口、数据模型或已有设计系统", "Existing", "先做只读 Inventory、页面/接口/权限勘测与 Existing Baseline；未完成前不得正式出效果图。"],
+        ["存在代码仓库、可运行页面、路由、接口、数据模型或已有设计系统", "Existing", "先做只读 Inventory、页面/接口/权限勘测与 Existing Baseline；未完成前不得正式出运行时 Demo。"],
         ["需求包含“改造、优化、统一、保留、兼容、修复、迁移、在原系统上增加”", "Existing", "冻结保护边界、回归路径和不可变业务规则；视觉与实现均须引用真实基线。"],
         ["只有业务目标、用户问题、领域信息或空项目脚手架，且无可读取的既有业务事实", "Greenfield", "建立 Intent Brief、领域假设、信息架构与 Delivery Contract。"],
         ["既有系统存在，但本次要独立建设新产品", "双轨并行", "Existing 作为迁移/集成边界读取；新产品按 Greenfield 形成信息架构，两个范围分别确认。"],
@@ -581,7 +607,7 @@ def build(version: str):
     subsection("2.2 场景判断：用户到底要交付什么", ["场景判断将一句自然语言请求转为交付类型、证据类型和调用能力，避免把所有请求误处理成“设计一张页面”或“生成一段代码”。一个需求可同时命中多个场景，但必须明确主场景和依赖场景。"], rows=[
         ["主场景", "典型用户表达", "交付重点与最小证据"],
         ["产品能力从 0 到 1", "做一个系统 / 新增产品 / 从想法落地", "角色、任务、领域模型、信息架构、页面族、接口契约与端到端验证。"],
-        ["Existing 体验改造", "改造现有系统 / 高级专业 / 统一视觉", "代码和页面基线、保留边界、效果图、Stitch、视觉差异与页面族回归。"],
+        ["Existing 体验改造", "改造现有系统 / 高级专业 / 统一视觉", "代码和页面基线、保留边界、运行时 Demo、Stitch、视觉差异与页面族回归。"],
         ["单页面或组件优化", "优化报表 / 表单 / 导航 / 交互", "问题定位、组件状态、响应式、无障碍、交互和视觉回归。"],
         ["功能与业务流程建设", "增加审批、权限、数据、工作流、AI 能力", "功能拆解、领域对象、状态转换、角色权限、API Contract、异常路径与真实运行证据。"],
         ["数据叙事与报告", "成长报告 / 看板 / 数据分析", "指标口径、趋势、异常、目标、预测、AI 解读、建议、图表可访问性与数据来源。"],
@@ -610,13 +636,13 @@ def build(version: str):
 
     story += [p("能力拆解可视化：从用户目标到验证交付", styles["h1"]), p("图 4 将功能解析连接到设计和工程实现。其作用是把模糊愿望转化成可以在 Gate 2 映射、在 Gate 3 验证的能力单元。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["decomposition"], 97), Spacer(1, 4*mm), p("图 4. 功能拆解的每一层都留下可追溯工件；任何未定义的角色、数据、状态、权限或异常路径都不能被“页面已生成”掩盖。", styles["small"]), PageBreak()]
 
-    section("3. 一句话需求、体验策略与候选评选", ["用户可以只说“基于参考图生成一个高级、专业、效果炫酷的效果图”或“改造这个系统”。APEX 不把这些形容词直接翻译成模板：先由设计导演将其拆解为可比较、可确认、可验证的体验策略；策略通过质量门后才允许生成候选效果图。"], [
+    section("3. 一句话需求、体验策略与候选评选", ["用户可以只说“基于参考图生成一个高级、专业、效果炫酷的运行时 Demo”或“改造这个系统”。APEX 不把这些形容词直接翻译成模板：先由设计导演将其拆解为可比较、可确认、可验证的体验策略；策略通过质量门后才允许生成候选运行时 Demo。"], [
         "提炼业务目标、用户、关键任务、页面族、数据、权限、风险、已有事实与未知项。",
         "将“高级、专业、华丽、炫酷、动效拉满”等偏好转为信息层级、构图、字重、密度、色彩、材质、动效节奏、交互反馈和禁止模式。",
         "识别会改变业务语义、权限、外部依赖或不可逆迁移的事项，形成备选与确认点；其余内容以明确假设推进。",
         "输出 Intent Brief、Delivery Contract、Experience Strategy 与质量门槛；策略必须覆盖信息层级、数据问题/编码/交互、功能状态/事件/验收、视觉系统、响应式、无障碍、动效与反模式。",
-        "Experience Evaluator 对当前策略执行 85/100 阈值和关键缺失检查；不通过时回到文案拆解，不得生成正式效果图。",
-        "Gate 1 确认后至少生成两个具有明确的信息架构或数据表达取舍的候选；用户选中的候选图片哈希锁定正式效果图，未选中候选不得进入 Stitch。",
+        "Experience Evaluator 对当前策略执行 85/100 阈值和关键缺失检查；不通过时回到文案拆解，不得生成正式运行时 Demo。",
+        "Gate 1 后在视觉实施方案中比较信息架构与数据表达取舍，并明确所选方向、真实来源与参数；用户确认完整视觉方案后，系统按该唯一方案生成并登记运行时 Demo。",
     ])
 
     section("4. 质量定义与专业标准", ["APEX 以标准校准而非自创形容词标准。项目可追加公司、行业或职业规范，但必须将它们转为可验证的 Contract、Freeze 或 Evidence。"], rows=[
@@ -634,45 +660,45 @@ def build(version: str):
     section("5. 三个 Gate 与交付状态机", ["Gate 是用户确认与机器验证的组合，不是单纯的流程提示。状态变更必须经 Router，且任何视觉、接口、领域或运行时变化都会撤销受影响的后续证据。"], rows=[
         ["阶段", "用户确认", "机器前置与结果"],
         ["Gate 1", "目标、范围、数据、风险、质量、假设与体验策略", "Intent Brief、Delivery Contract、Experience Strategy 与通过的 85 分质量证据；Existing 另需 Inventory、Baseline、Functional Freeze；通过后才允许候选视觉"],
-        ["Visual 确认", "需求拆解、视觉描述、布局、色彩、组件、动效、在线候选与待安装依赖；方案确认后直接生成并登记运行时效果图", "Visual Execution Plan 是唯一视觉确认；效果图工件必须锁定官方来源、精确版本、API、风险与 Gate 2 后安装计划"],
-        ["Stitch / 直接代码", "效果图登记后选择：Stitch 内容与画布单独确认；或以同一效果图、来源、代码目标与实施方案直接实施", "Stitch 须有候选选择哈希、Visual Reference、Stitch Freeze 与严格保真证据；直接代码路线须有登记效果图与实施方案。两者均不得跳过确认"],
+        ["Visual 确认", "需求拆解、视觉描述、布局、色彩、组件、动效、在线候选与待安装依赖；方案确认后直接生成并登记运行时 Demo", "Visual Execution Plan 是唯一视觉确认；运行时 Demo工件必须锁定官方来源、精确版本、API、风险与 Gate 2 后安装计划"],
+        ["Stitch / 直接代码", "运行时 Demo登记后选择：Stitch 内容与画布单独确认；或以同一运行时 Demo、来源、代码目标与实施方案直接实施", "Stitch 须有候选选择哈希、Visual Reference、Stitch Freeze 与严格保真证据；直接代码路线须有登记运行时 Demo与实施方案。两者均不得跳过确认"],
         ["Gate 2", "所选视觉基线、设计契约、依赖与实现映射", "Site Contract、Visual Bundle、Implementation Map、Dependency Lock，以及与当前实施基线一致的严格校验；通过后开放实施"],
         ["Proof", "代表页或高风险流程的可实现性", "真实实现、浏览器、结构与合同证据"],
         ["Gate 3", "真实交付结果", "Verification Bundle：功能、视觉、无障碍、性能、契约、回归，及多视口、默认/加载/空/异常/无权限状态与关键交互的稳定性矩阵"],
     ], widths=[25*mm, 58*mm, 87*mm])
 
-    story += [PageBreak(), p("工作流总览：从短需求到 Gate 3 交付", styles["h1"]), p("下图展示 APEX 的主交付路径。所有场景先完成需求分析、Existing 基线（如适用）、视觉描述与实施方案；视觉方案确认后直接生成并登记严格运行时效果图，不增加效果图人工确认。工件齐全后，用户才选择进入独立的 Stitch 确认或直接代码实施方案确认；两者均保留视觉冻结、工程实施和真实验证。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["workflow"], 97), Spacer(1, 4*mm), p("图 5. 视觉方案确认是唯一视觉人工确认；路线选择位于效果图工件登记之后，Stitch 确认仍是独立确认。", styles["small"]), PageBreak()]
+    story += [PageBreak(), p("工作流总览：从短需求到 Gate 3 交付", styles["h1"]), p("下图展示 APEX 的主交付路径。所有场景先完成需求分析、Existing 基线（如适用）、视觉描述与实施方案；视觉方案确认后直接生成并登记严格运行时 Demo，不增加运行时 Demo人工确认。工件齐全后，用户才选择进入独立的 Stitch 确认或直接代码实施方案确认；两者均保留视觉冻结、工程实施和真实验证。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["workflow"], 97), Spacer(1, 4*mm), p("图 5. 视觉方案确认是唯一视觉人工确认；路线选择位于运行时 Demo工件登记之后，Stitch 确认仍是独立确认。", styles["small"]), PageBreak()]
 
-    story += [p("全链路审核门：确认、冻结与交付", styles["h1"]), p("本图将用户确认点与机器 Gate 明确分层。前五步决定“做什么、按什么视觉与依赖方案做”；Gate 2 决定“是否允许写代码和安装已批准依赖”；Gate 3 决定“是否能以真实证据交付”。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["control_flow"], 97), Spacer(1, 4*mm), p("图 6. 五个用户确认点不会替代 Gate 2 或 Gate 3；任何可见调整都会撤销相应的下游结论。", styles["small"]), PageBreak()]
+    story += [p("全链路审核门：确认、冻结与交付", styles["h1"]), p("本图将用户确认点与机器 Gate 明确分层。确认节点决定“做什么、按什么视觉与依赖方案做”；Gate 2 决定“是否允许写代码和安装已批准依赖”；Gate 3 决定“是否能以真实证据交付”。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["control_flow"], 97), Spacer(1, 4*mm), p("图 6. 用户确认最多四类，其中 Stitch 为条件式确认；任何可见调整都会撤销受影响的下游结论。", styles["small"]), PageBreak()]
 
     story += [p("技术架构总览：从宿主到项目证据", styles["h1"]), p("APEX 将 Skill 的发现能力、Router 的流程裁决、Action Gateway 的受控执行与项目真实系统分层隔离。Markdown 定义策略与标准，代码负责不可绕过的状态、授权和并发控制。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["technical"], 97), Spacer(1, 4*mm), p("图 6. 更新路径：Core 更新 → 版本策略 → 文档与 PDF 重建 → 发布审计 → 下一次 Router 调用加载最新 Bridge。", styles["small"]), PageBreak()]
 
     section("6. 视觉真相源、确认顺序与 Stitch", ["视觉不是统计卡片堆叠或后台管理模板的同义词。APEX 可根据产品任务采用故事化叙事、杂志化编排、现代极简、强动效或其他经确认的视觉方向；关键在于先将参考图和用户意图拆解为体验策略、视觉描述和实施方案，并把 Visual 与 Stitch 的确认清晰分开。"], [
-        "固定前置顺序为：一句话需求/参考图 → 文案与体验策略 → 策略质量评分 → Gate 1 确认 → 视觉效果描述与实施方案确认 → 直接生成并登记效果图 → Stitch 确认或直接代码实施方案确认。不得直接从需求跳到实现。",
-        "视觉方案确认后必须直接生成多个严格运行时效果图候选，并完整登记来源与运行时证据；不追加效果图确认。登记后才允许选择进入 Stitch。不得先出图后补文案。",
-        "直接代码路线不生成 Stitch，但必须将已登记效果图、代码目标、来源、Implementation Map 与实施方案一起冻结；不因此减少确认或 Gate。",
-        "效果图：定义整体审美、叙事、光影、构图、动态意图与体验上限。",
+        "固定前置顺序为：一句话需求/参考图 → 文案与体验策略 → 策略质量评分 → Gate 1 确认 → 视觉效果描述与实施方案确认 → 直接生成并登记运行时 Demo → Stitch 确认或直接代码实施方案确认。不得直接从需求跳到实现。",
+        "视觉方案确认后必须按已确认的唯一方案自动生成运行时 Demo，并完整登记来源、参数与运行时证据；不追加运行时 Demo确认。登记后才允许选择进入 Stitch 或直接代码路线。",
+        "直接代码路线不生成 Stitch，但必须将已登记运行时 Demo、代码目标、来源、Implementation Map 与实施方案一起冻结；不因此减少确认或 Gate。",
+        "运行时 Demo：定义整体审美、叙事、光影、构图、动态意图与体验上限。",
         "Stitch：提供可编辑的页面结构、尺寸、间距、颜色、字体、组件与内容节点数据。",
         "DESIGN.md / Site Contract：提供 token、响应式、无障碍、交互、动效与禁止模式。",
         "设计师可直接调整 Stitch；APEX 同步最新画布并比较冻结差异，重大视觉或交互变化会撤销旧 Gate 2。",
-        "选中效果图与同一 Prompt 一同输入 Stitch；无原生图片输入时走 Stitch UI 导入，否则报告能力缺口，禁止静默退化为纯文本。仅当用户明确要求“跳过 Stitch 步骤”时，Router 才可受控地跳过该阶段并锁定已确认效果图；“继续”或普通 skip 都不会触发该路径。",
+        "Stitch 使用同一 Demo 的截图、DOM、来源清单与参数合同建立画布；无原生图片输入时走 Stitch UI 导入，否则报告能力缺口，禁止静默退化为纯文本。仅当用户明确要求“跳过 Stitch 步骤”时，Router 才可受控地跳过该阶段并锁定已登记 Demo；“继续”或普通 skip 都不会触发该路径。",
     ])
 
-    section("7. 严格视觉到代码链路", ["所有路线先将运行时效果图作为共同视觉基线；选择 Stitch 时，效果图、Stitch 画布与代码是同一参数化视觉合同的物化结果；选择直接代码时，已确认效果图、来源与实施方案构成可审计的代码基线。两者都不是人工目测，而是以结构、内容、token 和截图证据共同约束。"], [
-        "Gate 1 后先确认视觉描述与实施方案；方案确认后直接生成并单独确认效果图与参数合同，锁定中文内容、表格、布局节点、图表编码、组件和 design token。",
-        "Stitch Freeze 保存确认 Screen 的 HTML、完整截图、内容哈希和 generation input；strict-replica 完成效果图到 Stitch 的结构与保真校验后才 Seal。",
-        "运行时由真实浏览器采集截图与 DOM。效果图路线完成 Stitch 到代码的第二段结构和视觉校验；直接代码路线验证其确认描述、来源、映射和运行时结果一致。任何结构、内容或设计 token 差异均不能以人工近似放行。",
+    section("7. 严格视觉到代码链路", ["所有路线先将运行时 Demo作为共同视觉基线；选择 Stitch 时，运行时 Demo、Stitch 画布与代码是同一参数化视觉合同的物化结果；选择直接代码时，已登记并被路线选择接受的运行时 Demo、来源与实施方案构成可审计的代码基线。两者都不是人工目测，而是以结构、内容、token 和截图证据共同约束。"], [
+        "Gate 1 后先确认完整视觉描述与实施方案；方案确认后自动生成并登记运行时 Demo与参数合同，锁定中文内容、表格、布局节点、图表编码、组件和 design token，不再增加 Demo 确认。",
+        "Stitch Freeze 保存确认 Screen 的 HTML、完整截图、内容哈希和 generation input；strict-replica 完成运行时 Demo到 Stitch 的结构与保真校验后才 Seal。",
+        "运行时由真实浏览器采集截图与 DOM。运行时 Demo路线完成 Stitch 到代码的第二段结构和视觉校验；直接代码路线验证其确认描述、来源、映射和运行时结果一致。任何结构、内容或设计 token 差异均不能以人工近似放行。",
         "`data-apex-*` 标记锁定布局、图表、组件和 token；哈希不一致、标记缺失或关键差异均不得进入下一 Gate。",
     ])
 
-    section("7.1 全元素来源锁定与可追溯实施", ["APEX 3.22 将效果图中的视觉元素从“视觉提示”升级为可复用、可验证的来源合同，并在效果图前加入 Visual Execution Plan 确认。任何需要落代码的元素都必须在实施前锁定其具体来源，代码阶段不得重新检索相似元素或用近似填充替代。"], [
+    section("7.1 全元素来源锁定与可追溯实施", ["APEX 3.22 将运行时 Demo中的视觉元素从“视觉提示”升级为可复用、可验证的来源合同，并在运行时 Demo前加入 Visual Execution Plan 确认。任何需要落代码的元素都必须在实施前锁定其具体来源，代码阶段不得重新检索相似元素或用近似填充替代。"], [
         "Visual Source Manifest 为每个视觉节点锁定布局、组件、样式和文字内容来源；图标、素材、图表、图示与动效出现时还需锁定资源 ID、版本和参数。",
         "来源可来自项目既有资产、宿主 Skill、APEX 官方注册表、原生 Web 能力、用户提供内容或经确认的新增依赖；宿主 Skill、官方注册来源和新增依赖锁会被机器校验。",
-        "Motion Capability Inventory 与 Selection 在效果图生成前盘点现有动效资产、已安装库和可用专业能力；动效预览、Motion Contract 和实现映射必须使用同一引擎、API、关键帧和时间参数。",
+        "Motion Capability Inventory 与 Selection 在运行时 Demo生成前盘点现有动效资产、已安装库和可用专业能力；动效预览、Motion Contract 和实现映射必须使用同一引擎、API、关键帧和时间参数。",
         "Implementation Map 消费同一份来源清单，并记录代码目标、选择器、实现方式和来源标记。实施代码必须保留 data-apex-source 标记，审计会验证标记真实出现在对应文件中。",
         "Gate 2 验证来源清单、Visual Bundle、动效合同、依赖锁和实现映射；Gate 3 验证真实代码仍保留同一来源标记与运行时证据。未登记来源、未锁版本或相似替代均不能通过。",
-        "明确跳过 Stitch 阶段会写入 stage-skip 决策回执，不会伪造 Stitch Freeze 或放宽 Gate。Visual Bundle、实现对比证据和运行状态矩阵都必须绑定已确认效果图；普通 `skip stitch` 仍只可豁免人工确认，必须已有真实 Stitch 工件。",
-        "效果图前先展示并确认 Visual Execution Plan：布局、颜色、字体、内容、组件、特效、动效引擎/API、在线候选和待安装依赖。未安装候选只有同时进入确认方案和精确 Dependency Lock 后才可进入 Gate 2；确认前 Router 不授予正式效果图生成。",
+        "明确跳过 Stitch 阶段会写入 stage-skip 决策回执，不会伪造 Stitch Freeze 或放宽 Gate。Visual Bundle、实现对比证据和运行状态矩阵都必须绑定已登记并由路线选择接受的运行时 Demo；普通 `skip stitch` 仍只可豁免人工确认，必须已有真实 Stitch 工件。",
+        "运行时 Demo前先展示并确认 Visual Execution Plan：布局、颜色、字体、内容、组件、特效、动效引擎/API、在线候选和待安装依赖。未安装候选只有同时进入确认方案和精确 Dependency Lock 后才可进入 Gate 2；确认前 Router 不授予正式运行时 Demo生成。",
     ])
 
     story += [PageBreak(), p("APEX 工作台原型：分析、冻结与交付", styles["h1"]), p("以下为 APEX 对用户和交付团队的典型工作台原型。它们不是某个业务系统的页面，而是将需求、视觉和证据在同一 run 内连接起来的操作模型。", styles["body"]), Spacer(1, 5*mm), prototype_visual(styles), Spacer(1, 6*mm), p("三个工作台共享同一项目 run、同一视觉事实和同一验收合同；用户在关键 Gate 确认，APEX 才会向下一阶段授权。", styles["small"]), PageBreak()]
@@ -703,7 +729,7 @@ def build(version: str):
         "稳定性矩阵：至少两个视口，并记录默认、加载、空、异常、无权限五类状态的通过证据；不适用状态必须留下原因，关键交互必须有真实运行证据。",
     ])
 
-    section("11. Router-first、Session 隔离与受控执行", [f"APEX {version} 将 Markdown 规范与代码化路由分层：Markdown 描述角色、标准、约束与策略；代码负责不可跳过的 run、session、Gate、审批、授权、取消、幂等与并发判断。", "唯一 Core 位于 `/Users/fredyw/.codex/apex/APEX`。项目运行产物只在 `<project-root>/.apex/`，Core 不保存项目截图、效果图、Stitch、证据、用户资料或缓存。"], rows=[
+    section("11. Router-first、Session 隔离与受控执行", [f"APEX {version} 将 Markdown 规范与代码化路由分层：Markdown 描述角色、标准、约束与策略；代码负责不可跳过的 run、session、Gate、审批、授权、取消、幂等与并发判断。", "唯一 Core 位于 `~/.codex/apex/APEX`。项目运行产物只在 `<project-root>/.apex/`，Core 不保存项目截图、运行时 Demo、Stitch、证据、用户资料或缓存。"], rows=[
         ["控制点", "强制行为"],
         ["新 session", "必须创建新 run；不得自动复用旧 run"],
         ["恢复", "仅同一 session 可以恢复自己绑定的 run；跨 session 需显式交接授权"],
@@ -723,8 +749,9 @@ def build(version: str):
         "宿主通用 shell/文件工具无法被本地 Skill 平台级拦截；APEX 正常路径用 Router 和 Action Gateway 约束高风险动作。",
     ])
 
-    section("13. 接入、Connector 与 Adapter", ["APEX 可由 Codex 全局 `apex` Skill 发现和调用。Connector 提供项目类型接入方式，Adapter 只映射项目事实而不复制 Core。"], rows=[
+    section("13. 安装、接入、Connector 与 Adapter", ["APEX 安装到当前用户的唯一 Core `<CODEX_HOME>/apex/APEX`，默认即 `~/.codex/apex/APEX`；安装器不会覆盖非空 Core，也不会自动下载外部 Skill。安装完成后必须运行 `npm run preflight`，只有真实依赖与当前用户 Bridge 可用时才进入既有 Router 工作流。Connector 提供项目类型接入方式，Adapter 只映射项目事实而不复制 Core。"], rows=[
         ["对象", "职责"],
+        ["安装与预检", "`npm run install:apex` 安装当前用户 Core 与内置 Bridge；`npm run preflight` 校验 Node、Git、npm、必需 Skill、manifest 与规范路径；`npm test` 验证便携安装和 Router 合约"],
         ["Connector", "generic-web-app、react-saas、vue-admin、vanilla-js-app 等项目类型接入指引"],
         ["Adapter", "映射产品真相源、设计真相源、代码入口、页面家族、验证方式与保护边界"],
         ["Skill", "提供设计、图标、动效、浏览器、组件和工程增强；不能裁决 Gate 或绕过 Router"],
@@ -741,6 +768,8 @@ def build(version: str):
 
     section("15. 版本发布与自动文档同步", ["APEX 正式更新必须同时更新受影响的 Core、Schema、Bridge、规范、产品/技术/部署文档与本独立 PDF。该要求不依赖人工记忆：发布审计自动同步全局 Skill、验证 manifest YAML 与入口路径、检查 Router 合约与动作守卫、禁止文档展示绕过 Router 的命令，并自动重建本 PDF。"], [
         "PDF 封面、正文与 PDF 元数据都写入 manifest 版本；版本不一致即发布失败。",
+        "发布包必须通过隔离的全新用户目录安装契约：Core 与 Bridge 可复制，固定维护者路径为零，外部必需 Skill 缺失时真实阻断并给出来源与安装命令。",
+        "资源解析器只把 npm 与 URL 视为本地可执行解析；API / MCP 必须由宿主适配器提供，Skill / 官方站点仅作来源元数据，禁止把探测成功伪装成代码已下载。",
         "新 session 与既有 session 的下一次 APEX Router 调用自动采用最新 Bridge。已在生成中的回复不能由本地文件反向注入，但下次调用不会继续旧规则。",
         "发布审计只证明 APEX Core 可用；具体项目仍必须为本次 run 形成真实 Gate 3 证据。",
     ])
@@ -758,7 +787,7 @@ def build(version: str):
     section("17. 结语与文档修订", [f"APEX {version} 的目标是让专业判断被保留、让用户确认被尊重、让设计和工程共享同一份事实，并以真实证据定义交付完成。无论从 0 到 1，还是 Existing 改造，只有业务合同、视觉冻结、实施映射和验证证据一致，才可称为真正的一次性落地。", "本白皮书为当前版本的独立说明。发布审计会自动更新版本相关内容、重建 PDF 并验证其元数据；具体项目的交付完成仍以该项目自己的 Gate 3 证据为准。"], rows=[
         ["价值对象", "APEX 的完成承诺"],
         ["业务与产品", "短需求被提炼为可确认范围、假设、风险与质量合同，而非直接变成不可复核的页面。"],
-        ["设计与体验", "所有路线先以确认效果图建立视觉事实；Stitch 路线再以 Stitch、设计契约与运行时截图扩展，直接代码路线以效果图、来源、实施方案与运行时截图构成可审计事实。"],
+        ["设计与体验", "所有路线先以确认运行时 Demo建立视觉事实；Stitch 路线再以 Stitch、设计契约与运行时截图扩展，直接代码路线以运行时 Demo、来源、实施方案与运行时截图构成可审计事实。"],
         ["研发与交付", "每项实现可追溯到组件、接口、权限和测试；交付结论必须有浏览器、契约、性能、无障碍与回归证据。"],
         ["组织与交付", "Router-first 的 run/session/授权/lease/队列/取消机制保障并发隔离、版本同步、恢复和审计，而项目数据始终留在项目边界。"],
     ], widths=[40*mm, 130*mm])

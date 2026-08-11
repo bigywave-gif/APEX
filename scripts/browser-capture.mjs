@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot, playwrightBridge as pwcli, npmCacheRoot as npxCacheRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,9 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
-const pwcli = '/Users/fredyw/.codex/skills/playwright/scripts/playwright_cli.sh';
-const npxCacheRoot = '/Users/fredyw/.npm/_npx';
 function die(message) { console.error(`Browser capture failed: ${message}`); process.exit(1); }
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
@@ -39,7 +37,7 @@ const [command, runArg, baseUrl, specArg] = process.argv.slice(2);
 canonical();
 if (command !== 'capture' || !runArg || !baseUrl || !specArg) die('usage: capture <run-dir> <base-url> <browser-spec.json>');
 try { new URL(baseUrl); } catch { die(`invalid base URL: ${baseUrl}`); }
-if (!fs.existsSync(pwcli)) die(`Playwright bridge is unavailable: ${pwcli}`);
+if (!fs.existsSync(pwcli) && !cachedCli()) die(`Playwright bridge is unavailable: ${pwcli}; install the Playwright Skill or provide a valid npm cache`);
 const runDir = path.resolve(runArg); const spec = read(path.resolve(specArg));
 try { requireRouterAction(runDir, ['verify', 'collect_existing_baseline', 'generate_visual']); } catch (error) { die(error.message); }
 if (!Array.isArray(spec.screens) || !spec.screens.length) die('browser spec requires non-empty screens');

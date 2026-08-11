@@ -1,5 +1,5 @@
 name: APEX User-Intent-Driven Full-Stack Delivery System
-version: 4.15.0
+version: 4.16.1
 type: agentic-delivery-system
 scope:
   - frontend
@@ -10,9 +10,14 @@ scope:
   - implementation
   - verification
 entrypoints:
+  license: LICENSE
   readme: README.md
   index: INDEX.md
   preflight: runtime/preflight.md
+  preflight_runner: scripts/preflight.mjs
+  installer: scripts/install.mjs
+  path_resolver: scripts/apex-paths.mjs
+  portable_install_contract_test: scripts/portable-install-contract-test.mjs
   codex_discovery: runtime/codex-discovery.md
   bridge_skill: runtime/host-bridges/codex-skill/SKILL.md
   system_docs: system-docs/README.md
@@ -128,8 +133,10 @@ entrypoints:
   host_capability_governance: core/runtime/host-capability-governance.md
   audit_spec: core/runtime/apex-audit-spec.md
   plugin_capability_inventory: core/runtime/plugin-capability-inventory.md
+  host_skill_dependencies: registry/host-skill-dependencies.json
   online_asset_registry: registry/assets/online-sources.yaml
   online_asset_contract: registry/assets/contract.md
+  resolver_support: registry/assets/resolver-support.json
   frontend_dependencies: registry/frontend-dependencies.yaml
   system_requirements: core/runtime/system-requirements.md
   release_checklist: core/runtime/release-checklist.md
@@ -149,6 +156,7 @@ modules:
   - connectors
   - adapters
   - scripts
+  - skills
 required_capabilities:
   - structured-step-execution
   - gate-control

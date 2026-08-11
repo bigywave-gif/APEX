@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "policy": "unsupported-resolvers-fail-closed",
+  "resolvers": {
+    "npm": { "status": "executable", "entrypoint": "scripts/asset-resolver.mjs", "verification": "registry metadata, exact version, integrity and license" },
+    "url": { "status": "executable", "entrypoint": "scripts/asset-resolver.mjs", "verification": "official URL reachability, exact revision, license and response identity" },
+    "api": { "status": "host-provided", "entrypoint": null, "requirement": "a registered host adapter must return concrete resource identity, license, version and integrity before selection" },
+    "mcp": { "status": "host-provided", "entrypoint": null, "requirement": "an available MCP tool must return concrete resource identity, license, version and integrity before selection" },
+    "skill": { "status": "metadata-only", "entrypoint": null, "requirement": "Skills may rank or describe candidates but cannot materialize a runtime asset without an executable resolver" },
+    "official-site": { "status": "metadata-only", "entrypoint": null, "requirement": "manual browsing is discovery evidence only until converted to npm, URL or a registered host adapter" }
+  }
+}

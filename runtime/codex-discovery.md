@@ -6,29 +6,31 @@
 
 ## 发现方式
 
-推荐使用固定目录发现：
+使用当前用户的 Codex 主目录发现：
 
 ```text
-`/Users/fredyw/.codex/apex/APEX`
+`<CODEX_HOME>/apex/APEX`
 ```
 
 当且仅当以下条件同时满足时，视为 `Codex` 已发现 APEX：
 
-1. `/Users/fredyw/.codex/apex/APEX/manifest.yaml` 存在
+1. `<CODEX_HOME>/apex/APEX/manifest.yaml` 存在
 2. `manifest.yaml` 中声明的关键入口可读
 3. `core/`、`runtime/`、`registry/`、`references/` 结构完整
 
-该绝对路径是所有新建、继续和恢复 session 的唯一 APEX 根目录。工作区中的 `APEX/` 副本只能作为迁移源或只读镜像，不能作为运行根、规则真相源或升级目标。
+`CODEX_HOME` 未设置时等于 `$HOME/.codex`。解析后的目录是所有新建、继续和恢复 session 的唯一 APEX 根目录；工作区中的 `APEX/` 副本只能作为迁移源或只读镜像，不能作为运行根、规则真相源或升级目标。
 
 所有 APEX 核心代码、文档、Schema、Skill 和正式输出均必须在该主目录内创建或更新。当前终端工作目录不构成 APEX 写入授权；工作区或其他副本不得接收 APEX 核心变更。
 
 ## Codex 读取顺序
 
 1. `manifest.yaml`
-2. `core/runtime/invocation-spec.md`
+2. 执行 `scripts/preflight.mjs`
 3. `runtime/preflight.md`
-4. `registry/required-capabilities.yaml`
-5. `registry/optional-capabilities.yaml`
+4. `core/runtime/invocation-spec.md`
+5. `registry/host-skill-dependencies.json`
+6. `registry/required-capabilities.yaml`
+7. `registry/optional-capabilities.yaml`
 
 ## 路由语义
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot, isCanonicalApexRoot } from './apex-paths.mjs';
 /** Executes only registered APEX runtime scripts after Router authorization. */
 import path from 'node:path';
 import fs from 'node:fs';
@@ -7,7 +8,6 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
 const permitted = {
   analyze_requirement: new Set(['experience-evaluator.mjs']),
@@ -25,7 +25,7 @@ const permitted = {
   recover: new Set(['apex-recover.mjs', 'run-migrate.mjs'])
 };
 function fail(message) { console.error(`APEX action failed: ${message}`); process.exit(1); }
-if (path.resolve(apexRoot) !== canonicalApexRoot) fail(`APEX must run from canonical root: ${canonicalApexRoot}`);
+if (!isCanonicalApexRoot(apexRoot)) fail(`APEX must run from canonical root: ${canonicalApexRoot}`);
 const [command, projectRoot, runId, sessionId, authorizationRef, action, script, ...scriptArgs] = process.argv.slice(2);
 if (command !== 'run' || !projectRoot || !runId || !sessionId || !authorizationRef || !action || !script) fail('usage: run <project-root> <run-id> <session-id> <authorization-ref> <action> <apex-script> [args...]');
 if (!permitted[action]?.has(script)) fail(`script ${script || '<none>'} is not registered for action ${action}`);

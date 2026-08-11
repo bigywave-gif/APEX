@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot, playwrightBridge as pwcli, npmCacheRoot as npxCacheRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -6,9 +7,6 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
-const pwcli = '/Users/fredyw/.codex/skills/playwright/scripts/playwright_cli.sh';
-const npxCacheRoot = '/Users/fredyw/.npm/_npx';
 const PLAYWRIGHT_TIMEOUT_MS = Number(process.env.APEX_STITCH_UI_TIMEOUT_MS || 30000);
 function die(message) { console.error(`Stitch UI import failed: ${message}`); process.exit(1); }
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
@@ -20,7 +18,7 @@ function authenticationProbe(session, cwd) { return call(session, cwd, ['run-cod
 const [command, runArg, planArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'import' || !runArg || !planArg) die('usage: import <run-dir> <stitch-ui-import-plan.json>');
-if (!fs.existsSync(pwcli)) die(`Playwright bridge is unavailable: ${pwcli}`);
+if (!fs.existsSync(pwcli) && !cachedCli()) die(`Playwright bridge is unavailable: ${pwcli}; install the Playwright Skill or provide a valid npm cache`);
 const runDir = path.resolve(runArg); const plan = read(path.resolve(planArg));
 try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
 for (const key of ['url', 'imagePath', 'prompt', 'uploadTriggerRef', 'promptRef', 'submitRef']) if (!plan[key]) die(`${key} is required`);

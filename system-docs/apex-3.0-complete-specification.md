@@ -111,7 +111,7 @@ APEX 以阶段化上下文和结构化 JSON 作为 Token 治理方式：只读�
 
 APEX Bridge Skill 负责在 Codex 中命中 APEX；`apex-router.mjs` 是项目 run、session、阶段、审批和动作授权的唯一代码化入口；`apex-action.mjs` 只执行已登记且已经授权的运行脚本。新 Codex session 必须创建新的 run；同一 session 只能恢复自己绑定的 run；跨 session 交接必须显式授权。
 
-每次 Router 调用都从唯一主目录 `/Users/fredyw/.codex/apex/APEX` 自动发布最新 Bridge 到全局 `apex` Skill，并校验内容哈希。若发布或校验失败，Router 必须阻断执行，不得允许旧规则继续运行。已进入中的模型回复不能被本地文件反向注入，但该 session 的下一次 APEX Router 调用必定使用最新 Bridge。
+每次 Router 调用都从唯一主目录 `~/.codex/apex/APEX` 自动发布最新 Bridge 到全局 `apex` Skill，并校验内容哈希。若发布或校验失败，Router 必须阻断执行，不得允许旧规则继续运行。已进入中的模型回复不能被本地文件反向注入，但该 session 的下一次 APEX Router 调用必定使用最新 Bridge。
 
 所有项目中间产物只允许位于 `<project-root>/.apex/`；APEX Core 不得保存项目 run、效果图、Stitch 画布、截图、用户资料、测试证据或缓存。项目 mutation lease 防止不同 run 同时修改同一目标项目；动作授权绑定项目、run、session、Gate、动作、状态哈希和过期时间，任何状态变化都会使旧授权失效。
 

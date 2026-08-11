@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes the concrete source identity for every visual node before code generation. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 const hostSkills = new Set(['ui-ux-pro-max-skill', 'shadcn-ui-reference', 'motion-ai-kit', 'framer-motion', 'react-bits', 'better-icons', 'google-design-md', 'impeccable', 'taste-skill']);
 function die(message) { console.error(`Visual source failed: ${message}`); process.exit(1); }
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }

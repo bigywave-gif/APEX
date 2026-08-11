@@ -1,11 +1,11 @@
 #!/usr/bin/env node
+import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 
 function die(message) { console.error(`Asset resolution failed: ${message}`); process.exit(1); }
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
@@ -47,7 +47,11 @@ const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'compile_visual_bundle'); } catch (error) { die(error.message); }
 const selection = read(path.resolve(selectionArg));
 const output = [];
-for (const item of selection.items || []) output.push(item.kind === 'npm' ? await resolveNpm(item) : await resolveRemote(item));
+for (const item of selection.items || []) {
+  if (item.kind === 'npm') output.push(await resolveNpm(item));
+  else if (item.kind === 'url') output.push(await resolveRemote(item));
+  else die(`${item.assetRef}: resolver kind ${item.kind} is host-provided and has no registered executable adapter; resolve it through the host first or select an exact npm/url source`);
+}
 const lock = { schemaVersion: '3.0', resolvedAt: new Date().toISOString(), items: output };
 write(path.join(runDir, 'dependency-lock.json'), lock);
 const stateFile = path.join(runDir, 'state.json');

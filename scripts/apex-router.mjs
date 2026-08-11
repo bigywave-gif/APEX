@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { canonicalApexRoot, globalBridge } from './apex-paths.mjs';
 /**
  * Code-level admission point for Codex sessions. Existing gates and skills are
  * preserved; this router creates project-local runs and returns an action
@@ -11,9 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
 const bridgeSource = path.join(apexRoot, 'runtime', 'host-bridges', 'codex-skill', 'SKILL.md');
-const globalBridge = '/Users/fredyw/.codex/skills/apex/SKILL.md';
 const bridgeSync = path.join(apexRoot, 'scripts', 'sync-codex-bridge.mjs');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
 const DEFAULT_LEASE_MS = 15 * 60 * 1000;

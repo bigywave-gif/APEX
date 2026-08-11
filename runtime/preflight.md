@@ -4,7 +4,7 @@
 
 定义 `Codex -> APEX` 正式执行前必须先完成的轻量检查。
 
-本检查不是安装器，也不是项目级工作流本身。它只负责回答三件事：
+可执行入口为 `node scripts/preflight.mjs`；`npm run preflight` 是等价快捷方式。本检查不是安装器，也不是项目级工作流本身。它只负责回答三件事：
 
 1. 当前宿主是否已发现 `APEX`
 2. 当前宿主是否具备运行 APEX 的最小能力
@@ -14,6 +14,7 @@
 
 - `manifest.yaml`
 - `registry/required-capabilities.yaml`
+- `registry/host-skill-dependencies.json`
 - `registry/optional-capabilities.yaml`
 - 当前宿主暴露出的 skill / plugin / tool 元信息
 - `registry/assets/online-sources.yaml`（若任务可能进入 Visual）
@@ -40,6 +41,8 @@ next_action:
 - APEX 根目录可发现
 - `manifest.yaml` 可读
 - 必需能力全部满足
+- 必需 Skill 的真实 `SKILL.md` 可读
+- Node.js、Git 与 npm 可执行
 
 ### `ready-with-risks`
 
@@ -54,6 +57,7 @@ next_action:
 - `manifest.yaml` 不可读
 - 缺少必需 skill
 - 缺少必需宿主工具能力
+- 当前目录与当前用户的唯一 APEX 主目录不一致
 
 ## 执行顺序
 

@@ -1,5 +1,7 @@
 # APEX 交付系统
 
+APEX 以 [Apache License 2.0](LICENSE) 发布。
+
 ## 定义
 
 在本系统中，`APEX` 采用的正式展开名为：
@@ -109,6 +111,18 @@
 
 放运行状态控制器和Gate校验器。`apex-run.mjs`负责合法状态变更与Checkpoint，`apex-validate.mjs`负责Schema、锁关系和实现权限验证。
 
+## 安装与自检
+
+```bash
+git clone https://github.com/bigywave-gif/APEX.git
+cd APEX
+npm run install:apex
+npm run preflight
+npm test
+```
+
+默认安装到当前用户的 `~/.codex/apex/APEX`，并同步 `~/.codex/skills/apex/SKILL.md`。如果宿主设置了 `CODEX_HOME`，两者都以该目录为根。安装器不会覆盖非空 Core、不会改业务项目，也不会自动下载第三方 Skill；Preflight 会列出真实缺失项、来源与显式安装命令。
+
 ## 使用方式
 
 当 `Codex` 已发现本地 APEX 包后，调用 APEX 时，建议使用统一入口：
@@ -136,16 +150,16 @@
 
 如果希望直观完整地查看 APEX 本体内容，优先阅读：
 
-1. [system-docs/README.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/README.md)
-2. [system-docs/product-document.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/product-document.md)
-3. [system-docs/technical-architecture.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/technical-architecture.md)
-4. [system-docs/deployment-and-integration.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/deployment-and-integration.md)
+1. [system-docs/README.md](system-docs/README.md)
+2. [system-docs/product-document.md](system-docs/product-document.md)
+3. [system-docs/technical-architecture.md](system-docs/technical-architecture.md)
+4. [system-docs/deployment-and-integration.md](system-docs/deployment-and-integration.md)
 
-## APEX 当前系统调用链（v4.15.0）
+## APEX 当前系统调用链（版本以 `manifest.yaml` 为准）
 
 APEX 先编译用户短需求为 Intent Brief 和 Delivery Contract，再按 `Greenfield / Existing` 分轨，并组合 `Lite / Standard / Full` 范围和 `Interactive / Autonomous` 授权。新项目先建立产品、技术、数据和 Site Contract；已有项目先核对真实基线、冻结功能和影响范围。
 
-两条轨道在 Visual 阶段汇合：先完成需求拆解、视觉效果描述和视觉实施方案确认，随后立即生成并登记严格运行时效果图。效果图是工件而非第二次人工确认；工件齐全后，用户才明确选择进入 Stitch 或直接代码：Stitch 路线再经过独立的 Stitch 生成、严格保真和 Stitch 确认后 Seal；直接代码路线以已登记效果图、代码目标和实施方案作为冻结基线。两条路线都必须通过 Gate 2 才能实施；实现后均以真实浏览器、功能/API、页面族与整站回归证据通过 Gate 3，不能以“直接代码”为由跳过确认或验收。
+两条轨道在 Visual 阶段汇合：先完成需求拆解、视觉效果描述和完整视觉实施方案确认，随后立即在项目的隔离 run 沙箱中生成并登记可访问、可交互的运行时 Demo。Demo 是唯一用户视觉审阅产物，不再生成或确认静态效果图；工件齐全后，用户明确选择进入 Stitch 或直接代码。Stitch 路线再经过同一 Demo 的严格导入、一致性校验和 Stitch 确认后 Seal；直接代码路线以已登记 Demo、代码目标和实施方案作为冻结基线。两条路线都必须经过实施冻结、Gate 2、正式生产代码落地和 Gate 3，不能以“直接代码”为由跳过确认或验收。
 
 运行状态和产物位于目标项目 `.apex/runs/<run-id>/`；Checkpoint和内容哈希支持增量恢复，不再因中断无条件重跑全部流程。
 
@@ -189,7 +203,7 @@ APEX 负责：
 1. 关键规范、组件语言、工具来源具备公开来源与许可证
 2. 宿主本地 skill 不能作为硬依赖
 3. 插件 / 宿主能力必须有降级策略
-4. 采用状态以 [references/external/sources.yaml](https://github.com/bigywave-gif/APEX/blob/main/references/external/sources.yaml) 与 [references/external/open-source-eligibility-policy.md](https://github.com/bigywave-gif/APEX/blob/main/references/external/open-source-eligibility-policy.md) 为准
+4. 采用状态以 [references/external/sources.yaml](references/external/sources.yaml) 与 [references/external/open-source-eligibility-policy.md](references/external/open-source-eligibility-policy.md) 为准
 
 ## 持续更新能力
 
@@ -211,37 +225,35 @@ APEX 支持在使用中持续补充外部能力池，但遵循：
 
 规则真相源见：
 
-- [references/external/continuous-update-policy.md](https://github.com/bigywave-gif/APEX/blob/main/references/external/continuous-update-policy.md)
+- [references/external/continuous-update-policy.md](references/external/continuous-update-policy.md)
 
-## 当前接入实例
+## 接入示例
 
-公开仓库提供通用 SaaS 接入示例：
+匿名通用 SaaS 接入层位于：
 
-- [adapters/examples/generic-saas/adapter.md](https://github.com/bigywave-gif/APEX/blob/main/adapters/examples/generic-saas/adapter.md)
-
-具体业务项目的 Adapter 与参考实现不进入通用公开包，应由使用方在自己的私有项目中维护。
+- [adapters/examples/generic-saas/adapter.md](adapters/examples/generic-saas/adapter.md)
 
 ## 关键文件
 
-- [INDEX.md](https://github.com/bigywave-gif/APEX/blob/main/INDEX.md)
-- [PACKAGING.md](https://github.com/bigywave-gif/APEX/blob/main/PACKAGING.md)
-- [manifest.yaml](https://github.com/bigywave-gif/APEX/blob/main/manifest.yaml)
-- [core/framework/APEX.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/APEX.md)
-- [core/framework/state-machine.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/state-machine.md)
-- [core/framework/gates.md](https://github.com/bigywave-gif/APEX/blob/main/core/framework/gates.md)
-- [core/runtime/invocation-spec.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/invocation-spec.md)
-- [core/policies/admission-rules.md](https://github.com/bigywave-gif/APEX/blob/main/core/policies/admission-rules.md)
-- [core/policies/priority-model.md](https://github.com/bigywave-gif/APEX/blob/main/core/policies/priority-model.md)
-- [core/policies/accessibility-gate.md](https://github.com/bigywave-gif/APEX/blob/main/core/policies/accessibility-gate.md)
-- [core/runtime/apex-audit-spec.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/apex-audit-spec.md)
-- [core/runtime/token-policy.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/token-policy.md)
-- [core/runtime/tooling-matrix.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/tooling-matrix.md)
-- [core/runtime/host-capability-governance.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/host-capability-governance.md)
-- [core/runtime/system-requirements.md](https://github.com/bigywave-gif/APEX/blob/main/core/runtime/system-requirements.md)
-- [runtime/preflight.md](https://github.com/bigywave-gif/APEX/blob/main/runtime/preflight.md)
-- [runtime/codex-discovery.md](https://github.com/bigywave-gif/APEX/blob/main/runtime/codex-discovery.md)
-- [registry/required-capabilities.yaml](https://github.com/bigywave-gif/APEX/blob/main/registry/required-capabilities.yaml)
-- [registry/optional-capabilities.yaml](https://github.com/bigywave-gif/APEX/blob/main/registry/optional-capabilities.yaml)
-- [registry/skills/manifest.yaml](https://github.com/bigywave-gif/APEX/blob/main/registry/skills/manifest.yaml)
-- [registry/skills/activation-matrix.md](https://github.com/bigywave-gif/APEX/blob/main/registry/skills/activation-matrix.md)
-- [registry/skills/conflict-matrix.md](https://github.com/bigywave-gif/APEX/blob/main/registry/skills/conflict-matrix.md)
+- [INDEX.md](INDEX.md)
+- [PACKAGING.md](PACKAGING.md)
+- [manifest.yaml](manifest.yaml)
+- [core/framework/APEX.md](core/framework/APEX.md)
+- [core/framework/state-machine.md](core/framework/state-machine.md)
+- [core/framework/gates.md](core/framework/gates.md)
+- [core/runtime/invocation-spec.md](core/runtime/invocation-spec.md)
+- [core/policies/admission-rules.md](core/policies/admission-rules.md)
+- [core/policies/priority-model.md](core/policies/priority-model.md)
+- [core/policies/accessibility-gate.md](core/policies/accessibility-gate.md)
+- [core/runtime/apex-audit-spec.md](core/runtime/apex-audit-spec.md)
+- [core/runtime/token-policy.md](core/runtime/token-policy.md)
+- [core/runtime/tooling-matrix.md](core/runtime/tooling-matrix.md)
+- [core/runtime/host-capability-governance.md](core/runtime/host-capability-governance.md)
+- [core/runtime/system-requirements.md](core/runtime/system-requirements.md)
+- [runtime/preflight.md](runtime/preflight.md)
+- [runtime/codex-discovery.md](runtime/codex-discovery.md)
+- [registry/required-capabilities.yaml](registry/required-capabilities.yaml)
+- [registry/optional-capabilities.yaml](registry/optional-capabilities.yaml)
+- [registry/skills/manifest.yaml](registry/skills/manifest.yaml)
+- [registry/skills/activation-matrix.md](registry/skills/activation-matrix.md)
+- [registry/skills/conflict-matrix.md](registry/skills/conflict-matrix.md)

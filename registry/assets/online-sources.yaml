@@ -13,6 +13,13 @@ policy:
   require_complete_dependency_lock: true
   catalog_model: open-and-extensible-not-a-closed-whitelist
 
+resolver_support:
+  source: registry/assets/resolver-support.json
+  executable: [npm, url]
+  host_provided: [api, mcp]
+  metadata_only: [skill, official-site]
+  rule: candidate resolver labels describe possible discovery routes; only executable or currently registered host-provided routes may create a dependency lock.
+
 discovery_layers:
   icons:
     - iconify

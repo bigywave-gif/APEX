@@ -3,7 +3,7 @@
 ## 文档登记
 
 - 文档名称：APEX 部署与接入文档
-- 当前版本：4.15.0
+- 当前版本：4.16.1
 - 文档类型：系统级部署与接入主文档
 - 适用对象：平台维护者、迁移执行人、项目接入人
 
@@ -38,7 +38,7 @@ APEX 最小通用包应包含：
 
 - `adapters/examples/`
 
-具体业务项目的 Adapter 与参考实现默认不进入公开包，只能随已授权的项目私有迁移。
+具体项目 Adapter 由项目自身保存，不进入 APEX 通用安装包。
 
 ## 二、安装与迁移总流程
 
@@ -56,12 +56,24 @@ flowchart TD
 
 ## 三、宿主环境要求
 
+标准安装命令：
+
+```bash
+git clone https://github.com/bigywave-gif/APEX.git
+cd APEX
+npm run install:apex
+npm run preflight
+```
+
+安装器只写入当前用户的 `<CODEX_HOME>/apex/APEX` 和 `<CODEX_HOME>/skills/`；目标非空时失败，不覆盖既有安装。外部 Skill 不自动下载，Preflight 会列出真实缺失项及 `registry/host-skill-dependencies.json` 中的显式安装命令。
+
 最小要求：
 
 - 可读取项目代码
 - 可编辑项目文件
 - 可访问项目文档
 - 可执行结构化步骤输出
+- Node.js 18+、Git 与 npm
 
 推荐要求：
 
@@ -74,18 +86,8 @@ flowchart TD
 
 ### 1. 复制 APEX
 
-从 GitHub 获取当前发布包：
-
-```bash
-mkdir -p "$HOME/.codex/apex"
-git clone https://github.com/bigywave-gif/APEX.git "$HOME/.codex/apex/APEX"
-```
-
-安装后的 APEX Core 唯一主目录为 `$HOME/.codex/apex/APEX`。不得把业务项目内副本、其他工作区副本
-或临时目录作为规则真相源或升级目标。业务项目只保留自己的 `<project-root>/.apex/` 运行产物。
-
-当前脚本发行版以 `/Users/fredyw/.codex/apex/APEX` 为默认规范化路径；在其他账号或平台部署时，
-应在安装阶段统一替换为实际的 `$HOME/.codex/apex/APEX` 绝对路径，并运行发布审计，不得让同一安装混用多个 Core 根目录。
+APEX Core 的唯一主目录为 `<CODEX_HOME>/apex/APEX`；`CODEX_HOME` 未设置时等于 `$HOME/.codex`，所以默认仍为 `~/.codex/apex/APEX`。不得把项目内副本、工作区副本
+或临时目录作为规则真相源或升级目标。项目只保留自己的 `<project-root>/.apex/` 运行产物。
 
 ### 2. 阅读主入口
 
@@ -142,9 +144,16 @@ git clone https://github.com/bigywave-gif/APEX.git "$HOME/.codex/apex/APEX"
 
 ### 7. 配置 Codex 全局接入
 
-通过唯一主目录中的 `runtime/host-bridges/codex-skill/SKILL.md` 发布全局 `apex` Skill。每次
+`npm run install:apex` 会将唯一主目录中的 `runtime/host-bridges/codex-skill/SKILL.md` 发布到当前用户的全局 `apex` Skill。每次
 Router 调用会自动同步该 Bridge，因此 APEX Core、Schema、规范或 Skill 更新后，新 session
 和既有 session 的下一次 APEX 调用都会加载最新规则；若发布失败，Router 必须阻断执行。
+
+### 8. 验证安装闭环
+
+1. `npm run preflight` 必须报告必需 Skill 和工具的真实安装位置。
+2. `npm test` 必须通过跨用户安装合同和 Router 合同。
+3. 对需要 Visual/Gate 3 的任务，浏览器 Bridge 必须真实可执行；缺失时报告能力缺口，不得生成假截图或假证据。
+4. 更新时先在新目录运行测试，再替换当前用户 Core；不得直接覆盖一个已知可用安装。
 
 ## 五、connector 选择原则
 
@@ -256,9 +265,9 @@ adapter 只能做项目映射，不应复制 Core。
 
 ## 交叉引用
 
-- [README.md](https://github.com/bigywave-gif/APEX/blob/main/README.md)
-- [product-document.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/product-document.md)
-- [technical-architecture.md](https://github.com/bigywave-gif/APEX/blob/main/system-docs/technical-architecture.md)
-- [../PACKAGING.md](https://github.com/bigywave-gif/APEX/blob/main/PACKAGING.md)
-- [../connectors/connector-selection.md](https://github.com/bigywave-gif/APEX/blob/main/connectors/connector-selection.md)
-- [../adapters/README.md](https://github.com/bigywave-gif/APEX/blob/main/adapters/README.md)
+- [README.md](../README.md)
+- [product-document.md](product-document.md)
+- [technical-architecture.md](technical-architecture.md)
+- [../PACKAGING.md](../PACKAGING.md)
+- [../connectors/connector-selection.md](../connectors/connector-selection.md)
+- [../adapters/README.md](../adapters/README.md)

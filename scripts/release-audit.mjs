@@ -1,19 +1,14 @@
 #!/usr/bin/env node
+import { apexRoot, canonicalApexRoot, globalBridge } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-
-const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const canonicalApexRoot = '/Users/fredyw/.codex/apex/APEX';
-const globalBridge = '/Users/fredyw/.codex/skills/apex/SKILL.md';
 const sourceBridge = path.join(apexRoot, 'runtime/host-bridges/codex-skill/SKILL.md');
 const bridgeSync = path.join(apexRoot, 'scripts', 'sync-codex-bridge.mjs');
 const versionManager = path.join(apexRoot, 'scripts', 'apex-release-version.mjs');
 const pdfGenerator = path.join(apexRoot, 'scripts', 'generate-public-pdf.py');
-const bundledPython = '/Users/fredyw/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
-const python = process.env.APEX_PYTHON || (fs.existsSync(bundledPython) ? bundledPython : 'python3');
+const python = process.env.APEX_PYTHON || 'python3';
 function hash(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function check(id, pass, detail) { return { id, status: pass ? 'passed' : 'failed', detail }; }
 function files(dir, filter, output = []) { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) files(file, filter, output); else if (filter(file)) output.push(file); } return output; }
@@ -42,7 +37,8 @@ const manifestVersion = manifest.match(/^version:\s*([^\s#]+)/m)?.[1]?.replace(/
 const pdfMetadata = spawnSync(python, ['-c', 'from pypdf import PdfReader; import sys; print(PdfReader(sys.argv[1]).metadata.get("/Subject", ""))', publicPdf], { encoding: 'utf8' });
 results.push(check('public-pdf-version', pdfMetadata.status === 0 && pdfMetadata.stdout.includes(`APEX 版本 ${manifestVersion}`), (pdfMetadata.stderr || pdfMetadata.stdout || 'PDF metadata must contain manifest version').trim()));
 const pdfRenderDirectory = fs.mkdtempSync(path.join('/tmp', 'apex-public-pdf-render-'));
-const pdftoppm = '/Users/fredyw/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/override/pdftoppm';
+const pdftoppmLookup = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['pdftoppm'], { encoding: 'utf8' });
+const pdftoppm = process.env.APEX_PDFTOPPM || pdftoppmLookup.stdout.trim() || 'pdftoppm';
 const pdfRender = spawnSync(pdftoppm, ['-f', '1', '-l', '1', '-png', '-r', '72', publicPdf, path.join(pdfRenderDirectory, 'page')], { encoding: 'utf8' });
 const renderedPage = path.join(pdfRenderDirectory, 'page-01.png');
 results.push(check('public-pdf-renderable', pdfRender.status === 0 && fs.existsSync(renderedPage) && fs.statSync(renderedPage).size > 4096, (pdfRender.stderr || pdfRender.stdout || 'portable PDF first page rendered').trim()));
@@ -75,6 +71,20 @@ const guardedScriptPattern = /node scripts\/(?:runtime-visual-baseline|runtime-m
 const documentationFiles = files(apexRoot, file => file.endsWith('.md'));
 const obsoleteDirectCommands = documentationFiles.filter(file => guardedScriptPattern.test(fs.readFileSync(file, 'utf8'))).map(file => path.relative(apexRoot, file));
 results.push(check('documentation-router-path', obsoleteDirectCommands.length === 0, obsoleteDirectCommands.length ? `direct guarded commands documented in: ${obsoleteDirectCommands.join(', ')}` : 'no direct guarded runtime commands documented'));
+const brokenDocumentationLinks = [];
+for (const file of documentationFiles) {
+  const source = fs.readFileSync(file, 'utf8');
+  for (const match of source.matchAll(/\]\(([^)]+)\)/g)) {
+    const target = match[1].trim();
+    if (!target || /^(?:https?:|mailto:|#|<)/.test(target) || target.includes('://')) continue;
+    const localTarget = target.split('#')[0];
+    if (localTarget && !fs.existsSync(path.resolve(path.dirname(file), localTarget))) brokenDocumentationLinks.push(`${path.relative(apexRoot, file)} -> ${target}`);
+  }
+}
+results.push(check('documentation-links', brokenDocumentationLinks.length === 0, brokenDocumentationLinks.length ? `broken links: ${brokenDocumentationLinks.slice(0, 20).join(', ')}` : `${documentationFiles.length} Markdown files have resolvable local links`));
+const publicDocumentationFiles = documentationFiles.filter(file => !path.relative(apexRoot, file).startsWith(`adapters${path.sep}student-system${path.sep}`));
+const privateReferences = publicDocumentationFiles.filter(file => /\/Users\/fredyw|adapters\/student-system/.test(fs.readFileSync(file, 'utf8'))).map(file => path.relative(apexRoot, file));
+results.push(check('public-documentation-portability', privateReferences.length === 0, privateReferences.length ? `private or maintainer references remain: ${privateReferences.join(', ')}` : 'public documentation contains no maintainer path or private adapter reference'));
 for (const file of files(path.join(apexRoot, 'scripts'), file => file.endsWith('.mjs'))) { const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' }); results.push(check(`syntax:${path.basename(file)}`, result.status === 0, (result.stderr || result.stdout || 'ok').trim())); }
 for (const file of files(path.join(apexRoot, 'core/runtime/schemas'), file => file.endsWith('.json'))) { try { JSON.parse(fs.readFileSync(file, 'utf8')); results.push(check(`json:${path.basename(file)}`, true, 'valid JSON')); } catch (error) { results.push(check(`json:${path.basename(file)}`, false, error.message)); } }
 const routerContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'router-contract-test.mjs')], { encoding: 'utf8' });
@@ -91,5 +101,15 @@ const runtimeMaterializerContract = spawnSync(process.execPath, [path.join(apexR
 results.push(check('runtime-materializer-contract', runtimeMaterializerContract.status === 0, (runtimeMaterializerContract.stderr || runtimeMaterializerContract.stdout || 'ok').trim()));
 const scopeBoundaryContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'scope-boundary-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('scope-boundary-contract', scopeBoundaryContract.status === 0, (scopeBoundaryContract.stderr || scopeBoundaryContract.stdout || 'ok').trim()));
+const portableInstallContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'portable-install-contract-test.mjs')], { encoding: 'utf8', timeout: 120000 });
+results.push(check('portable-install-contract', portableInstallContract.status === 0, (portableInstallContract.stderr || portableInstallContract.stdout || 'ok').trim()));
+results.push(check('package-manifest', fs.existsSync(path.join(apexRoot, 'package.json')), 'package.json must expose install, preflight, test and release audit commands'));
+results.push(check('executable-preflight', fs.existsSync(path.join(apexRoot, 'scripts', 'preflight.mjs')), 'scripts/preflight.mjs must be present'));
+results.push(check('host-skill-dependencies', fs.existsSync(path.join(apexRoot, 'registry', 'host-skill-dependencies.json')), 'required host Skills must have machine-readable sources and install commands'));
+results.push(check('resolver-support', fs.existsSync(path.join(apexRoot, 'registry', 'assets', 'resolver-support.json')), 'resolver support levels must be machine-readable'));
+results.push(check('license-declaration', ['LICENSE', 'LICENSE.md', 'COPYING'].some(file => fs.existsSync(path.join(apexRoot, file))), 'public distribution must declare its license before release'));
+const maintainerPath = path.join(path.sep, 'Users', 'fredyw');
+const hardCodedScripts = files(path.join(apexRoot, 'scripts'), file => file.endsWith('.mjs') && fs.readFileSync(file, 'utf8').includes(maintainerPath)).map(file => path.relative(apexRoot, file));
+results.push(check('portable-script-paths', hardCodedScripts.length === 0, hardCodedScripts.length ? `maintainer paths remain: ${hardCodedScripts.join(', ')}` : 'no maintainer-specific script paths'));
 const report = { schemaVersion: '3.0', auditedAt: new Date().toISOString(), status: results.every(item => item.status === 'passed') ? 'passed' : 'failed', checks: results };
 const output = path.join(apexRoot, 'release-audit.json'); fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`); console.log(JSON.stringify({ report: output, status: report.status, failed: results.filter(item => item.status === 'failed').map(item => item.id) })); if (report.status !== 'passed') process.exitCode = 2;
