@@ -30,7 +30,7 @@ try {
 } catch (error) { results.push(check('manifest-entrypoints', false, (manifestPaths.stderr || error.message).trim())); }
 results.push(check('global-bridge-present', fs.existsSync(globalBridge), globalBridge));
 results.push(check('global-bridge-synchronized', fs.existsSync(globalBridge) && hash(globalBridge) === hash(sourceBridge), 'global bridge must equal canonical bridge'));
-const publicPdf = path.join(apexRoot, 'output', 'pdf', 'APEX-3.0-Product-Design-and-Technical-Architecture.pdf');
+const publicPdf = path.join(apexRoot, 'output', 'pdf', 'APEX-Product-Design-and-Technical-Architecture.pdf');
 const pdfBuild = spawnSync(python, [pdfGenerator], { encoding: 'utf8' });
 results.push(check('public-pdf-generated', pdfBuild.status === 0 && fs.existsSync(publicPdf), (pdfBuild.stderr || pdfBuild.stdout || 'public PDF generated').trim()));
 const manifestVersion = manifest.match(/^version:\s*([^\s#]+)/m)?.[1]?.replace(/["']/g, '') || 'unknown';

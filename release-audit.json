@@ -1,17 +1,17 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-08-11T12:12:42.535Z",
+  "auditedAt": "2026-08-12T02:48:36.964Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"version\":\"4.16.1\",\"changed\":[]}"
+      "detail": "{\"status\":\"current\",\"version\":\"4.16.3\",\"changed\":[]}"
     },
     {
       "id": "global-bridge-published",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"2b7f973a9869e082817ae8798df2dec14582817875750df56f833e0985f9fff4\"}"
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"a99904799985b4feb30e99811215d78fd9992c6e65be5f892ce4cfd03c8413b7\"}"
     },
     {
       "id": "manifest-semver",
@@ -26,7 +26,7 @@
     {
       "id": "manifest-entrypoints",
       "status": "passed",
-      "detail": "139 manifest paths present"
+      "detail": "140 manifest paths present"
     },
     {
       "id": "global-bridge-present",
@@ -41,12 +41,12 @@
     {
       "id": "public-pdf-generated",
       "status": "passed",
-      "detail": "/Users/fredyw/.codex/apex/APEX/output/pdf/APEX-3.0-Product-Design-and-Technical-Architecture.pdf"
+      "detail": "/Users/fredyw/.codex/apex/APEX/output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf"
     },
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.16.1 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.16.3 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",
@@ -646,7 +646,7 @@
     {
       "id": "router-contract",
       "status": "passed",
-      "detail": "{\"status\":\"passed\",\"checks\":44}"
+      "detail": "{\"status\":\"passed\",\"checks\":47}"
     },
     {
       "id": "visual-sandbox-writer-contract",
@@ -681,7 +681,7 @@
     {
       "id": "portable-install-contract",
       "status": "passed",
-      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":44}"
+      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":47}"
     },
     {
       "id": "package-manifest",

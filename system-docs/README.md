@@ -8,6 +8,15 @@
 
 ## 当前主文档清单
 
+### 独立 PDF 白皮书
+
+- [APEX-Product-Design-and-Technical-Architecture.pdf](../output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf)
+
+说明：
+
+- 文件名保持稳定，不再携带历史 `3.0` 标识；具体发布版本以 PDF 封面、元数据及 `manifest.yaml` 为准。
+- PDF 与产品、技术架构、部署文档在发布审计中同步生成和校验。
+
 ### APEX 当前完整规范（以 manifest.version 为准）
 
 - [apex-3.0-complete-specification.md](apex-3.0-complete-specification.md)

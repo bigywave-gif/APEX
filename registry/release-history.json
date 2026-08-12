@@ -1336,6 +1336,16 @@
         "scripts/router-contract-test.mjs"
       ],
       "releasedAt": "2026-08-11T14:44:07.166Z"
+    },
+    {
+      "from": "4.16.2",
+      "to": "4.16.3",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "manifest.yaml"
+      ],
+      "releasedAt": "2026-08-12T02:47:06.668Z"
     }
   ]
 }

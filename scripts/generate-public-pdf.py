@@ -28,7 +28,10 @@ from reportlab.platypus import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "manifest.yaml"
-OUTPUT = ROOT / "output/pdf/APEX-3.0-Product-Design-and-Technical-Architecture.pdf"
+OUTPUT = ROOT / "output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf"
+LEGACY_OUTPUT = ROOT / "output/pdf/APEX-3.0-Product-Design-and-Technical-Architecture.pdf"
+
+
 def first_font(env_name: str, candidates: list[str]) -> str:
     requested = os.environ.get(env_name)
     if requested:
@@ -489,6 +492,8 @@ def make_portable_pdf(vector_pdf: Path, version: str):
 
 
 def build(version: str):
+    if LEGACY_OUTPUT.exists():
+        LEGACY_OUTPUT.unlink()
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     styles = setup_styles()
     visual_asset_dir = Path(tempfile.mkdtemp(prefix="apex-whitepaper-visuals-"))

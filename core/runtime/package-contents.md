@@ -43,6 +43,7 @@
 - `core/templates/gate1-visual-output.example.json`
 - `scripts/release-audit.mjs`
 - `core/runtime/schemas/`
+- `output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf`
 
 ## 推荐附带
 

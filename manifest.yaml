@@ -1,5 +1,5 @@
 name: APEX User-Intent-Driven Full-Stack Delivery System
-version: 4.16.2
+version: 4.16.3
 type: agentic-delivery-system
 scope:
   - frontend
@@ -24,6 +24,7 @@ entrypoints:
   product_document: system-docs/product-document.md
   technical_architecture_document: system-docs/technical-architecture.md
   deployment_integration_document: system-docs/deployment-and-integration.md
+  public_whitepaper: output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf
   packaging: PACKAGING.md
   package_contents: core/runtime/package-contents.md
   framework: core/framework/APEX.md

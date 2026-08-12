@@ -21,6 +21,7 @@
 - `connectors/`
 - `scripts/`
 - `skills/`
+- `output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf`
 
 可选包含：
 
@@ -85,6 +86,7 @@ apex/
   scripts/
   skills/
   adapters/
+  output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf
 ```
 
 其中：

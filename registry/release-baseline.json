@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
-  "version": "4.16.2",
-  "generatedAt": "2026-08-11T14:44:07.167Z",
+  "version": "4.16.3",
+  "generatedAt": "2026-08-12T02:47:06.669Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "94c405131510ab0ee4ab007f2e60e4947c67e4c25b7617eda11908b76fb88a8d",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -47,7 +47,7 @@
     "core/runtime/schemas/visual-reference.schema.json": "71fba41251abfa4c9f8e7d2931eeb0a5284cccded513a620ce0fe5163574c044",
     "core/runtime/schemas/visual-source-manifest.schema.json": "8a47ed837836103f36bde45ec3af0c50f6533db11ba2f647dbe0d1310ea65d0b",
     "core/runtime/schemas/visual-spec.schema.json": "b5a6f349b6c48fb03ae4fbf01179d9f8055f648056ad9b84762d1c5ce8299a4c",
-    "manifest.yaml": "9d7725e2c70a3f2cf59d7f41f2baa9027918514e307c86352233e14866582d7e",
+    "manifest.yaml": "390da94a354723009fff50700bb96d6c076aa29696f78b6244b8a2e42c66117c",
     "package.json": "59f34c5efbf992b07ccefca64081f9694cd46376bea0e12dd0a2624f7bcbd3a3",
     "registry/capability-registry.json": "0b7e91304ede48475f3389293a311f72bea9003ed3c6cf5cf529f1f51b6659a8",
     "runtime/bridge-skill.md": "2294b631c8fc16abb8b8fd53c62bcad385727b57d3c38f6fb3a4eec22e773ac3",

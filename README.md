@@ -154,6 +154,7 @@ npm test
 2. [system-docs/product-document.md](system-docs/product-document.md)
 3. [system-docs/technical-architecture.md](system-docs/technical-architecture.md)
 4. [system-docs/deployment-and-integration.md](system-docs/deployment-and-integration.md)
+5. [APEX 产品设计与技术架构白皮书](output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf)
 
 ## APEX 当前系统调用链（版本以 `manifest.yaml` 为准）
 
