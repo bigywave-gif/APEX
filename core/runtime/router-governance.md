@@ -5,6 +5,8 @@
 APEX Bridge Skill 负责让 Codex 命中和进入 APEX；`apex-router.mjs` 是项目 run、
 session、阶段、审批与动作授权的唯一代码化入口；`apex-action.mjs` 只执行已登记且
 已经授权的 APEX 运行脚本。原有 Gate、Stitch、Existing、视觉、验证和质量脚本均保留，
+
+为防止宿主把自动阶段误结束为聊天回复，所有 APEX 安装必须部署 `scripts/install-codex-stop-hook.mjs`。该 Hook 在 Codex 的 `Stop` 生命周期复核当前 session 的 Router 状态；只有 `terminalResponseContract.allowed: true` 或有已执行动作产生的阻断回执时才允许结束回合。
 由能力注册表声明并经 Router 分阶段调用。
 
 ## Session 隔离
@@ -12,7 +14,7 @@ session、阶段、审批与动作授权的唯一代码化入口；`apex-action.
 - 新 Codex session 必须新建 run，禁止自动续接旧 run。
 - 同一 session 只可恢复自己绑定的 run。
 - 跨 session 接手不是默认行为；需要单独的显式交接协议和用户授权。
-- 用户明确要求“重新执行 / 从头开始”时，必须使用 `restart` 在同一 session 创建全新 run。Router 必须先在旧 run 记录否决事件、清除该 session 的旧绑定并释放其旧 mutation lease，再绑定新 run；旧 run及其审计证据必须保留，但任何 Gate、用户输入、产品/交付契约、基线、功能冻结、视觉、Stitch、编译、实现与验证工件均不得继承，新 run 必须从入口阶段重新执行。
+- 用户明确要求“重新执行 / 从头开始”时，必须使用 `restart` 在同一 session 创建全新 run。Router 必须先在旧 run 记录否决事件、清除该 session 的旧绑定并释放其旧 mutation lease，再绑定新 run；随后只清理该 session 刚被替换的旧 run，绝不枚举、清理或影响其他 session 的 run。任何 Gate、用户输入、产品/交付契约、基线、功能冻结、视觉、Stitch、编译、实现与验证工件均不得继承，新 run 必须从入口阶段重新执行。
 - 同一 session 在未完成 run 时收到第二次用户输入，必须先按语义路由：补充、澄清或同一任务的继续使用 `reinvoke ... continue`，保持当前 run；独立的新任务使用 `reinvoke ... new-task`，Router 清除旧 session 绑定与 lease 后创建并绑定新的干净 run，绝不继承旧任务的 Gate、用户输入或 APEX 中间产物。对既有任务的否决/重做仍使用 `restart`。
 - 每次 Router 调用都先把 APEX 主目录 Bridge 自动发布到全局 Skill，再验证哈希同步并返回当前版本；发布失败即阻断。已打开 session 在下一次 Router 调用时自动重绑到当前版本与哈希，再进行状态返回、授权或阶段裁决；旧版本记录为 `previousBridge` 审计事实。不得把版本更新转嫁为用户“新开 session”“手动刷新”或显式交接的操作；所有可执行 Gate 与动作始终以自动刷新后的当前 Core 为准。
 
@@ -56,3 +58,14 @@ worktree。运行状态、确认、证据和交付契约仍只保存在原项目
 Codex 通用 shell 或文件编辑工具不由本地 Skill 在平台层面拦截。APEX 正常调用路径必须
 先请求 Router 授权，并优先使用 `apex-action.mjs` 执行 APEX 脚本；若宿主未来提供工具
 代理，应将同一份 Router 校验挂到每个高风险工具之前。
+
+## 受控专业角色边界（目标规范）
+
+专业角色适配器只能在 Router 已授权的既有动作中运行：`analyze_requirement`、`collect_existing_baseline`、`plan_visual`、`compile_visual_bundle` 或 `verify`。它们不构成新的动作、阶段、Run、审批或授权主体。
+
+- 角色只能向当前 Run 的 `advisories/` 写入结构化建议；不得写项目正式目录、`state.json`、Gate receipt、来源锁或其他角色的输出。
+- 角色完成后必须由 Router 的自动链继续到下一个受控动作；不得出现角色级“继续”或确认。
+- 用户只确认既有 Gate 的完整汇总内容。角色建议改变上游已确认工件时，必须由既有 `revise` 路由解锁最早受影响 Gate。
+- 角色超时、无效输出或上游事实失效必须产生可审计 receipt；只有完成实际执行后仍缺少必要事实/证据时才可阻断。
+
+详见 [受控专业角色链治理](agency-role-chain-governance.md)。

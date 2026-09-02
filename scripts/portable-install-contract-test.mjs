@@ -14,6 +14,8 @@ const install = spawnSync(process.execPath, [path.join(source, 'scripts', 'insta
 if (![0, 2].includes(install.status)) throw new Error((install.stderr || install.stdout || 'portable install failed').trim());
 for (const file of ['manifest.yaml', 'scripts/apex-router.mjs', 'scripts/preflight.mjs', 'runtime/host-bridges/codex-skill/SKILL.md']) if (!fs.existsSync(path.join(apexRoot, file))) throw new Error(`portable install missing ${file}`);
 if (!fs.existsSync(path.join(codexHome, 'skills', 'apex', 'SKILL.md'))) throw new Error('portable install did not publish the bridge');
+const hooks = JSON.parse(fs.readFileSync(path.join(codexHome, 'hooks.json'), 'utf8'));
+if (!(hooks.hooks?.Stop || []).some(group => (group.hooks || []).some(hook => hook.type === 'command' && hook.command.includes('codex-stop-continuation.mjs')))) throw new Error('portable install did not publish the required APEX Stop continuation hook');
 const maintainerHome = path.join(path.sep, 'Users', 'fredyw');
 for (const name of fs.readdirSync(path.join(apexRoot, 'scripts')).filter(value => value.endsWith('.mjs'))) if (fs.readFileSync(path.join(apexRoot, 'scripts', name), 'utf8').includes(maintainerHome)) throw new Error(`hard-coded maintainer path remains in scripts/${name}`);
 const preflight = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'preflight.mjs'), '--json'], { encoding: 'utf8', env });

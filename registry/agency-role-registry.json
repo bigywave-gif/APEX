@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0",
+  "title": "APEX Controlled Role Registry",
+  "upstream": {
+    "repository": "https://github.com/msitarzewski/agency-agents",
+    "commit": "3c9588880b7cafaec325a104899fd8bbe27e7d72",
+    "license": "MIT",
+    "usage": "Role descriptions are adapted as internal capability contracts; they never control APEX state, Gates, project mutation, or user interaction."
+  },
+  "policy": {
+    "confirmationModel": "gate-summary-only",
+    "maxDefaultRolesPerStage": 3,
+    "maxIndependentParallelRoles": 2,
+    "fallback": "A non-critical advisory failure is recorded and the existing APEX chain continues. A missing indispensable source, security, or acceptance input is reported only after the controlled action has attempted it."
+  },
+  "sourceFiles": {
+    "codebase-onboarding-engineer": { "path": "engineering/engineering-codebase-onboarding-engineer.md", "blobSha1": "cc36ec153ebe38ebf51515d8591a44e1213e5aa1" },
+    "product-manager": { "path": "product/product-manager.md", "blobSha1": "6a617be2dbf1a1321b23b0b40e693041a1178cbe" },
+    "senior-project-manager": { "path": "project-management/project-manager-senior.md", "blobSha1": "52bb3a7012fb249e30a2d2f6ae3ed3287e6024d1" },
+    "ux-architect": { "path": "design/design-ux-architect.md", "blobSha1": "36e324342ca889151417439c2802445a24f471f0" },
+    "ui-designer": { "path": "design/design-ui-designer.md", "blobSha1": "ca8886161000d62dd4429d1462b3fd473c031312" },
+    "brand-ui-finish-reviewer": { "path": "design/design-ui-finish-gate-reviewer.md", "blobSha1": "cefcf1a9787c6d5735b740f348b2b73a282cc439" },
+    "data-visualization-engineer": { "path": "engineering/engineering-data-visualization-engineer.md", "blobSha1": "2cc24e7c0a91c7b132a9ce568983ebabda8a1e3d" },
+    "code-reviewer": { "path": "engineering/engineering-code-reviewer.md", "blobSha1": "fb93291f4b94a8d5687aa1cc0d05741c3352dd22" },
+    "evidence-collector": { "path": "testing/testing-evidence-collector.md", "blobSha1": "187a2d010abb3439d91ea59aa75de8c5ee860560" },
+    "reality-checker": { "path": "testing/testing-reality-checker.md", "blobSha1": "e534cfbd20d3115d5265387f19db7d3b25649421" }
+  },
+  "roles": [
+    { "id": "codebase-onboarding-engineer", "stage": "baseline", "activation": ["existing"], "class": "core", "purpose": "Freeze formal entrypoints, route/component/data facts and authoritative evidence.", "standards": ["formal-code-only", "real-browser-evidence", "change-closure"], "prohibitions": ["modify-project", "decide-track", "approve-gate", "ask-user"], "inputs": ["projectInventory", "codeReference", "pageSkeleton"], "outputs": ["baseline-facts", "protected-complement"] },
+    { "id": "existing-baseline-analyst", "stage": "baseline", "activation": ["existing"], "class": "core", "purpose": "Bind platform style baseline and functional freeze without redesigning unchanged areas.", "standards": ["existing-style-reuse", "affected-closure-only"], "prohibitions": ["modify-project", "expand-scope", "approve-gate", "ask-user"], "inputs": ["existingBaseline", "functionalFreeze", "changeScope"], "outputs": ["style-baseline", "scope-risks"] },
+    { "id": "minimal-change-engineer", "stage": "gate1", "activation": ["existing"], "class": "core", "purpose": "Prove the smallest affected closure and preserve the exact protected complement.", "standards": ["change-closure", "regression-control"], "prohibitions": ["modify-project", "expand-scope", "approve-gate", "ask-user"], "inputs": ["changeScope", "codeReference", "functionalFreeze"], "outputs": ["scope-rationale", "protected-complement"] },
+    { "id": "product-manager", "stage": "gate1", "activation": ["all"], "class": "core", "purpose": "Translate user intent into outcomes, users, core tasks, scope and measurable acceptance.", "standards": ["product-brief", "acceptance-criteria"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["intentBrief", "deliveryContract"], "outputs": ["product-rationale", "scope-decisions"] },
+    { "id": "senior-project-manager", "stage": "gate1", "activation": ["all"], "class": "core", "purpose": "Audit delivery path, dependencies, exclusions, risks and verification feasibility.", "standards": ["delivery-management", "risk-register"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["deliveryContract", "experienceStrategy"], "outputs": ["delivery-risks", "acceptance-plan"] },
+    { "id": "ux-architect", "stage": "visual", "activation": ["all"], "class": "core", "purpose": "Define IA, task flow, responsive states, accessibility and component hierarchy.", "standards": ["WCAG-2.2-AA", "responsive-contract", "task-flow"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["experienceStrategy", "deliveryContract"], "outputs": ["ux-architecture", "state-matrix"] },
+    { "id": "ui-designer", "stage": "visual", "activation": ["all"], "class": "core", "purpose": "Compare real source candidates and converge layout, tokens, typography, components and icon language.", "standards": ["design-system", "source-selection", "visual-coherence"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["experienceStrategy", "visualCandidates"], "outputs": ["visual-system", "selection-rationale"] },
+    { "id": "data-visualization-engineer", "stage": "visual", "activation": ["requires-chart"], "class": "conditional", "purpose": "Bind chart type, theme, density, accessibility and source implementation to decision tasks.", "standards": ["chart-accessibility", "information-density", "source-selection"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["deliveryContract", "experienceStrategy"], "outputs": ["chart-system", "chart-risks"] },
+    { "id": "motion-specialist", "stage": "visual", "activation": ["requires-motion"], "class": "conditional", "purpose": "Bind meaningful motion to user tasks, reduced-motion and performance budgets.", "standards": ["reduced-motion", "motion-performance"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["experienceStrategy", "visualCandidates"], "outputs": ["motion-rationale", "fallbacks"] },
+    { "id": "brand-ui-finish-reviewer", "stage": "visual", "activation": ["all"], "class": "conditional", "purpose": "Review coherence, brand fit, density, hierarchy and anti-template quality before visual confirmation.", "standards": ["visual-coherence", "design-system"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["experienceStrategy", "visualCandidates"], "outputs": ["finish-review", "coherence-risks"] },
+    { "id": "frontend-implementation-planner", "stage": "implementation", "activation": ["all"], "class": "core", "purpose": "Map approved visual nodes and selected minimal sources to formal runtime targets.", "standards": ["implementation-map", "source-materialization", "scope-boundary"], "prohibitions": ["modify-project", "approve-gate", "ask-user", "install-dependency"], "inputs": ["visualExecutionPlan"], "outputs": ["implementation-rationale", "dependency-minimum"] },
+    { "id": "code-reviewer", "stage": "implementation", "activation": ["all"], "class": "core", "purpose": "Review the proposed map for contract adherence, source parity, scope and regressions before Gate 2.", "standards": ["code-review", "regression-control", "source-parity"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["visualExecutionPlan"], "outputs": ["review-findings", "implementation-risks"] },
+    { "id": "evidence-collector", "stage": "verify", "activation": ["all"], "class": "core", "purpose": "Check that claims have reproducible runtime, browser and command evidence.", "standards": ["evidence-collection", "reproducibility"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["verificationBundle", "runtimeStateMatrix"], "outputs": ["evidence-gaps", "evidence-summary"] },
+    { "id": "reality-checker", "stage": "verify", "activation": ["all"], "class": "core", "purpose": "Reject unsupported completion claims and distinguish facts, inference and unresolved risks.", "standards": ["reality-check", "claim-evidence-traceability"], "prohibitions": ["modify-project", "approve-gate", "ask-user"], "inputs": ["verificationBundle", "qualityEvidence"], "outputs": ["claim-audit", "remaining-risks"] }
+  ]
+}

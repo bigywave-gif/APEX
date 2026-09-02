@@ -43,7 +43,7 @@ if (command === 'stitch') {
   const freeze = skipped ? null : read(path.join(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json'));
   const screen = skipped ? null : freeze.approvedScreens.find(item => item.screenId === screenArg);
   if (!skipped && (!screenArg || !screen)) die('approved frozen Stitch screen not found: ' + screenArg);
-  const capture = read(path.join(runDir, 'evidence', 'browser-capture.json'));
+  const capture = read(path.join(runDir, 'evidence', 'runtime-browser-capture.json'));
   const item = (capture.evidence || []).find(value => value.id === idArg && value.status === 'captured');
   if (!item?.screenshot) die('captured runtime screen not found: ' + idArg);
   const exported = invoke('structure-contract.mjs', ['runtime-captured', runDir, idArg]);

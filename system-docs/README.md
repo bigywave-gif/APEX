@@ -43,6 +43,15 @@
 - 说明 APEX 的系统分层、调用链、状态机执行路径、更新边界、宿主关系和关键运行细节。
 - 本文档包含架构图、流程图和细节说明。
 
+### 专业角色链目标规范
+
+- [受控专业角色链治理](../core/runtime/agency-role-chain-governance.md)
+
+说明：
+
+- 定义基于 agency-agents 的产品、设计、前端与测试角色如何在 APEX Router 内受控串联。
+- 本文是目标规范；在相关 Schema、受控脚本、评测与发布审计实现前，不改变当前 APEX 的运行行为。
+
 ### 部署与接入文档
 
 - [deployment-and-integration.md](deployment-and-integration.md)

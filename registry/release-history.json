@@ -1346,6 +1346,271 @@
         "manifest.yaml"
       ],
       "releasedAt": "2026-08-12T02:47:06.668Z"
+    },
+    {
+      "from": "4.16.3",
+      "to": "4.17.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/contract-recorder.mjs",
+        "scripts/scope-boundary-contract-test.mjs",
+        "scripts/scope-boundary.mjs",
+        "scripts/visual-execution-plan.mjs"
+      ],
+      "releasedAt": "2026-08-12T10:52:31.268Z"
+    },
+    {
+      "from": "4.17.0",
+      "to": "4.17.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T04:06:12.555Z"
+    },
+    {
+      "from": "4.17.1",
+      "to": "4.17.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T05:55:33.684Z"
+    },
+    {
+      "from": "4.17.2",
+      "to": "4.18.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/asset-resolver.mjs",
+        "scripts/motion-capability.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T06:12:43.474Z"
+    },
+    {
+      "from": "4.18.0",
+      "to": "4.18.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T06:27:05.915Z"
+    },
+    {
+      "from": "4.18.1",
+      "to": "4.18.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T08:55:22.719Z"
+    },
+    {
+      "from": "4.18.2",
+      "to": "4.18.3",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T09:07:35.370Z"
+    },
+    {
+      "from": "4.18.3",
+      "to": "4.18.4",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/asset-materializer-contract-test.mjs",
+        "scripts/runtime-materializer-contract-test.mjs",
+        "scripts/visual-source-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T09:13:29.277Z"
+    },
+    {
+      "from": "4.18.4",
+      "to": "4.18.5",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-action.mjs"
+      ],
+      "releasedAt": "2026-08-13T10:22:13.482Z"
+    },
+    {
+      "from": "4.18.5",
+      "to": "4.18.6",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/browser-capture.mjs",
+        "scripts/stitch-ui-importer.mjs"
+      ],
+      "releasedAt": "2026-08-13T10:29:52.299Z"
+    },
+    {
+      "from": "4.18.6",
+      "to": "4.18.7",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T10:38:42.185Z"
+    },
+    {
+      "from": "4.18.7",
+      "to": "4.18.8",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T10:44:37.471Z"
+    },
+    {
+      "from": "4.18.8",
+      "to": "4.19.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "scripts/baseline-collector.mjs",
+        "scripts/browser-capture.mjs",
+        "scripts/router-contract-test.mjs",
+        "scripts/runtime-visual-baseline-contract-test.mjs",
+        "scripts/runtime-visual-baseline.mjs",
+        "scripts/strict-replica.mjs",
+        "scripts/structure-contract.mjs",
+        "scripts/visual-sandbox-writer.mjs",
+        "scripts/visual-source-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-13T10:57:13.141Z"
+    },
+    {
+      "from": "4.19.0",
+      "to": "4.19.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/apex-router.mjs"
+      ],
+      "releasedAt": "2026-08-13T10:58:33.808Z"
+    },
+    {
+      "from": "4.19.1",
+      "to": "4.20.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/install.mjs",
+        "scripts/portable-install-contract-test.mjs",
+        "scripts/codex-stop-continuation.mjs",
+        "scripts/install-codex-stop-hook.mjs"
+      ],
+      "releasedAt": "2026-08-13T11:07:33.122Z"
+    },
+    {
+      "from": "4.20.0",
+      "to": "4.21.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/run-state.schema.json",
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-action.mjs",
+        "scripts/apex-router.mjs",
+        "scripts/contract-recorder.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-19T11:25:14.841Z"
+    },
+    {
+      "from": "4.21.0",
+      "to": "4.21.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-08-19T11:28:38.271Z"
+    },
+    {
+      "from": "4.21.1",
+      "to": "4.22.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/run-state.schema.json",
+        "package.json",
+        "registry/capability-registry.json",
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-action.mjs",
+        "scripts/apex-router.mjs",
+        "scripts/apex-validate.mjs",
+        "scripts/bundle-compiler.mjs",
+        "scripts/contract-recorder.mjs",
+        "scripts/router-contract-test.mjs",
+        "scripts/visual-execution-plan.mjs",
+        "core/runtime/schemas/role-advisory-manifest.schema.json",
+        "core/runtime/schemas/role-advisory.schema.json",
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs"
+      ],
+      "releasedAt": "2026-09-02T13:17:29.006Z"
+    },
+    {
+      "from": "4.22.0",
+      "to": "4.23.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/role-advisory-manifest.schema.json",
+        "scripts/apex-router.mjs",
+        "scripts/apex-validate.mjs",
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs"
+      ],
+      "releasedAt": "2026-09-02T13:19:37.306Z"
+    },
+    {
+      "from": "4.23.0",
+      "to": "4.23.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "package.json",
+        "registry/capability-registry.json",
+        "scripts/visual-execution-plan.mjs",
+        "scripts/role-quality-evaluator.mjs"
+      ],
+      "releasedAt": "2026-09-02T13:24:15.843Z"
     }
   ]
 }

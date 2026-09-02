@@ -21,7 +21,7 @@ function assets(projectRoot) { const found = []; for (const file of walk(project
 const [command, runArg, projectArg, selectionArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'compile' || !runArg || !projectArg || !selectionArg) die('usage: motion-capability.mjs compile <run-dir> <project-root> <selection.json>');
-const runDir = path.resolve(runArg), projectRoot = path.resolve(projectArg); try { requireRouterAction(runDir, 'compile_visual_bundle'); } catch (error) { die(error.message); }
+const runDir = path.resolve(runArg), projectRoot = path.resolve(projectArg); try { requireRouterAction(runDir, ['plan_visual', 'compile_visual_bundle']); } catch (error) { die(error.message); }
 const manifestFile = path.join(projectRoot, 'package.json'); const manifest = fs.existsSync(manifestFile) ? read(manifestFile) : { dependencies: {}, devDependencies: {} }; const dependencies = { ...(manifest.dependencies || {}), ...(manifest.devDependencies || {}) };
 const inventory = { schemaVersion: '3.0', projectRoot, runtime: fs.existsSync(manifestFile) ? ['node'] : [], installedPackages: Object.entries(dependencies).filter(([name]) => supported.has(name)).map(([name, version]) => ({ name, version })).sort((a, b) => a.name.localeCompare(b.name)), motionAssets: assets(projectRoot), hostCapabilities: ['ui-ux-pro-max-skill', 'shadcn-ui-reference', 'motion-ai-kit', 'framer-motion'] };
 const inventoryFile = path.join(runDir, 'motion-capability-inventory.json'); write(inventoryFile, inventory);

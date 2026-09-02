@@ -6,6 +6,8 @@
 
 策略必须绑定本次范围的 `code-reference.json`、`page-skeleton.json` 与真实浏览器展示证据哈希。策略不能以猜测替代已读取代码、实际 DOM、现有 Token、组件或用户需求。
 
+当启用受控专业角色链时，策略还必须记录产生关键决策的角色、其 advisory 输入/输出哈希、事实引用和采纳状态。角色建议不是独立真相源：用户已确认契约、Existing 基线、DESIGN.md、真实来源锁和本合同优先于角色建议。
+
 ## 必填决策
 
 1. 场景与用户：识别数据洞察、管理工作流、内容阅读、协作决策、转化入口或配置管理等场景；声明主要用户、核心任务、首屏目标与成功动作。
@@ -23,6 +25,16 @@
 - Material 自适应布局：按屏幕与任务进行布局重排，而非机械缩放。<https://developer.android.com/codelabs/adaptive-material-guidance?hl=en>
 - DTCG Token Format：用于设计 Token 在工具和代码之间的交换；它是社区规范，不是 W3C 标准。<https://www.w3.org/community/reports/design-tokens/CG-FINAL-format-20251028/>
 - Microsoft Fluent：借鉴可复用组件、生命周期反馈与错误恢复的体验原则，不复制品牌视觉。<https://learn.microsoft.com/en-us/agents/design-guidelines/human-centered-design>
+
+## 专业角色职责与边界
+
+- Product Manager / Senior Project Manager 负责将需求转为用户任务、范围、交付、验收、风险与不包含项，不能新增功能或替代用户确认。
+- UX Architect / UI Designer 负责信息架构、视觉系统与候选取舍；Data Visualization Engineer、Brand Guardian、Motion Specialist 只在对应需求存在时补充专业结论。
+- 视觉角色必须为每项决定绑定真实组件、样式、图标、图表、动效或原生实现来源；设计能力 Skill 不得伪装为可加载实现来源。
+- Frontend Implementation Planner / Code Reviewer 负责实施映射和越界审查，不能在 Gate 2 前修改正式代码。
+- Evidence Collector / Reality Checker 只能以真实截图、DOM、交互、状态矩阵和性能证据判断交付状态；不能以“看起来专业”放行。
+
+角色链、交接、评测与降级规则见 [受控专业角色链治理](agency-role-chain-governance.md)。
 
 ## 反模式
 

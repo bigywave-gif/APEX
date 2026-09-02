@@ -19,6 +19,13 @@ const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'compile_visual_bundle'); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
+if (state.roleChain?.enabled) {
+  const manifestRef = state.artifacts?.roleAdvisoryManifest, summaryRef = state.artifacts?.roleDecisionSummaries?.implementation;
+  const manifestFile = manifestRef && path.resolve(runDir, manifestRef), summaryFile = summaryRef && path.resolve(runDir, summaryRef);
+  if (!manifestFile || !summaryFile || !manifestFile.startsWith(`${runDir}${path.sep}`) || !summaryFile.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(manifestFile) || !fs.existsSync(summaryFile)) die('Visual Bundle requires a current controlled implementation role advisory summary');
+  const manifest = read(manifestFile), stage = manifest.stages?.implementation;
+  if (stage?.status !== 'ready' || stage.summary !== summaryRef) die('implementation role advisory manifest is not ready for the current bundle');
+}
 if (state.gates.gate1.status !== 'passed') die('Gate 1 has not passed');
 if (!state.locks.visualApproved || (!state.locks.stitchCurrent && !state.locks.stitchSkipped)) die('latest Stitch canvas must be approved and current, or the Stitch stage must be explicitly skipped');
 const site = read(path.join(runDir, state.artifacts.siteContract || 'site-contract.json'));

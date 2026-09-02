@@ -10,17 +10,21 @@ import { fileURLToPath } from 'node:url';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
 const permitted = {
-  analyze_requirement: new Set(['experience-evaluator.mjs']),
-  plan_visual: new Set(['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs']),
+  // Gate 1 is one controlled chain: the evaluator produces the evidence and
+  // the recorder materializes the human-readable eight-section proposal.
+  // Keeping the recorder on record_context only made the Router advertise an
+  // automatic Gate 1 action that had no executor capable of finishing it.
+  analyze_requirement: new Set(['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs']),
+  plan_visual: new Set(['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs']),
   generate_visual: new Set(['visual-sandbox-writer.mjs', 'browser-capture.mjs', 'runtime-visual-baseline.mjs', 'visual-reference-compiler.mjs', 'visual-sandbox-dependency.mjs', 'experience-evaluator.mjs']),
-  collect_existing_baseline: new Set(['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs']),
+  collect_existing_baseline: new Set(['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs', 'role-advisory.mjs']),
   sync_stitch: new Set(['stitch-sync.mjs', 'stitch-ui-importer.mjs', 'strict-replica.mjs']),
   observe_stitch: new Set(['stitch-sync.mjs']),
   validate_stitch: new Set(['strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs']),
   prepare_workspace: new Set(['apex-workspace.mjs']),
-  compile_visual_bundle: new Set(['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs']),
+  compile_visual_bundle: new Set(['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs', 'role-advisory.mjs']),
   implement: new Set(['asset-materializer.mjs', 'runtime-materializer.mjs']),
-  verify: new Set(['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs']),
+  verify: new Set(['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs']),
   record_context: new Set(['contract-recorder.mjs', 'context-compiler.mjs', 'evidence-provenance.mjs']),
   recover: new Set(['apex-recover.mjs', 'run-migrate.mjs'])
 };
@@ -33,6 +37,21 @@ const target = path.join(apexRoot, 'scripts', script);
 const runDirectory = path.resolve(projectRoot, '.apex', 'runs', runId);
 const operationDirectory = path.join(runDirectory, 'operations');
 const operationIndexFile = path.join(runDirectory, 'operations-index.json');
+function containsTemplatePlaceholder(value) {
+  if (typeof value === 'string') return /(?:^|:)TO_REPLACE(?:$|[^A-Za-z0-9_-])/.test(value);
+  if (Array.isArray(value)) return value.some(containsTemplatePlaceholder);
+  return Boolean(value && typeof value === 'object' && Object.values(value).some(containsTemplatePlaceholder));
+}
+function validatePlanVisualInput() {
+  if (action !== 'plan_visual' || script !== 'visual-execution-plan.mjs' || scriptArgs[0] !== 'compile' || !scriptArgs[2]) return;
+  const input = path.resolve(scriptArgs[2]);
+  if (!input.startsWith(`${runDirectory}${path.sep}`) || !fs.existsSync(input)) fail('plan_visual input must be a current run-local JSON file');
+  let value;
+  try { value = JSON.parse(fs.readFileSync(input, 'utf8')); }
+  catch (error) { fail(`plan_visual input is invalid JSON: ${path.relative(runDirectory, input)}: ${error.message}. Regenerate the input internally and retry; do not expose this as a user confirmation or manual repair task.`); }
+  if (containsTemplatePlaceholder(value)) fail(`plan_visual input contains unresolved template placeholders: ${path.relative(runDirectory, input)}. Bind current change-scope and DESIGN hashes, then regenerate internally before retrying.`);
+}
+validatePlanVisualInput();
 function fileHash(file) { return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`; }
 function fileFingerprint(file) { const stat = fs.statSync(file); return { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs }; }
 const productionIgnored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);

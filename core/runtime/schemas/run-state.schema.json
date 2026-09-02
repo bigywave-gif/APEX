@@ -47,6 +47,16 @@
         "autonomous"
       ]
     },
+    "roleChain": {
+      "type": "object",
+      "properties": {
+        "version": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "confirmationModel": { "const": "gate-summary-only" }
+      },
+      "required": ["version", "enabled", "confirmationModel"],
+      "additionalProperties": false
+    },
     "lifecycle": {
       "enum": ["active", "cancelled", "handed-off"]
     },
@@ -168,6 +178,7 @@
           ]
         },
         "gate1PresentationManifest": { "type": ["string", "null"] },
+        "gate1PresentationRegistration": { "type": ["string", "null"] },
         "existingBaseline": {
           "type": [
             "string",
@@ -184,6 +195,8 @@
           "type": ["string", "null"]
         },
         "experienceStrategy": { "type": ["string", "null"] },
+        "roleAdvisoryManifest": { "type": ["string", "null"] },
+        "roleDecisionSummaries": { "type": "object", "additionalProperties": { "type": "string" } },
         "motionContract": { "type": ["string", "null"] },
         "motionEvidence": { "type": ["string", "null"] },
         "visualPlanPresentationManifest": { "type": ["string", "null"] },

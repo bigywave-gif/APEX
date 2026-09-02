@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { assertAffectedOnlyPresentation } from './scope-boundary.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
@@ -43,13 +44,25 @@ function completeSections(content, sections) {
 }
 if ((!contracts[command] && command !== 'gate1-presentation') || !runArg || !inputArg) die('usage: intent|delivery|scope|domain|api|gate1-presentation <run-dir> <input-file>');
 const runDir = path.resolve(runArg);
-try { requireRouterAction(runDir, 'record_context'); } catch (error) { die(error.message); }
+// A Gate 1 presentation is not incidental context: it is the user-facing
+// output of analyze_requirement.  Other contracts remain record_context-only.
+const permittedActions = command === 'gate1-presentation' ? ['record_context', 'analyze_requirement'] : 'record_context';
+try { requireRouterAction(runDir, permittedActions); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
 if (state.gates?.gate1?.status === 'passed') die('Gate 1 is frozen; revise the requirement through the Router instead of replacing a contract');
 if (command === 'gate1-presentation') {
   const content = fs.readFileSync(path.resolve(inputArg), 'utf8');
   if (!completeSections(content, gate1PresentationSections)) die('Gate 1 presentation must contain substantive content in all eight APEX-defined direction sections');
+  const roleChainEnabled = state.roleChain?.enabled === true;
+  const roleManifestRef = state.artifacts?.roleAdvisoryManifest;
+  const roleSummaryRef = state.artifacts?.roleDecisionSummaries?.gate1;
+  if (roleChainEnabled) {
+    const roleManifest = roleManifestRef && path.resolve(runDir, roleManifestRef);
+    const roleSummary = roleSummaryRef && path.resolve(runDir, roleSummaryRef);
+    if (!roleManifest || !roleSummary || !roleManifest.startsWith(`${runDir}${path.sep}`) || !roleSummary.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(roleManifest) || !fs.existsSync(roleSummary)) die('Gate 1 presentation requires the current controlled role-advisory manifest and gate1 decision summary');
+    if (!content.includes('### 内部专业协作摘要')) die('Gate 1 presentation must include “### 内部专业协作摘要” so the user can review the synthesized professional rationale');
+  }
   const sourceArtifacts = ['intentBrief', 'deliveryContract', 'experienceStrategy'];
   if (state.track === 'existing') {
     sourceArtifacts.push('projectInventory', 'existingBaseline', 'functionalFreeze', 'changeScope');
@@ -66,8 +79,17 @@ if (command === 'gate1-presentation') {
     const reference = state.artifacts?.[artifact], file = reference && path.resolve(runDir, reference);
     if (file && file.startsWith(`${runDir}${path.sep}`) && fs.existsSync(file)) sources[artifact] = { path: reference, sha256: sha256(file) };
   }
+  if (roleChainEnabled) {
+    sources.roleAdvisoryManifest = { path: roleManifestRef, sha256: sha256(path.resolve(runDir, roleManifestRef)) };
+    sources.roleDecisionSummary = { path: roleSummaryRef, sha256: sha256(path.resolve(runDir, roleSummaryRef)) };
+  }
+  let presentationScopeValidation = null;
+  if (state.track === 'existing') {
+    try { presentationScopeValidation = assertAffectedOnlyPresentation(content, read(path.resolve(runDir, state.artifacts.changeScope)), { requireBaselineSection: true }); }
+    catch (error) { die(error.message); }
+  }
   const output = path.join(runDir, 'gate1-presentation.md'); fs.writeFileSync(output, content.endsWith('\n') ? content : `${content}\n`);
-  const manifest = { schemaVersion: '3.0', kind: 'gate1-direction-presentation', track: state.track, presentation: 'gate1-presentation.md', presentationSha256: sha256(output), requiredSections: gate1PresentationSections, sources, status: 'ready-for-user-confirmation' };
+  const manifest = { schemaVersion: '3.0', kind: 'gate1-direction-presentation', track: state.track, presentation: 'gate1-presentation.md', presentationSha256: sha256(output), requiredSections: gate1PresentationSections, ...(presentationScopeValidation ? { presentationScopeValidation } : {}), sources, status: 'ready-for-user-confirmation' };
   write(path.join(runDir, 'gate1-presentation-manifest.json'), manifest);
   state.artifacts.gate1Presentation = 'gate1-presentation.md'; state.artifacts.gate1PresentationManifest = 'gate1-presentation-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
   console.log(JSON.stringify({ artifact: 'gate1Presentation', path: output, manifest: path.join(runDir, 'gate1-presentation-manifest.json') })); process.exit(0);

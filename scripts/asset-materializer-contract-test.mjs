@@ -39,6 +39,7 @@ try {
   const lease = expect(run(router, ['lease', root, 'run-assets', 'asset-session']), 'lease');
   const applyAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'apply authorization');
   expect(run(action, ['run', root, 'run-assets', 'asset-session', applyAuth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, root]), 'apply selected asset');
+  const appliedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); appliedState.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); fs.writeFileSync(stateFile, `${JSON.stringify(appliedState, null, 2)}\n`);
   const auditAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'verify']), 'audit authorization');
   expect(run(action, ['run', root, 'run-assets', 'asset-session', auditAuth.authorizationRef, 'verify', 'asset-materializer.mjs', 'audit', runDir, root]), 'audit selected asset');
   fs.writeFileSync(path.join(root, 'src', 'icons', 'triangle-alert.svg'), '<svg data-lucide="substitute"/>');

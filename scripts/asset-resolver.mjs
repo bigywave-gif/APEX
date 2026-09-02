@@ -44,7 +44,7 @@ const [command, runArg, selectionArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'resolve' || !runArg || !selectionArg) die('usage: resolve <run-dir> <asset-selection.json>');
 const runDir = path.resolve(runArg);
-try { requireRouterAction(runDir, 'compile_visual_bundle'); } catch (error) { die(error.message); }
+try { requireRouterAction(runDir, ['plan_visual', 'compile_visual_bundle']); } catch (error) { die(error.message); }
 const selection = read(path.resolve(selectionArg));
 const output = [];
 for (const item of selection.items || []) {

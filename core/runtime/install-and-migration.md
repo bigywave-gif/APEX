@@ -28,7 +28,7 @@ npm run install:apex
 npm run preflight
 ```
 
-安装器只在当前用户的 `<CODEX_HOME>/apex/APEX` 为空时复制 Core，并发布全局 Bridge；不会覆盖已有 Core，不会自动安装第三方 Skill，也不会修改业务项目。若 Preflight 报告缺少外部 Skill，按 `registry/host-skill-dependencies.json` 中的精确来源显式安装，重启宿主后再次运行 Preflight。
+安装器只在当前用户的 `<CODEX_HOME>/apex/APEX` 为空时复制 Core，并发布全局 Bridge 与 APEX `Stop` Hook；不会覆盖已有 Core，不会自动安装第三方 Skill，也不会修改业务项目。`Stop` Hook 只读取当前 APEX session 的 Router 状态，在自动阶段阻止提前结束回合，不会作用于非 APEX 任务。若 Preflight 报告缺少外部 Skill，按 `registry/host-skill-dependencies.json` 中的精确来源显式安装，重启宿主后再次运行 Preflight。
 
 ## 验证与卸载
 

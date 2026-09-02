@@ -1,17 +1,17 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-08-12T02:48:36.964Z",
+  "auditedAt": "2026-09-02T13:24:52.339Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"version\":\"4.16.3\",\"changed\":[]}"
+      "detail": "{\"status\":\"bumped\",\"from\":\"4.23.0\",\"version\":\"4.23.1\",\"level\":\"patch\",\"reason\":\"compatible APEX runtime implementation fix\",\"changed\":[\"package.json\",\"registry/capability-registry.json\",\"scripts/visual-execution-plan.mjs\",\"scripts/role-quality-evaluator.mjs\"]}"
     },
     {
       "id": "global-bridge-published",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"a99904799985b4feb30e99811215d78fd9992c6e65be5f892ce4cfd03c8413b7\"}"
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"220177353eee5c958885dbc2b4cfac4530b35a145878cc5b48635110a6a1997d\"}"
     },
     {
       "id": "manifest-semver",
@@ -46,7 +46,7 @@
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.16.3 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.23.1 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",
@@ -56,67 +56,72 @@
     {
       "id": "capability-registry",
       "status": "passed",
-      "detail": "35 capability entrypoints present"
+      "detail": "37 capability entrypoints present"
     },
     {
       "id": "router-guard:analyze_requirement",
       "status": "passed",
-      "detail": "1 scripts guarded"
+      "detail": "3 scripts guarded for analyze_requirement"
+    },
+    {
+      "id": "router-guard:plan_visual",
+      "status": "passed",
+      "detail": "4 scripts guarded for plan_visual"
     },
     {
       "id": "router-guard:generate_visual",
       "status": "passed",
-      "detail": "6 scripts guarded"
+      "detail": "6 scripts guarded for generate_visual"
     },
     {
       "id": "router-guard:collect_existing_baseline",
       "status": "passed",
-      "detail": "4 scripts guarded"
+      "detail": "5 scripts guarded for collect_existing_baseline"
     },
     {
       "id": "router-guard:sync_stitch",
       "status": "passed",
-      "detail": "3 scripts guarded"
+      "detail": "2 scripts guarded for sync_stitch"
     },
     {
       "id": "router-guard:observe_stitch",
       "status": "passed",
-      "detail": "1 scripts guarded"
+      "detail": "1 scripts guarded for observe_stitch"
     },
     {
       "id": "router-guard:validate_stitch",
       "status": "passed",
-      "detail": "3 scripts guarded"
+      "detail": "3 scripts guarded for validate_stitch"
     },
     {
       "id": "router-guard:prepare_workspace",
       "status": "passed",
-      "detail": "1 scripts guarded"
+      "detail": "1 scripts guarded for prepare_workspace"
     },
     {
       "id": "router-guard:compile_visual_bundle",
       "status": "passed",
-      "detail": "10 scripts guarded"
+      "detail": "11 scripts guarded for compile_visual_bundle"
     },
     {
       "id": "router-guard:implement",
       "status": "passed",
-      "detail": "2 scripts guarded"
+      "detail": "2 scripts guarded for implement"
     },
     {
       "id": "router-guard:verify",
       "status": "passed",
-      "detail": "14 scripts guarded"
+      "detail": "15 scripts guarded for verify"
     },
     {
       "id": "router-guard:record_context",
       "status": "passed",
-      "detail": "2 scripts guarded"
+      "detail": "2 scripts guarded for record_context"
     },
     {
       "id": "router-guard:recover",
       "status": "passed",
-      "detail": "1 scripts guarded"
+      "detail": "1 scripts guarded for recover"
     },
     {
       "id": "documentation-router-path",
@@ -126,7 +131,7 @@
     {
       "id": "documentation-links",
       "status": "passed",
-      "detail": "116 Markdown files have resolvable local links"
+      "detail": "117 Markdown files have resolvable local links"
     },
     {
       "id": "public-documentation-portability",
@@ -214,6 +219,11 @@
       "detail": "ok"
     },
     {
+      "id": "syntax:codex-stop-continuation.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
       "id": "syntax:context-compiler.mjs",
       "status": "passed",
       "detail": "ok"
@@ -254,6 +264,11 @@
       "detail": "ok"
     },
     {
+      "id": "syntax:install-codex-stop-hook.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
       "id": "syntax:install.mjs",
       "status": "passed",
       "detail": "ok"
@@ -290,6 +305,21 @@
     },
     {
       "id": "syntax:release-audit.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:role-advisory-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:role-advisory.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:role-quality-evaluator.mjs",
       "status": "passed",
       "detail": "ok"
     },
@@ -569,6 +599,16 @@
       "detail": "valid JSON"
     },
     {
+      "id": "json:role-advisory-manifest.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
+      "id": "json:role-advisory.schema.json",
+      "status": "passed",
+      "detail": "valid JSON"
+    },
+    {
       "id": "json:run-state.schema.json",
       "status": "passed",
       "detail": "valid JSON"
@@ -646,7 +686,17 @@
     {
       "id": "router-contract",
       "status": "passed",
-      "detail": "{\"status\":\"passed\",\"checks\":47}"
+      "detail": "{\"status\":\"passed\",\"checks\":48}"
+    },
+    {
+      "id": "role-advisory-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"selectedRoles\":[\"product-manager\",\"senior-project-manager\"]}"
+    },
+    {
+      "id": "role-quality-evaluation",
+      "status": "passed",
+      "detail": "{\"schemaVersion\":\"1.0\",\"status\":\"passed\",\"score\":100,\"threshold\":85,\"roles\":14,\"scenarios\":3,\"failures\":[]}"
     },
     {
       "id": "visual-sandbox-writer-contract",
@@ -676,12 +726,12 @@
     {
       "id": "scope-boundary-contract",
       "status": "passed",
-      "detail": "{\"status\":\"passed\",\"cases\":[\"localized-schema\",\"affected-node-closure\",\"source-selection-closure\",\"protected-file-hash\",\"protected-visual-zero-diff\"]}"
+      "detail": "{\"status\":\"passed\",\"cases\":[\"localized-schema\",\"affected-node-closure\",\"source-selection-closure\",\"affected-only-presentation\",\"protected-presentation-non-republication\",\"protected-file-hash\",\"protected-visual-zero-diff\"]}"
     },
     {
       "id": "portable-install-contract",
       "status": "passed",
-      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":47}"
+      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":48}"
     },
     {
       "id": "package-manifest",
@@ -692,6 +742,11 @@
       "id": "executable-preflight",
       "status": "passed",
       "detail": "scripts/preflight.mjs must be present"
+    },
+    {
+      "id": "stop-continuation-hook",
+      "status": "passed",
+      "detail": "APEX must ship the Codex Stop continuation hook and its installer"
     },
     {
       "id": "host-skill-dependencies",

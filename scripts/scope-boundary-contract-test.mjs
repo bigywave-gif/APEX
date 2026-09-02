@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { assertExistingPlanScope, protectedFileChecks, protectedVisualEvidenceChecks } from './scope-boundary.mjs';
+import { assertAffectedOnlyPresentation, assertExistingPlanScope, protectedFileChecks, protectedVisualEvidenceChecks, unchangedBaselineSentence } from './scope-boundary.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
@@ -38,6 +38,11 @@ try {
   assertExistingPlanScope(basePlan, frozen, scopeHash);
   expectFailure(() => assertExistingPlanScope({ ...basePlan, components: [{ visualNode: 'app-shell', runtimeTarget: [protectedFile] }] }, frozen, scopeHash), 'out-of-scope visual nodes must be rejected');
   expectFailure(() => assertExistingPlanScope({ ...basePlan, sourceSelections: [{ visualNodes: ['revenue-chart', 'app-shell'] }] }, frozen, scopeHash), 'out-of-scope source selections must be rejected');
+  const localizedPresentation = `# 局部调整\n\n## 1. 需求方向与成功标准\n调整 revenue-chart 的标签可读性。\n\n### 本次变更闭包\n仅修改 revenue-chart。\n\n### 明确保留内容\n${unchangedBaselineSentence}\n\n## 2. 用户、场景与核心任务\n报表用户更快读取 revenue-chart。`;
+  assertAffectedOnlyPresentation(localizedPresentation, frozen, { requireBaselineSection: true });
+  expectFailure(() => assertAffectedOnlyPresentation(localizedPresentation.replace('仅修改 revenue-chart。', '修改 revenue-chart，并重新设计 app-shell。'), frozen, { requireBaselineSection: true }), 'protected presentation terms must be rejected');
+  expectFailure(() => assertAffectedOnlyPresentation(localizedPresentation.replace(unchangedBaselineSentence, `${unchangedBaselineSentence}\n- app-shell 保持原状`), frozen, { requireBaselineSection: true }), 'unchanged content must not be republished as a list');
+  expectFailure(() => assertAffectedOnlyPresentation(localizedPresentation.replace('局部调整', '整站调整'), frozen, { requireBaselineSection: true }), 'localized presentation must reject site-wide framing');
   if (!protectedFileChecks(root, frozen.protected.files).every(item => item.passed)) throw new Error('unchanged protected file must pass');
   const baselineShot = 'baseline-shell.png', runtimeShot = 'runtime-shell.png', pixels = Buffer.from('same-rendered-region');
   fs.writeFileSync(path.join(root, baselineShot), pixels); fs.writeFileSync(path.join(root, runtimeShot), pixels);
@@ -49,7 +54,7 @@ try {
   if (protectedVisualEvidenceChecks(root, scopeHash, ['app-shell'], interaction).every(item => item.passed)) throw new Error('changed protected visual node must fail');
   fs.writeFileSync(path.join(root, protectedFile), 'export const AppShell = false;\n');
   if (protectedFileChecks(root, frozen.protected.files).every(item => item.passed)) throw new Error('changed protected file must fail');
-  console.log(JSON.stringify({ status: 'passed', cases: ['localized-schema', 'affected-node-closure', 'source-selection-closure', 'protected-file-hash', 'protected-visual-zero-diff'] }));
+  console.log(JSON.stringify({ status: 'passed', cases: ['localized-schema', 'affected-node-closure', 'source-selection-closure', 'affected-only-presentation', 'protected-presentation-non-republication', 'protected-file-hash', 'protected-visual-zero-diff'] }));
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

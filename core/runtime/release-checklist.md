@@ -42,12 +42,15 @@
 - 审计规格已存在
 - 工具矩阵已存在
 - 宿主能力治理已存在
+- 若发布包启用受控专业角色链：角色注册表、角色 advisory Schema、上游来源/许可证/固定版本、评测 fixture、降级策略与 Router 边界均已审计
 - 插件与宿主能力清单已存在
 - Gate 2 校验器可执行，缺失冻结产物时必须失败
 - Checkpoint 恢复不得无条件从入口重跑
 - Context Compiler 按阶段装载而不是重复加载全部上下文
 - `scripts/preflight.mjs` 在干净当前用户目录中可执行
 - `scripts/portable-install-contract-test.mjs` 证明无维护者绝对路径、Bridge 可发布且 Preflight 状态可解释
+- `scripts/role-advisory-contract-test.mjs` 证明受控角色只能经 Router action 选择、记录、汇总与校验，且不产生角色级用户确认
+- `registry/agency-role-registry.json` 固定上游 commit、许可证、适配职责与来源文件哈希；默认角色链不超过每阶段 3 个角色
 
 ### 接入
 

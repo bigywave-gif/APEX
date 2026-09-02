@@ -33,8 +33,8 @@ if (sourceKind === 'visual-sandbox' && input.patterns.length) {
   const manifestFile = manifestRef && inside(runDir, manifestRef); if (!manifestFile || !fs.existsSync(manifestFile)) die('run-local runtimeRoot requires a frozen visual sandbox dependency manifest');
   const manifest = read(manifestFile); if (manifest.sourceKind !== 'visual-sandbox' || manifest.runtimeRoot !== input.runtimeRoot) die('runtimeRoot does not match the frozen visual sandbox dependency manifest');
 }
-const evidencePath = path.join(runDir, 'evidence', 'browser-capture.json'); const evidence = read(evidencePath);
-if (evidence.status !== 'passed') die('browser capture must pass before a runtime baseline can be frozen');
+const evidencePath = path.join(runDir, 'evidence', 'runtime-browser-capture.json'); const evidence = read(evidencePath);
+if (evidence.kind !== 'runtime' || evidence.status !== 'passed') die('a passed runtime browser capture is required before a runtime baseline can be frozen');
 const screen = evidence.evidence?.find(item => item.id === input.referenceScreenId && item.status === 'captured' && item.screenshot && item.domHtml);
 if (!screen) die('referenceScreenId must identify a captured browser screen with DOM evidence');
 const motionSamples = evidence.motionSamples || [];
@@ -67,7 +67,19 @@ if (!screenshot || !dom || !fs.existsSync(screenshot) || !fs.existsSync(dom)) di
 for (const sample of motionSamples) { const shot = inside(runDir, sample.screenshot); if (!shot || !fs.existsSync(shot)) die(`motion screenshot is missing: ${sample.id}`); }
 if (!screen.url) die('browser capture must retain the runtime Demo URL');
 const viewportClass = /^\d+x\d+$/.test(screen.viewport || '') && Number(screen.viewport.split('x')[0]) < 768 ? 'mobile' : Number(screen.viewport.split('x')[0]) < 1100 ? 'tablet' : 'desktop';
-const baseline = { schemaVersion: '3.0', sourceLockHash: hash(lockFile), browserCapture: { path: 'evidence/browser-capture.json', sha256: hash(evidencePath) }, runtimeDemo: { url: screen.url, entryScreenId: screen.id, viewport: viewportClass, domHtml: screen.domHtml, sourceRoot: sourceKind === 'project-installed' ? projectRoot : path.relative(runDir, runtimeRoot) }, referenceImage: { path: screen.screenshot, sha256: hash(screenshot), viewport: viewportClass }, motionSamples: motionSamples.map(item => ({ id: item.id, screenshot: item.screenshot, timestampMs: item.timestampMs })) };
+if (runState.track === 'existing') {
+  const sandboxManifestPath = path.join(runDir, 'visual-sandbox-files.json');
+  if (!fs.existsSync(sandboxManifestPath)) die('Existing runtime Demo requires a materialized visual sandbox manifest');
+  const sandboxManifest = read(sandboxManifestPath);
+  const binding = sandboxManifest.existingPageSkeleton;
+  const skeletonPath = runState.artifacts?.pageSkeleton && inside(runDir, runState.artifacts.pageSkeleton);
+  if (!binding || !skeletonPath || !fs.existsSync(skeletonPath)) die('Existing runtime Demo requires a frozen page-skeleton binding');
+  const skeleton = read(skeletonPath);
+  const knownNodes = new Set((skeleton.nodes || []).map(node => node.id));
+  if (binding.sourceTreeHash !== skeleton.sourceTreeHash || binding.skeletonHash !== skeleton.skeletonHash || !Array.isArray(binding.mappings) || !binding.mappings.length || !binding.mappings.every(mapping => planSelections.has(mapping.sourceSelectionId) && Array.isArray(mapping.nodeIds) && mapping.nodeIds.length && mapping.nodeIds.every(id => knownNodes.has(id)))) die('Existing runtime Demo page-skeleton binding is incomplete or stale');
+  if (![...planSelections.keys()].every(id => binding.mappings.some(mapping => mapping.sourceSelectionId === id))) die('Existing runtime Demo must bind every selected visual source to frozen page-skeleton nodes');
+}
+const baseline = { schemaVersion: '3.0', sourceLockHash: hash(lockFile), browserCapture: { path: 'evidence/runtime-browser-capture.json', sha256: hash(evidencePath) }, runtimeDemo: { url: screen.url, entryScreenId: screen.id, viewport: viewportClass, domHtml: screen.domHtml, sourceRoot: sourceKind === 'project-installed' ? projectRoot : path.relative(runDir, runtimeRoot) }, referenceImage: { path: screen.screenshot, sha256: hash(screenshot), viewport: viewportClass }, motionSamples: motionSamples.map(item => ({ id: item.id, screenshot: item.screenshot, timestampMs: item.timestampMs })) };
 const baselineFile = path.join(runDir, 'runtime-visual-baseline.json'); write(baselineFile, baseline);
 const demoFile = path.join(runDir, 'runtime-demo.json'); write(demoFile, { schemaVersion: '3.0', runtimeVisualBaseline: 'runtime-visual-baseline.json', ...baseline.runtimeDemo, sourceLockHash: baseline.sourceLockHash, browserCaptureHash: baseline.browserCapture.sha256 });
 const stateFile = path.join(runDir, 'state.json'), state = read(stateFile); state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.runtimeVisualBaseline = 'runtime-visual-baseline.json'; state.artifacts.runtimeDemo = 'runtime-demo.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);

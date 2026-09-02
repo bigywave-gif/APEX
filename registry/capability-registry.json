@@ -14,6 +14,8 @@
     { "id": "run-migration", "kind": "governance", "entrypoint": "scripts/run-migrate.mjs", "phase": ["recover"] },
     { "id": "existing-baseline", "kind": "existing", "entrypoint": "scripts/baseline-collector.mjs", "phase": ["baseline"] },
     { "id": "experience-evaluation", "kind": "design-quality", "entrypoint": "scripts/experience-evaluator.mjs", "phase": ["plan", "visual"] },
+    { "id": "controlled-role-advisories", "kind": "governance", "entrypoint": "scripts/role-advisory.mjs", "phase": ["baseline", "plan", "visual", "implementation", "verify"] },
+    { "id": "role-quality-evaluation", "kind": "governance", "entrypoint": "scripts/role-quality-evaluator.mjs", "phase": ["release"] },
     { "id": "visual-reference", "kind": "visual", "entrypoint": "scripts/visual-reference-compiler.mjs", "phase": ["visual"] },
     { "id": "stitch-sync", "kind": "visual", "entrypoint": "scripts/stitch-sync.mjs", "phase": ["visual"] },
     { "id": "stitch-ui-import", "kind": "visual", "entrypoint": "scripts/stitch-ui-importer.mjs", "phase": ["visual"] },

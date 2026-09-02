@@ -145,6 +145,24 @@ function requireArtifact(runDir, state, name, fallback) {
   return resolveArtifact(runDir, reference, fallback);
 }
 
+function validateRoleStage(runDir, state, stage) {
+  if (!state.roleChain?.enabled) return;
+  const manifestFile = requireArtifact(runDir, state, 'roleAdvisoryManifest', 'role-advisory-manifest.json');
+  const manifest = validateFile('role-advisory-manifest.schema.json', manifestFile);
+  const registryFile = path.join(root, 'registry', 'agency-role-registry.json');
+  const entry = manifest.stages?.[stage];
+  if (manifest.registry?.sha256 !== hashFile(registryFile) || !entry || entry.status !== 'ready' || entry.selectedRoles.length !== entry.advisories.length) throw new Error(`controlled role advisory stage is incomplete or stale: ${stage}`);
+  const summary = resolveArtifact(runDir, entry.summary, '');
+  if (!summary.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(summary) || entry.summarySha256 !== hashFile(summary)) throw new Error(`controlled role decision summary is missing or stale: ${stage}`);
+  const operationIndex = fs.existsSync(path.join(runDir, 'operations-index.json')) ? readJson(path.join(runDir, 'operations-index.json')).receipts || {} : {};
+  for (const item of entry.advisories) {
+    const file = resolveArtifact(runDir, item.path, '');
+    const receipt = item.operationReceipt && operationIndex[item.operationReceipt];
+    if (!file.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(file) || hashFile(file) !== item.sha256 || receipt?.status !== 'succeeded' || receipt.script !== 'role-advisory.mjs' || receipt.outputFileHashes?.[item.path] !== item.sha256) throw new Error(`controlled role advisory is missing, stale, or not a controlled output: ${item.roleId}`);
+    validateFile('role-advisory.schema.json', file);
+  }
+}
+
 function hasPlaceholder(value) {
   if (typeof value === 'string') return /(^replace$|\breplace[-\w ]*|<[^>]+>)/i.test(value);
   if (Array.isArray(value)) return value.some(hasPlaceholder);
@@ -185,7 +203,9 @@ function validateGate1(runDir) {
   const quality = validateFile('experience-quality-evidence.schema.json', requireArtifact(runDir, state, 'experienceQualityEvidence', 'experience-quality-evidence.json'));
   if (quality.strategyHash !== hashFile(resolveArtifact(runDir, state.artifacts.experienceStrategy, 'experience-strategy.json')) || quality.status !== 'passed' || quality.score < quality.threshold || quality.criticalFailures.length) throw new Error('Experience strategy quality gate has not passed for the current strategy');
   const plannedStyle = strategy.designSystem?.styleBaseline;
+  validateRoleStage(runDir, state, 'gate1');
   if (state.track === 'existing') {
+    validateRoleStage(runDir, state, 'baseline');
     const inventory = validateFile('project-inventory.schema.json', requireArtifact(runDir, state, 'projectInventory', 'project-inventory.json'));
     const baseline = validateFile('existing-baseline.schema.json', requireArtifact(runDir, state, 'existingBaseline', 'existing-baseline.json'));
     rejectPlaceholders(inventory, 'Project Inventory');
@@ -240,6 +260,8 @@ function validateGate2(runDir) {
   const runtimeBaseline = validateFile('runtime-visual-baseline.schema.json', runtimeBaselineFile);
   const dependency = validateFile('dependency-lock.schema.json', resolveArtifact(runDir, state.artifacts.dependencyLock, 'dependency-lock.json'));
   const visualPlan = validateFile('visual-execution-plan.schema.json', requireArtifact(runDir, state, 'visualExecutionPlan', 'visual-execution-plan.json'));
+  validateRoleStage(runDir, state, 'visual');
+  validateRoleStage(runDir, state, 'implementation');
   if (state.track === 'existing') {
     const changeScopeFile = requireArtifact(runDir, state, 'changeScope', 'change-scope.json');
     const changeScope = validateFile('change-scope.schema.json', changeScopeFile);
@@ -362,6 +384,7 @@ function validateGate3(runDir) {
   const { state, contract } = validateGate1(runDir);
   if (state.gates.gate2.status !== 'passed' || !state.locks.implementationAllowed) throw new Error('Gate 2 has not passed or implementation is not allowed');
   if (!['passed', 'not-required'].includes(state.gates.proof.status)) throw new Error('Proof Gate has not passed');
+  validateRoleStage(runDir, state, 'verify');
   {
     const stitchSkipped = state.locks?.stitchSkipped === true;
     const stitch = stitchSkipped ? null : validateFile('stitch-freeze.schema.json', requireArtifact(runDir, state, 'stitchFreeze', 'stitch-freeze.json'));

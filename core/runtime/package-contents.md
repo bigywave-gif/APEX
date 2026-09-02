@@ -35,11 +35,17 @@
 - `scripts/apex-recover.mjs`
 - `scripts/project-intake.mjs`
 - `scripts/contract-recorder.mjs`
+- `scripts/role-advisory.mjs`
+- `scripts/role-advisory-contract-test.mjs`
 - `scripts/contract-verifier.mjs`
 - `scripts/verification-planner.mjs`
 - `scripts/quality-evidence.mjs`
 - `scripts/browser-capture.mjs`
 - `core/runtime/strict-replica.md`
+- `core/runtime/agency-role-chain-governance.md`
+- `core/runtime/schemas/role-advisory.schema.json`
+- `core/runtime/schemas/role-advisory-manifest.schema.json`
+- `registry/agency-role-registry.json`
 - `core/templates/gate1-visual-output.example.json`
 - `scripts/release-audit.mjs`
 - `core/runtime/schemas/`

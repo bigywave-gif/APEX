@@ -23,8 +23,10 @@ const bridgeSource = path.join(installedRoot, 'runtime', 'host-bridges', 'codex-
 fs.mkdirSync(path.dirname(globalBridge), { recursive: true });
 fs.copyFileSync(bridgeSource, globalBridge);
 if (hash(bridgeSource) !== hash(globalBridge)) fail('bridge hash verification failed');
+const stopHook = spawnSync(process.execPath, [path.join(installedRoot, 'scripts', 'install-codex-stop-hook.mjs')], { encoding: 'utf8', env: { ...process.env, CODEX_HOME: codexHome } });
+if (stopHook.status !== 0) fail(`Stop hook installation failed: ${(stopHook.stderr || stopHook.stdout).trim()}`);
 const marker = { schemaVersion: '1.0', apexRoot: installedRoot, installedAt: new Date().toISOString(), sourceRoot: apexRoot, bridgeHash: hash(globalBridge) };
 fs.writeFileSync(path.join(installedRoot, '.apex-install.json'), `${JSON.stringify(marker, null, 2)}\n`);
 const preflight = spawnSync(process.execPath, [path.join(installedRoot, 'scripts', 'preflight.mjs'), '--json'], { encoding: 'utf8', env: { ...process.env, APEX_ROOT: installedRoot } });
-console.log(JSON.stringify({ installed: true, apexRoot: installedRoot, bridge: globalBridge, preflight: preflight.status === 0 ? 'ready' : 'blocked', detail: (preflight.stdout || preflight.stderr).trim() }, null, 2));
+console.log(JSON.stringify({ installed: true, apexRoot: installedRoot, bridge: globalBridge, stopHook: (stopHook.stdout || '').trim(), preflight: preflight.status === 0 ? 'ready' : 'blocked', detail: (preflight.stdout || preflight.stderr).trim() }, null, 2));
 if (preflight.status !== 0) process.exitCode = 2;

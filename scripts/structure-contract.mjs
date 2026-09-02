@@ -54,7 +54,7 @@ let result;
 let runtimeHtmlArg = firstArg;
 let runtimeImageArg = secondArg;
 if (command === 'runtime-captured') {
-  const capture = read(path.join(runDir, 'evidence', 'browser-capture.json'));
+  const capture = read(path.join(runDir, 'evidence', 'runtime-browser-capture.json'));
   const item = (capture.evidence || []).find(value => value.id === firstArg && value.status === 'captured');
   if (!item?.domHtml || !item?.screenshot) die('captured runtime screen is missing DOM HTML or screenshot: ' + firstArg);
   runtimeHtmlArg = path.resolve(runDir, item.domHtml);

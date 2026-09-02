@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { assertAffectedOnlyPresentation } from './scope-boundary.mjs';
 import { assertExistingPlanScope } from './scope-boundary.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,6 +14,16 @@ function die(message) { console.error(`Visual execution plan failed: ${message}`
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
 function write(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha256(file) { return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`; }
+function roleVisualSummary(state, runDir) {
+  if (!state.roleChain?.enabled) return null;
+  const reference = state.artifacts?.roleDecisionSummaries?.visual;
+  const file = reference && path.resolve(runDir, reference);
+  if (!file || !file.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(file)) die('visual planning requires the current controlled visual role decision summary');
+  // The advisory summary is also a standalone document.  Keep its content in
+  // the visual plan, but remove its document-level title so it remains nested
+  // under section 9 instead of restarting the page hierarchy.
+  return fs.readFileSync(file, 'utf8').trim().replace(/^# [^\n]+\n+/, '');
+}
 const labels = {
   track: '场景轨道', deliveryNarrative: '方案决策叙事', userNeedFit: '用户需求适配', informationArchitecture: '信息架构', grid: '栅格与布局', responsive: '响应式合同', styleDirection: '风格方向', colors: '颜色系统', typography: '字体与字号', effects: '边框、圆角、阴影与特效', designContract: '设计规范依据', components: '组件与状态', contentHierarchy: '内容层级', dataExpression: '数据表达', iconSystem: '图标系统', chartSystem: '图表系统', selectedResources: '选定素材', motion: '动效方案', threeD: '3D 方案', reducedMotion: '减少动效降级', performanceRisks: '性能与风险', responsiveContract: '响应式合同', loadingEmptyErrorPermissionStates: '加载、空、错误与权限状态', sourceSelections: '真实来源选择', dependencies: '最小依赖计划', libraryComparisons: '候选库比较', alternatives: '备选与拒绝理由', aestheticAssessment: '整体审美与一致性判断', industryBenchmark: '行业基准', trackNarrative: '轨道专属落地说明', responsiveAcceptance: '响应式验收', risks: '风险', status: '状态'
 };
@@ -34,7 +45,7 @@ function readable(value, depth = 0) {
   return `${pad}- ${scalar(value)}\n`;
 }
 function block(value) { return `\n${readable(value)}\n`; }
-function renderVisualPresentation(plan, track) {
+function renderVisualPresentation(plan, track, roleSummary = null) {
   const selected = plan.sourceSelections.map(item => ({ id: item.id, visualNodes: item.visualNodes, kind: item.kind, sourceType: item.sourceType, sourceId: item.sourceId, resourceId: item.resourceId, version: item.version, materialization: item.materialization, parameters: item.parameters }));
   const states = plan.content.states;
   const responsive = plan.layout.responsive;
@@ -46,7 +57,7 @@ function renderVisualPresentation(plan, track) {
     '',
     '下面是由已通过 APEX 校验的视觉执行计划自动编译的完整方案。正文采用可读说明与清单；内部哈希仅保存在审计清单中，不要求用户阅读。',
     '',
-    '## 1. 目标与范围', block({ track, ...(track === 'existing' ? { scopeControl: plan.scopeControl, note: '本确认仅覆盖上述变更闭包；未调整内容沿用已冻结 Existing 基线，不在本方案中重新设计或重复确认。' } : {}), deliveryNarrative: plan.deliveryNarrative, userNeedFit: plan.selectionAnalysis.userNeedFit }),
+    '## 1. 目标与范围', block({ track, ...(track === 'existing' ? { scopeControl: { mode: plan.scopeControl.mode, affectedVisualNodes: plan.scopeControl.affectedVisualNodes, affectedRuntimeTargets: plan.scopeControl.affectedRuntimeTargets, presentationPolicy: plan.scopeControl.presentationPolicy, implementationPolicy: plan.scopeControl.implementationPolicy }, note: '未列入本次变更闭包的内容沿用已冻结 Existing 基线，不重新罗列、不重新设计、不再次确认。' } : {}), deliveryNarrative: plan.deliveryNarrative, userNeedFit: plan.selectionAnalysis.userNeedFit }),
     '## 2. 信息架构与布局', block({ informationArchitecture: plan.layout.informationArchitecture, grid: plan.layout.grid, responsive }),
     '## 3. 视觉 Token', block(track === 'existing' ? { tokenPolicy: plan.scopeControl.tokenPolicy, tokenDeltas: plan.scopeControl.tokenDeltas, unchangedSummary: plan.scopeControl.unchangedSummary, designContract: plan.selectionAnalysis.designContract } : { styleDirection: plan.visualSystem.styleDirection, colors: plan.visualSystem.colors, typography: plan.visualSystem.typography, effects: plan.visualSystem.effects, designContract: plan.selectionAnalysis.designContract }),
     '## 4. 组件与交互', block({ components: plan.components, contentHierarchy: plan.content.hierarchy, dataExpression: plan.content.dataExpression }),
@@ -55,6 +66,7 @@ function renderVisualPresentation(plan, track) {
     '## 7. 响应式与状态', block({ responsiveContract: responsive, loadingEmptyErrorPermissionStates: states }),
     '## 8. 真实来源与物化', block({ sourceSelections: selected, dependencies: plan.dependencies }),
     '## 9. 候选比较与取舍', block({ libraryComparisons: plan.selectionAnalysis.libraryComparisons, alternatives: plan.selectionAnalysis.alternatives, aestheticAssessment: plan.selectionAnalysis.aestheticAssessment, industryBenchmark: plan.selectionAnalysis.industryBenchmark }),
+    ...(roleSummary ? ['### 内部专业协作摘要', roleSummary] : []),
     '## 10. 实施影响与验收', block({ trackNarrative: narrative, dependencies: plan.dependencies, responsiveAcceptance: responsive.acceptance, risks: plan.risks, status: plan.status }),
     ''
   ].join('\n');
@@ -80,6 +92,7 @@ const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'plan_vis
 const stateFile = path.join(runDir, 'state.json'), state = read(stateFile);
 if (state.gates?.gate1?.status !== 'passed' || state.locks?.visualPlanApproved) die('a current post-Gate-1 visual plan must be awaiting user confirmation');
 const plan = read(path.resolve(inputArg));
+const roleSummary = roleVisualSummary(state, runDir);
 validateIndustryBenchmark(plan);
 for (const key of ['layout', 'visualSystem', 'content']) if (!plan[key] || typeof plan[key] !== 'object') die(`plan misses ${key}`);
 const narrative = plan.deliveryNarrative;
@@ -129,7 +142,12 @@ for (const scene of plan.threeD || []) { if (!scene.id || !['three-js', 'babylon
 const planFile = path.join(runDir, 'visual-execution-plan.json');
 write(planFile, plan);
 const presentationFile = path.join(runDir, 'visual-plan-presentation.md');
-fs.writeFileSync(presentationFile, renderVisualPresentation(plan, state.track));
+fs.writeFileSync(presentationFile, renderVisualPresentation(plan, state.track, roleSummary));
+let presentationScopeValidation = null;
+if (state.track === 'existing') {
+  try { presentationScopeValidation = assertAffectedOnlyPresentation(fs.readFileSync(presentationFile, 'utf8'), read(path.resolve(runDir, state.artifacts.changeScope))); }
+  catch (error) { die(error.message); }
+}
 const manifestFile = path.join(runDir, 'visual-plan-presentation-manifest.json');
 write(manifestFile, {
   schemaVersion: '3.0',
@@ -139,6 +157,8 @@ write(manifestFile, {
   visualExecutionPlan: 'visual-execution-plan.json',
   visualExecutionPlanSha256: sha256(planFile),
   ...(state.track === 'existing' ? { changeScope: state.artifacts.changeScope, changeScopeSha256: plan.scopeControl.changeScopeHash } : {}),
+  ...(presentationScopeValidation ? { presentationScopeValidation } : {}),
+  ...(roleSummary ? { roleDecisionSummary: state.artifacts.roleDecisionSummaries.visual, roleDecisionSummarySha256: sha256(path.resolve(runDir, state.artifacts.roleDecisionSummaries.visual)) } : {}),
   requiredSections: ['目标与范围', '信息架构与布局', '视觉 Token', '组件与交互', '图标、图表与素材', '动效与可访问性', '响应式与状态', '真实来源与物化', '候选比较与取舍', '实施影响与验收'],
   status: 'ready-for-user-confirmation'
 });
