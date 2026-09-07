@@ -1611,6 +1611,22 @@
         "scripts/role-quality-evaluator.mjs"
       ],
       "releasedAt": "2026-09-02T13:24:15.843Z"
+    },
+    {
+      "from": "4.23.3",
+      "to": "4.24.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-action.mjs",
+        "scripts/apex-router.mjs",
+        "scripts/codex-stop-continuation.mjs",
+        "scripts/contract-recorder.mjs",
+        "scripts/role-advisory.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-07T14:09:37.027Z"
     }
   ]
 }

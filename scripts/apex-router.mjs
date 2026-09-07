@@ -594,6 +594,45 @@ function deliveryRequiresApiContracts(state, runDir) {
     return (read(contract).capabilities || []).some(capability => ['backend', 'api-contract'].includes(capability));
   } catch { return false; }
 }
+function roleStageState(state, runDir, stage) {
+  if (!state.roleChain?.enabled) return 'not-required';
+  const manifestFile = artifactFile(runDir, state.artifacts?.roleAdvisoryManifest);
+  if (!manifestFile) return 'select';
+  try {
+    const entry = read(manifestFile).stages?.[stage];
+    if (!entry?.selectedRoles?.length) return 'select';
+    if (!entry.advisories || entry.advisories.length !== entry.selectedRoles.length) return 'record';
+    if (!entry.summary || !artifactFile(runDir, entry.summary)) return 'summarize';
+    return roleStageReady(state, runDir, stage) ? 'ready' : 'repair';
+  } catch { return 'select'; }
+}
+function automaticWorkStep(state, runDir, action) {
+  const runFile = name => artifactFile(runDir, state.artifacts?.[name]);
+  const step = (id, title, produces, details, followUpAction = action) => ({ id, title, produces, details, authorizationAction: followUpAction, mandatory: true, userInteraction: 'forbidden', afterCompletion: 're-read-router-status-and-execute-the-next-current-step' });
+  if (action === 'collect_existing_baseline') {
+    if (!runFile('projectInventory')) return step('capture-project-inventory', '扫描正式项目入口、技术栈与脚本', ['project-inventory.json'], '通过 collect_existing_baseline 调用 project-intake.mjs scan；仅扫描正式项目，排除 .apex 与临时 Demo。');
+    if (!runFile('codeReference') || !runFile('pageSkeleton')) return step('freeze-code-reference', '从当前目标页生成 Existing 代码闭包与页面骨架', ['baseline-code-scope-input.json', 'code-reference.json', 'page-skeleton.json'], '内部根据当前需求、真实入口和路由生成范围输入，再调用 existing-code-reference.mjs capture；不得使用模板 Replace 值。');
+    const display = path.join(runDir, 'evidence', 'existing-browser-capture.json');
+    if (!fs.existsSync(display)) return step('capture-existing-browser-baseline', '采集真实 Existing 页面截图与 DOM 证据', ['browser-spec.json', 'evidence/existing-browser-capture.json'], '内部基于已冻结目标页生成浏览器规格并调用 browser-capture.mjs capture；截图和 DOM 仅作证据，不是用户确认。');
+    const baseline = existingVisualBaselineStatus(runDir, state);
+    if (!baseline.ready) return step('freeze-existing-baseline', '从真实代码、DOM、截图和样式源冻结 Existing 基线', ['existing-baseline-input.json', 'existing-baseline.json'], `内部生成真实基线输入并调用 baseline-collector.mjs capture；当前校验原因：${baseline.reason}。禁止提交占位符、1970 时间或 Replace 模板。`);
+    if (!runFile('changeScope')) return step('freeze-change-scope', '冻结本次受影响闭包与未改动保护补集', ['change-scope-input.json', 'change-scope.json'], '内部从用户目标和完整代码引用生成局部变更闭包，再以 record_context 调用 contract-recorder.mjs scope。', 'record_context');
+    const roles = roleStageState(state, runDir, 'baseline');
+    if (roles !== 'ready' && roles !== 'not-required') return step(`baseline-role-${roles}`, '完成 Existing 基线专业角色汇总', ['advisories/baseline/selection.json', 'advisories/baseline/*.json', 'advisories/baseline/role-decision-summary.md'], `通过 collect_existing_baseline 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record/degrade' : 'summarize'}；这是内部工作，不得向用户提问。`);
+    return step('continue-gate1-analysis', '转入 Gate 1 需求与交付方案编译', [], 'Existing 基线已有效；重新读取 Router 后必须授权 analyze_requirement 并继续完整 Gate 1 链。', 'analyze_requirement');
+  }
+  if (action === 'analyze_requirement') {
+    if (!runFile('intentBrief') || !runFile('deliveryContract')) return step('derive-intent-and-delivery', '根据用户需求和冻结基线生成需求及交付契约', ['intent-brief.json', 'delivery-contract.json'], '内部从当前任务和 Existing/Greenfield 基线提炼可验证目标、范围、能力与不包含项；不得显示确认。', 'record_context');
+    if (deliveryRequiresApiContracts(state, runDir) && !runFile('domainModel')) return step('record-domain-model', '登记领域模型', ['domain-model-input.json', 'domain-model.json'], '基于当前代码/API 证据生成领域模型输入，再以 record_context 调用 contract-recorder.mjs domain。', 'record_context');
+    if (deliveryRequiresApiContracts(state, runDir) && !runFile('apiContract')) return step('record-api-contract', '登记 API 契约', ['api-contract-input.json', 'api-contract.json'], '基于当前代码/API 证据生成 API 契约输入，再以 record_context 调用 contract-recorder.mjs api。', 'record_context');
+    if (!runFile('experienceStrategy') || !runFile('experienceQualityEvidence')) return step('evaluate-experience-strategy', '评估体验策略与质量证据', ['experience-strategy.json', 'experience-quality-evidence.json'], '通过 analyze_requirement 调用 experience-evaluator.mjs；质量结论必须绑定当前需求与基线。');
+    const roles = roleStageState(state, runDir, 'gate1');
+    if (roles !== 'ready' && roles !== 'not-required') return step(`gate1-role-${roles}`, '完成 Gate 1 专业角色汇总', ['advisories/gate1/selection.json', 'advisories/gate1/*.json', 'advisories/gate1/role-decision-summary.md'], `通过 analyze_requirement 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record/degrade' : 'summarize'}；角色结论必须写入八节方案的内部专业协作摘要。`);
+    if (!runFile('gate1Presentation') || !runFile('gate1PresentationManifest')) return step('compile-gate1-presentation', '生成完整八节需求与交付方案', ['gate1-presentation.md', 'gate1-presentation-manifest.json'], '通过 analyze_requirement 调用 contract-recorder.mjs gate1-presentation。完成后不得停止，必须登记该方案。');
+    if (!gate1PresentationRegistrationReady(runDir, state)) return step('register-gate1-presentation', '登记完整 Gate 1 方案并打开唯一确认点', ['registrations/gate1-presentation-*.json'], '重新授权 analyze_requirement 后调用 Router register-gate1-presentation；随后完整流式展示八节方案，并且只显示“确认需求与交付方案”。');
+  }
+  return null;
+}
 function gate1PrerequisitesReady(state, runDir) {
   if (!runDir) return false;
   const required = ['intentBrief', 'deliveryContract', 'experienceStrategy', 'experienceQualityEvidence'];
@@ -721,6 +760,7 @@ function executionDirective(state, runDir = null) {
   const requiresApiContracts = action === 'analyze_requirement' && deliveryRequiresApiContracts(state, runDir);
   // This is deliberately structured rather than prose.  A host must not turn
   // a confirmed visual plan into a generic chat "continue" affordance.
+  const currentStep = automaticWorkStep(state, runDir, action);
   return {
     kind: 'must-complete-before-user-response',
     action,
@@ -745,6 +785,13 @@ function executionDirective(state, runDir = null) {
         : action === 'implement'
           ? { action, required: true, leaseRequired: true, leaseMode: 'acquire-before-router-authorize', runner: 'host-controlled-implementation', mode: 'lease-then-router-authorize-then-apply-approved-implementation-map', scope: 'formal-project-files-only-within-approved-implementation-map', requiredPostconditions: ['page-delta.json', 'selected-dependency-materialization-record', 'no-out-of-scope-project-changes'] }
           : { action, required: true, runner: 'apex-action.mjs', mode: 'run-after-router-authorize' },
+    currentStep,
+    continuationProtocol: {
+      reauthorizeAfterEveryStateWrite: true,
+      nextStepSource: 'executionDirective.currentStep',
+      terminalRule: 'do not end on a completed substep; repeat Router status and execute currentStep until Router exposes an exact confirmation or a receipt-backed failure',
+      forbiddenTerminalStates: ['baseline-captured-only', 'code-reference-captured-only', 'browser-captured-only', 'stage-summary-only']
+    },
     streamingProgress: {
       enabled: true,
       mode: 'commentary-step-progress',

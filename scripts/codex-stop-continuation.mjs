@@ -38,11 +38,12 @@ try {
   if (contract.allowed !== false || !contract.mustContinueAction) { output({}); process.exit(0); }
   const directive = status.executionDirective || {};
   const chain = Array.isArray(directive.requiredChain) ? directive.requiredChain.join(' → ') : contract.mustContinueAction;
+  const currentStep = directive.currentStep ? ` Current concrete step: ${directive.currentStep.title} [${directive.currentStep.id}]. It must produce ${Array.isArray(directive.currentStep.produces) && directive.currentStep.produces.length ? directive.currentStep.produces.join(', ') : 'the next Router state'} and then re-read Router.` : '';
   const subActions = Array.isArray(directive.actionAuthorization?.internalSubActions) && directive.actionAuthorization.internalSubActions.length
     ? ` Required internal sub-actions: ${directive.actionAuthorization.internalSubActions.map(item => `${item.command} (${item.requiredArtifact})`).join(', ')}.` : '';
   output({
     decision: 'block',
-    reason: `APEX continuation is mandatory: execute the authorized ${contract.mustContinueAction} chain now: ${chain}.${subActions} Do not emit a progress-only final response. Re-read Router after each operation; end only at its exact named confirmation, Demo route choice, delivery evidence, or an observed blocking report with an operation receipt.`
+    reason: `APEX continuation is mandatory: execute the authorized ${contract.mustContinueAction} chain now: ${chain}.${currentStep}${subActions} Do not emit a progress-only final response. Re-read Router after each operation; end only at its exact named confirmation, Demo route choice, delivery evidence, or an observed blocking report with an operation receipt.`
   });
 } catch {
   // A hook must never block unrelated Codex work merely because an APEX run

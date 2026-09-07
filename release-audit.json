@@ -1,17 +1,17 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-09-02T13:24:52.339Z",
+  "auditedAt": "2026-09-07T14:10:15.398Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"bumped\",\"from\":\"4.23.0\",\"version\":\"4.23.1\",\"level\":\"patch\",\"reason\":\"compatible APEX runtime implementation fix\",\"changed\":[\"package.json\",\"registry/capability-registry.json\",\"scripts/visual-execution-plan.mjs\",\"scripts/role-quality-evaluator.mjs\"]}"
+      "detail": "{\"status\":\"bumped\",\"from\":\"4.23.3\",\"version\":\"4.24.0\",\"level\":\"minor\",\"reason\":\"materially extended APEX runtime capability or contract\",\"changed\":[\"runtime/host-bridges/codex-skill/SKILL.md\",\"scripts/apex-action.mjs\",\"scripts/apex-router.mjs\",\"scripts/codex-stop-continuation.mjs\",\"scripts/contract-recorder.mjs\",\"scripts/role-advisory.mjs\",\"scripts/router-contract-test.mjs\"]}"
     },
     {
       "id": "global-bridge-published",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"220177353eee5c958885dbc2b4cfac4530b35a145878cc5b48635110a6a1997d\"}"
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"59890f0278fadb39d0b27c6f13be5f04046fe7685f588152b07583ba8030ff4d\"}"
     },
     {
       "id": "manifest-semver",
@@ -46,7 +46,7 @@
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.23.1 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.24.0 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",
@@ -686,7 +686,7 @@
     {
       "id": "router-contract",
       "status": "passed",
-      "detail": "{\"status\":\"passed\",\"checks\":48}"
+      "detail": "{\"status\":\"passed\",\"checks\":50}"
     },
     {
       "id": "role-advisory-contract",
@@ -731,7 +731,7 @@
     {
       "id": "portable-install-contract",
       "status": "passed",
-      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":48}"
+      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":50}"
     },
     {
       "id": "package-manifest",
