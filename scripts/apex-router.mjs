@@ -176,12 +176,12 @@ function purgeRetiredRun(root, previous, activeRunDir) {
   if (fs.existsSync(retiredDir)) fs.rmSync(retiredDir, { recursive: true, force: false });
   return { runId: previous.runId, purged: !fs.existsSync(retiredDir), scope: 'current-session-bound-run-only' };
 }
-const gate1Artifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton', 'experienceStrategy', 'experienceQualityEvidence', 'domainModel', 'apiContract', 'dataContract', 'siteContract', 'functionalFreeze'];
+const gate1Artifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton', 'experienceStrategy', 'experienceQualityEvidence', 'domainModel', 'apiContract', 'functionalFreeze'];
 // Formal Existing evidence remains valid when the user refines the requested
 // product behavior.  Everything derived from that behavior must be rebuilt;
 // otherwise an approved Gate 1 receipt can silently describe an older scope.
-const gate1DerivedArtifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'gate1PresentationManifest', 'experienceStrategy', 'experienceQualityEvidence', 'domainModel', 'apiContract', 'dataContract', 'siteContract', 'functionalFreeze', 'changeScope'];
-const visualAndImplementationArtifacts = ['motionContract', 'motionEvidence', 'visualExecutionPlan', 'visualPlanPresentation', 'visualPlanPresentationManifest', 'visualSandboxFiles', 'runtimeDemo', 'runtimeSourceLock', 'runtimeVisualBaseline', 'runtimeMaterialization', 'runtimeMaterializationAudit', 'materializedAssets', 'materializedAssetsAudit', 'designCandidates', 'visualSourceManifest', 'visualReference', 'gate1VisualOutput', 'stitchFreeze', 'stitchParityEvidence', 'implementationParityEvidence', 'visualBundle', 'implementationMap', 'runtimeStateMatrix', 'verificationPlan', 'verificationBundle', 'pageDelta', 'dependencyLock'];
+const gate1DerivedArtifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'gate1PresentationManifest', 'experienceStrategy', 'experienceQualityEvidence', 'domainModel', 'apiContract', 'functionalFreeze', 'changeScope'];
+const visualAndImplementationArtifacts = ['motionContract', 'motionEvidence', 'visualExecutionPlan', 'visualPlanPresentation', 'visualPlanPresentationManifest', 'visualSandboxFiles', 'runtimeDemo', 'runtimeSourceLock', 'runtimeVisualBaseline', 'runtimeMaterialization', 'runtimeMaterializationAudit', 'materializedAssets', 'materializedAssetsAudit', 'designCandidates', 'visualSourceManifest', 'visualReference', 'gate1VisualOutput', 'siteContract', 'stitchFreeze', 'stitchParityEvidence', 'implementationParityEvidence', 'visualBundle', 'implementationMap', 'runtimeStateMatrix', 'verificationPlan', 'verificationBundle', 'pageDelta', 'dependencyLock'];
 function clearArtifactReferences(state, names) {
   const cleared = [];
   for (const name of names) {
@@ -404,6 +404,7 @@ function registerGate1Presentation(root, run, sessionId, authorizationRef) {
   const state = stateOf(run.runDir);
   if (state.lifecycle !== 'active' || state.gates?.gate1?.status === 'passed') fail('Gate 1 presentation registration is only available before Gate 1 approval');
   if (state.track === 'existing' && !existingVisualBaselineStatus(run.runDir, state).ready) fail('Gate 1 presentation registration requires a current Existing formal-code and browser baseline');
+  if (!gate1PrerequisitesReady(state, run.runDir)) fail('Gate 1 presentation registration requires all automatic requirement, API/domain, baseline, experience, and role-advisory prerequisites');
   const presentation = artifactFile(run.runDir, state.artifacts?.gate1Presentation);
   const manifest = artifactFile(run.runDir, state.artifacts?.gate1PresentationManifest);
   if (!presentation || !manifest || !gate1PresentationReady(state, run.runDir)) fail('Gate 1 presentation registration requires a complete current eight-section presentation and manifest');
@@ -529,6 +530,7 @@ function gate1PresentationReady(state, runDir) {
     const manifest = read(manifestFile);
     if (manifest.status !== 'ready-for-user-confirmation' || manifest.track !== state.track || manifest.presentationSha256 !== sha256File(presentation)) return false;
     const required = ['intentBrief', 'deliveryContract', 'experienceStrategy'];
+    if (deliveryRequiresApiContracts(state, runDir)) required.push('domainModel', 'apiContract');
     if (state.track === 'existing') required.push('projectInventory', 'existingBaseline', 'functionalFreeze', 'changeScope');
     const sourcesCurrent = required.every(name => {
       const source = manifest.sources?.[name], file = artifactFile(runDir, source?.path);
@@ -585,23 +587,34 @@ function roleStageReady(state, runDir, stage) {
     });
   } catch { return false; }
 }
+function deliveryRequiresApiContracts(state, runDir) {
+  try {
+    const contract = artifactFile(runDir, state.artifacts?.deliveryContract);
+    if (!contract) return false;
+    return (read(contract).capabilities || []).some(capability => ['backend', 'api-contract'].includes(capability));
+  } catch { return false; }
+}
+function gate1PrerequisitesReady(state, runDir) {
+  if (!runDir) return false;
+  const required = ['intentBrief', 'deliveryContract', 'experienceStrategy', 'experienceQualityEvidence'];
+  if (state.track === 'existing') {
+    if (!existingVisualBaselineStatus(runDir, state).ready) return false;
+    required.push('projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton', 'functionalFreeze', 'changeScope');
+  }
+  try {
+    if (required.some(name => !artifactFile(runDir, state.artifacts?.[name]))) return false;
+    if (!roleStageReady(state, runDir, 'gate1') || (state.track === 'existing' && !roleStageReady(state, runDir, 'baseline'))) return false;
+    return !deliveryRequiresApiContracts(state, runDir) || ['domainModel', 'apiContract'].every(name => artifactFile(runDir, state.artifacts?.[name]));
+  } catch { return false; }
+}
 function checkpointReady(state, runDir, checkpoint) {
   if (!runDir) return false;
   if (checkpoint === 'gate1') {
     // This controls only whether a completed proposal may be shown.  The
     // approval path below still runs pre-gate1, including full source hashes.
-    const required = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'gate1PresentationManifest', 'experienceStrategy', 'experienceQualityEvidence'];
-    if (state.track === 'existing') {
-      // A complete narrative is not confirmable if its formal code or browser
-      // baseline has drifted.  Otherwise Router can expose Gate 1 and only
-      // discover the contradiction after the user has already confirmed it.
-      if (!existingVisualBaselineStatus(runDir, state).ready) return false;
-      required.push('projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton', 'functionalFreeze', 'changeScope');
-    }
+    const required = ['gate1Presentation', 'gate1PresentationManifest'];
     try {
-      if (required.some(name => !artifactFile(runDir, state.artifacts?.[name])) || !roleStageReady(state, runDir, 'gate1') || (state.track === 'existing' && !roleStageReady(state, runDir, 'baseline')) || !gate1PresentationReady(state, runDir) || !gate1PresentationRegistrationReady(runDir, state)) return false;
-      const contract = read(artifactFile(runDir, state.artifacts.deliveryContract));
-      if ((contract.capabilities || []).some(capability => ['backend', 'api-contract'].includes(capability)) && ['domainModel', 'apiContract'].some(name => !artifactFile(runDir, state.artifacts?.[name]))) return false;
+      if (!gate1PrerequisitesReady(state, runDir) || required.some(name => !artifactFile(runDir, state.artifacts?.[name])) || !gate1PresentationReady(state, runDir) || !gate1PresentationRegistrationReady(runDir, state)) return false;
       return true;
     } catch { return false; }
   }
@@ -705,6 +718,7 @@ function responsePolicy(state, runDir = null) {
 function executionDirective(state, runDir = null) {
   const action = nextRequiredAction(state, runDir);
   if (!['analyze_requirement', 'collect_existing_baseline', 'plan_visual', 'generate_visual', 'register_runtime_demo', 'sync_stitch', 'compile_visual_bundle', 'open_gate2', 'implement', 'verify', 'pass_proof', 'open_gate3'].includes(action)) return null;
+  const requiresApiContracts = action === 'analyze_requirement' && deliveryRequiresApiContracts(state, runDir);
   // This is deliberately structured rather than prose.  A host must not turn
   // a confirmed visual plan into a generic chat "continue" affordance.
   return {
@@ -723,7 +737,7 @@ function executionDirective(state, runDir = null) {
       allowedAfterAttempt: 'only report the observed action error together with its failed operation receipt and missing artifacts'
     },
     actionAuthorization: action === 'analyze_requirement'
-      ? { action, required: true, runner: 'apex-action.mjs + apex-router.mjs', command: 'register-gate1-presentation', mode: 'run-complete-gate1-chain-then-register-before-presentation' }
+      ? { action, required: true, runner: 'apex-action.mjs + apex-router.mjs', command: 'register-gate1-presentation', mode: 'run-complete-gate1-chain-then-register-before-presentation', ...(requiresApiContracts ? { internalSubActions: [{ action: 'record_context', script: 'contract-recorder.mjs', command: 'domain', requiredArtifact: 'domain-model.json' }, { action: 'record_context', script: 'contract-recorder.mjs', command: 'api', requiredArtifact: 'api-contract.json' }] } : {}) }
       : action === 'register_runtime_demo'
       ? { action, required: true, runner: 'apex-router.mjs', command: 'register-runtime-demo', mode: 'run-after-router-authorize' }
       : ['open_gate2', 'pass_proof', 'open_gate3'].includes(action)
@@ -745,7 +759,7 @@ function executionDirective(state, runDir = null) {
     requiredChain: action === 'collect_existing_baseline'
       ? ['scan_formal_project_inventory', 'freeze_code_reference_and_page_skeleton', 'capture_real_browser_baseline', 'bind_existing_baseline', 'select_and_run_baseline_role_advisories', 'analyze_requirement_and_emit_complete_gate1_presentation']
       : action === 'analyze_requirement'
-      ? ['derive_requirement_and_delivery_contract', 'evaluate_experience_strategy', 'select_and_run_gate1_role_advisories', 'synthesize_role_decisions_into_gate1_presentation', 'emit_complete_8_section_gate1_presentation', 'register_complete_gate1_presentation', 'render_chat_orientation_and_full_eight_section_plan', 'request_named_gate1_confirmation']
+      ? ['derive_requirement_and_delivery_contract', ...(requiresApiContracts ? ['derive_and_record_domain_model_from_current_scope', 'derive_and_record_api_contract_from_current_scope'] : []), 'evaluate_experience_strategy', 'select_and_run_gate1_role_advisories', 'synthesize_role_decisions_into_gate1_presentation', 'emit_complete_8_section_gate1_presentation', 'register_complete_gate1_presentation', 'render_chat_orientation_and_full_eight_section_plan', 'request_named_gate1_confirmation']
       : action === 'plan_visual'
       ? ['analyze_requirement_and_platform_constraints', 'select_and_run_visual_role_advisories', 'compare_real_layout_style_component_icon_chart_motion_sources', 'synthesize_role_decisions_into_visual_presentation', 'emit_visual_execution_plan', 'emit_10_section_visual_plan_presentation']
       : action === 'generate_visual'
@@ -755,7 +769,7 @@ function executionDirective(state, runDir = null) {
       : action === 'sync_stitch'
       ? ['submit_or_resume_same_stitch_job', 'capture_strict_export_and_parity_evidence', 'present_complete_stitch_candidate_and_request_stitch_confirmation']
       : action === 'compile_visual_bundle'
-      ? ['select_and_run_implementation_role_advisories', 'compile_visual_bundle', 'materialize_only_selected_sources', 'emit_implementation_map', 'present_complete_implementation_freeze_and_request_implementation_confirmation']
+      ? ['derive_and_record_site_contract_from_locked_visual_plan', 'select_and_run_implementation_role_advisories', 'compile_visual_bundle', 'materialize_only_selected_sources', 'emit_implementation_map', 'present_complete_implementation_freeze_and_request_implementation_confirmation']
       : action === 'open_gate2'
       ? ['run_pre_gate2_machine_validation', 'open_gate2', 'continue_to_controlled_implementation']
       : action === 'implement'
@@ -765,7 +779,7 @@ function executionDirective(state, runDir = null) {
       : action === 'pass_proof'
       ? ['pass_proof', 'open_gate3']
       : ['open_gate3', 'present_delivery_evidence'],
-    completionEvidence: action === 'collect_existing_baseline' ? ['project-inventory.json', 'code-reference.json', 'page-skeleton.json', 'existing-baseline.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'analyze_requirement' ? ['intent-brief.json', 'delivery-contract.json', 'experience-strategy.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'plan_visual' ? ['visual-execution-plan.json', 'visual-plan-presentation.md'] : action === 'generate_visual' ? ['runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json'] : action === 'register_runtime_demo' ? ['registrations/runtime-demo-*.json'] : action === 'sync_stitch' ? ['stitch-freeze.json', 'stitch-parity-evidence.json'] : action === 'compile_visual_bundle' ? ['visual-bundle.json', 'implementation-map.json'] : action === 'open_gate2' ? ['Gate 2 passed machine evidence'] : action === 'implement' ? ['page-delta.json'] : action === 'verify' ? ['verification-bundle.json', 'proof evidence'] : action === 'pass_proof' ? ['passed proof evidence'] : ['Gate 3 delivery evidence'],
+    completionEvidence: action === 'collect_existing_baseline' ? ['project-inventory.json', 'code-reference.json', 'page-skeleton.json', 'existing-baseline.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'analyze_requirement' ? ['intent-brief.json', 'delivery-contract.json', ...(requiresApiContracts ? ['domain-model.json', 'api-contract.json'] : []), 'experience-strategy.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'plan_visual' ? ['visual-execution-plan.json', 'visual-plan-presentation.md'] : action === 'generate_visual' ? ['runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json'] : action === 'register_runtime_demo' ? ['registrations/runtime-demo-*.json'] : action === 'sync_stitch' ? ['stitch-freeze.json', 'stitch-parity-evidence.json'] : action === 'compile_visual_bundle' ? ['site-contract.json', 'visual-bundle.json', 'implementation-map.json'] : action === 'open_gate2' ? ['Gate 2 passed machine evidence'] : action === 'implement' ? ['page-delta.json'] : action === 'verify' ? ['verification-bundle.json', 'proof evidence'] : action === 'pass_proof' ? ['passed proof evidence'] : ['Gate 3 delivery evidence'],
     userVisibleResults: action === 'collect_existing_baseline' || action === 'analyze_requirement' ? ['full-gate1-presentation-and-confirmation', 'blocking-report'] : action === 'plan_visual' ? ['full-visual-plan-presentation-and-confirmation', 'blocking-report'] : action === 'generate_visual' || action === 'register_runtime_demo' ? ['runtime-demo', 'blocking-report'] : action === 'sync_stitch' ? ['full-stitch-presentation-and-confirmation', 'blocking-report'] : action === 'compile_visual_bundle' ? ['full-implementation-freeze-presentation-and-confirmation', 'blocking-report'] : action === 'open_gate3' ? ['delivery-evidence', 'blocking-report'] : ['automatic-chain-progress', 'blocking-report'],
     forbiddenTerminalResults: ['stage-status-only', 'generation-progress-only', 'artifact-file-list-only', ...(action === 'plan_visual' ? ['one-sentence-plan-summary'] : [])],
     prohibitedUserPrompts: ['continue', 'confirm-runtime-demo', 'poll-for-progress', ...(action === 'plan_visual' ? ['generate-visual-plan', 'report-missing-visual-execution-plan-before-attempt'] : []), ...(action === 'sync_stitch' ? ['confirm-stitch-before-candidate-is-ready'] : []), ...(action === 'compile_visual_bundle' ? ['confirm-implementation-before-freeze-is-ready'] : [])]

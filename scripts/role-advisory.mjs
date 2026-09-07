@@ -13,7 +13,7 @@ const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
 const stageAction = { baseline: 'collect_existing_baseline', gate1: 'analyze_requirement', visual: 'plan_visual', implementation: 'compile_visual_bundle', verify: 'verify' };
 const stageArtifacts = {
   baseline: ['projectInventory', 'codeReference', 'pageSkeleton', 'existingBaseline', 'functionalFreeze', 'changeScope'],
-  gate1: ['intentBrief', 'deliveryContract', 'experienceStrategy'],
+  gate1: ['intentBrief', 'deliveryContract', 'domainModel', 'apiContract', 'experienceStrategy'],
   visual: ['deliveryContract', 'experienceStrategy', 'changeScope'],
   implementation: ['visualExecutionPlan', 'visualSourceManifest'],
   verify: ['implementationMap', 'pageDelta', 'verificationBundle']

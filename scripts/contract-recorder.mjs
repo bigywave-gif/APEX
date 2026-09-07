@@ -22,7 +22,7 @@ function validate(schema, file) {
 
 const [command, runArg, inputArg] = process.argv.slice(2);
 assertCanonicalRoot();
-const contracts = { intent: { target: 'intent-brief.json', schema: 'intent-brief.schema.json', artifact: 'intentBrief' }, delivery: { target: 'delivery-contract.json', schema: 'delivery-contract.schema.json', artifact: 'deliveryContract' }, scope: { target: 'change-scope.json', schema: 'change-scope.schema.json', artifact: 'changeScope' }, domain: { target: 'domain-model.json', schema: 'domain-model.schema.json', artifact: 'domainModel' }, api: { target: 'api-contract.json', schema: 'api-contract.schema.json', artifact: 'apiContract' } };
+const contracts = { intent: { target: 'intent-brief.json', schema: 'intent-brief.schema.json', artifact: 'intentBrief' }, delivery: { target: 'delivery-contract.json', schema: 'delivery-contract.schema.json', artifact: 'deliveryContract' }, scope: { target: 'change-scope.json', schema: 'change-scope.schema.json', artifact: 'changeScope' }, domain: { target: 'domain-model.json', schema: 'domain-model.schema.json', artifact: 'domainModel' }, api: { target: 'api-contract.json', schema: 'api-contract.schema.json', artifact: 'apiContract' }, site: { target: 'site-contract.json', schema: 'site-contract.schema.json', artifact: 'siteContract' } };
 const gate1PresentationSections = [
   '## 1. 需求方向与成功标准',
   '## 2. 用户、场景与核心任务',
@@ -42,15 +42,21 @@ function completeSections(content, sections) {
     return next > start && content.slice(start + section.length, next).replace(/[#*_`>|\-\s]/g, '').length >= 40;
   });
 }
-if ((!contracts[command] && command !== 'gate1-presentation') || !runArg || !inputArg) die('usage: intent|delivery|scope|domain|api|gate1-presentation <run-dir> <input-file>');
+function deliveryRequiresApiContracts(state) {
+  const reference = state.artifacts?.deliveryContract;
+  const file = reference && path.resolve(runDir, reference);
+  if (!file || !file.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(file)) return false;
+  return (read(file).capabilities || []).some(capability => ['backend', 'api-contract'].includes(capability));
+}
+if ((!contracts[command] && command !== 'gate1-presentation') || !runArg || !inputArg) die('usage: intent|delivery|scope|domain|api|site|gate1-presentation <run-dir> <input-file>');
 const runDir = path.resolve(runArg);
 // A Gate 1 presentation is not incidental context: it is the user-facing
 // output of analyze_requirement.  Other contracts remain record_context-only.
-const permittedActions = command === 'gate1-presentation' ? ['record_context', 'analyze_requirement'] : 'record_context';
+const permittedActions = command === 'gate1-presentation' ? ['record_context', 'analyze_requirement'] : command === 'site' ? 'compile_visual_bundle' : 'record_context';
 try { requireRouterAction(runDir, permittedActions); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
-if (state.gates?.gate1?.status === 'passed') die('Gate 1 is frozen; revise the requirement through the Router instead of replacing a contract');
+if (command !== 'site' && state.gates?.gate1?.status === 'passed') die('Gate 1 is frozen; revise the requirement through the Router instead of replacing a contract');
 if (command === 'gate1-presentation') {
   const content = fs.readFileSync(path.resolve(inputArg), 'utf8');
   if (!completeSections(content, gate1PresentationSections)) die('Gate 1 presentation must contain substantive content in all eight APEX-defined direction sections');
@@ -63,7 +69,9 @@ if (command === 'gate1-presentation') {
     if (!roleManifest || !roleSummary || !roleManifest.startsWith(`${runDir}${path.sep}`) || !roleSummary.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(roleManifest) || !fs.existsSync(roleSummary)) die('Gate 1 presentation requires the current controlled role-advisory manifest and gate1 decision summary');
     if (!content.includes('### 内部专业协作摘要')) die('Gate 1 presentation must include “### 内部专业协作摘要” so the user can review the synthesized professional rationale');
   }
-  const sourceArtifacts = ['intentBrief', 'deliveryContract', 'experienceStrategy'];
+  const requiresApiContracts = deliveryRequiresApiContracts(state);
+  if (requiresApiContracts && ['domainModel', 'apiContract'].some(artifact => !state.artifacts?.[artifact])) die('Gate 1 presentation requires the current domain-model.json and api-contract.json required by the frozen delivery contract');
+  const sourceArtifacts = ['intentBrief', 'deliveryContract', 'experienceStrategy', ...(requiresApiContracts ? ['domainModel', 'apiContract'] : [])];
   if (state.track === 'existing') {
     sourceArtifacts.push('projectInventory', 'existingBaseline', 'functionalFreeze', 'changeScope');
     for (const heading of ['### 本次变更闭包', '### 明确保留内容']) if (!content.includes(heading)) die(`Existing Gate 1 presentation must include ${heading} and may describe unchanged areas only by baseline reference`);
@@ -75,7 +83,7 @@ if (command === 'gate1-presentation') {
     if (!file || !file.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(file)) die(`Gate 1 presentation requires the frozen ${artifact} source artifact`);
     sources[artifact] = { path: reference, sha256: sha256(file) };
   }
-  for (const artifact of ['domainModel', 'apiContract']) {
+  for (const artifact of requiresApiContracts ? [] : ['domainModel', 'apiContract']) {
     const reference = state.artifacts?.[artifact], file = reference && path.resolve(runDir, reference);
     if (file && file.startsWith(`${runDir}${path.sep}`) && fs.existsSync(file)) sources[artifact] = { path: reference, sha256: sha256(file) };
   }
@@ -101,6 +109,9 @@ if (['domain', 'api'].includes(command)) {
   if (!deliveryFile || !deliveryFile.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(deliveryFile)) die('record delivery-contract.json before recording a domain model or API contract');
   const delivery = read(deliveryFile), capabilities = new Set(delivery.capabilities || []);
   if (!capabilities.has('backend') && !capabilities.has('api-contract')) die('domain and API contracts are only valid when the delivery contract requires backend or api-contract capability');
+}
+if (command === 'site') {
+  if (state.gates?.gate1?.status !== 'passed' || !state.locks?.visualPlanApproved || !state.artifacts?.visualExecutionPlan) die('site contract is created automatically after Gate 1 and visual-plan approval, from the locked visual execution plan');
 }
 const value = read(path.resolve(inputArg));
 value.schemaVersion = '3.0';

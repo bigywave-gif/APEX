@@ -36,9 +36,13 @@ try {
   const status = JSON.parse(result.stdout);
   const contract = status.terminalResponseContract || {};
   if (contract.allowed !== false || !contract.mustContinueAction) { output({}); process.exit(0); }
+  const directive = status.executionDirective || {};
+  const chain = Array.isArray(directive.requiredChain) ? directive.requiredChain.join(' → ') : contract.mustContinueAction;
+  const subActions = Array.isArray(directive.actionAuthorization?.internalSubActions) && directive.actionAuthorization.internalSubActions.length
+    ? ` Required internal sub-actions: ${directive.actionAuthorization.internalSubActions.map(item => `${item.command} (${item.requiredArtifact})`).join(', ')}.` : '';
   output({
     decision: 'block',
-    reason: `APEX continuation is mandatory: execute the authorized ${contract.mustContinueAction} chain now. Do not emit a progress-only final response. Re-read Router after each operation; end only at its exact named confirmation, Demo route choice, delivery evidence, or an observed blocking report with an operation receipt.`
+    reason: `APEX continuation is mandatory: execute the authorized ${contract.mustContinueAction} chain now: ${chain}.${subActions} Do not emit a progress-only final response. Re-read Router after each operation; end only at its exact named confirmation, Demo route choice, delivery evidence, or an observed blocking report with an operation receipt.`
   });
 } catch {
   // A hook must never block unrelated Codex work merely because an APEX run
