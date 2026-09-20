@@ -1,12 +1,12 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-09-20T12:00:34.473Z",
+  "auditedAt": "2026-09-20T12:18:45.459Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"bumped\",\"from\":\"4.36.3\",\"version\":\"4.36.4\",\"level\":\"patch\",\"reason\":\"compatible APEX runtime implementation fix\",\"changed\":[\"scripts/apex-router.mjs\",\"scripts/router-contract-test.mjs\"]}"
+      "detail": "{\"status\":\"bumped\",\"from\":\"4.36.4\",\"version\":\"4.37.0\",\"level\":\"minor\",\"reason\":\"materially extended APEX runtime capability or contract\",\"changed\":[\"scripts/apex-router.mjs\",\"scripts/apex-validate.mjs\",\"scripts/confirmation-presentation.mjs\",\"scripts/router-contract-test.mjs\"]}"
     },
     {
       "id": "global-bridge-published",
@@ -46,7 +46,7 @@
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.36.4 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.37.0 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",

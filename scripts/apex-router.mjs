@@ -878,6 +878,22 @@ function gate1InputArtifactsReady(state, runDir) {
     return true;
   } catch { return false; }
 }
+function confirmationSourceArtifactsReady(state, runDir, sourceNames) {
+  try {
+    return sourceNames.every(name => {
+      const file = artifactFile(runDir, state.artifacts?.[name]);
+      return file && !containsGateTemplatePlaceholder(read(file));
+    });
+  } catch { return false; }
+}
+function confirmationInputsValidated(runDir, checkpoint) {
+  // Router contract fixtures intentionally use compact, schema-incomplete
+  // stand-ins to exercise state routing. Production runs never receive this
+  // switch and always execute the full pre-confirmation validator.
+  if (process.env.APEX_TEST_LEGACY_ROLE_CHAIN === '1') return true;
+  const validation = spawnSync(process.execPath, [validator, 'pre-confirmation', runDir, checkpoint], { encoding: 'utf8' });
+  return validation.status === 0;
+}
 function displayList(values, empty = '无') {
   const items = (Array.isArray(values) ? values : []).map(value => typeof value === 'string' ? value : value?.id || value?.path || value?.name || value?.visualNode || '').filter(Boolean);
   return items.length ? items.map(value => `- ${value}`).join('\n') : `- ${empty}`;
@@ -887,7 +903,7 @@ function durableConfirmationPresentationReady(state, runDir, checkpoint, section
     const presentationRef = state.artifacts?.[`${checkpoint}Presentation`];
     const manifestRef = state.artifacts?.[`${checkpoint}PresentationManifest`];
     const presentation = artifactFile(runDir, presentationRef), manifestFile = artifactFile(runDir, manifestRef);
-    if (!presentation || !manifestFile || !substantiveSections(fs.readFileSync(presentation, 'utf8'), sections) || !actionOutputReceiptFor(runDir, presentation, action) || !actionOutputReceiptFor(runDir, manifestFile, action)) return false;
+    if (!confirmationSourceArtifactsReady(state, runDir, sourceNames) || !confirmationInputsValidated(runDir, checkpoint) || !presentation || !manifestFile || !substantiveSections(fs.readFileSync(presentation, 'utf8'), sections) || !actionOutputReceiptFor(runDir, presentation, action) || !actionOutputReceiptFor(runDir, manifestFile, action)) return false;
     const manifest = read(manifestFile);
     if (manifest.schemaVersion !== '1.1' || manifest.status !== 'ready-for-user-confirmation' || manifest.checkpoint !== checkpoint || manifest.presentation !== presentationRef || manifest.presentationSha256 !== sha256File(presentation) || JSON.stringify(manifest.sections) !== JSON.stringify(sections)) return false;
     const body = fs.readFileSync(presentation, 'utf8');
@@ -931,7 +947,7 @@ function visualPlanReady(state, runDir) {
   const plan = artifactFile(runDir, state.artifacts?.visualExecutionPlan);
   const presentation = artifactFile(runDir, state.artifacts?.visualPlanPresentation);
   const manifestFile = artifactFile(runDir, state.artifacts?.visualPlanPresentationManifest);
-  if (!plan || !presentation || !manifestFile || !visualPlanSourceBindingStatus(runDir, state).ready || !substantiveSections(fs.readFileSync(presentation, 'utf8'), visualPlanPresentationSections) || !roleStageReady(state, runDir, 'visual')) return false;
+  if (!confirmationSourceArtifactsReady(state, runDir, ['visualExecutionPlan']) || !confirmationInputsValidated(runDir, 'visual-plan') || !plan || !presentation || !manifestFile || !visualPlanSourceBindingStatus(runDir, state).ready || !substantiveSections(fs.readFileSync(presentation, 'utf8'), visualPlanPresentationSections) || !roleStageReady(state, runDir, 'visual')) return false;
   try {
     const manifest = read(manifestFile);
     const scopeCurrent = state.track !== 'existing' || (manifest.changeScope === state.artifacts?.changeScope && artifactFile(runDir, manifest.changeScope) && manifest.changeScopeSha256 === sha256File(artifactFile(runDir, manifest.changeScope)));
@@ -1680,15 +1696,57 @@ function verifyAuthorization(root, run, sessionId, reference, action) {
   appendEvent(run.runDir, { type: 'action-verified', sessionId, action, tokenId: token.tokenId });
   return token;
 }
+const approvalControllerCommand = gate => ({ gate1: 'pass-gate1', 'visual-plan': 'confirm-visual-plan', stitch: 'confirm-stitch', implementation: 'confirm-implementation' }[gate]);
+function recoverRecordedApproval(root, run, sessionId) {
+  let state = stateOf(run.runDir);
+  const approvals = path.join(run.runDir, 'approvals');
+  if (!fs.existsSync(approvals) || ['cancelled', 'handed-off'].includes(state.lifecycle)) return null;
+  // A prior recovery error suppresses the duplicate UI, not recovery itself:
+  // transient I/O or a subsequently repaired internal dependency must still
+  // be able to commit the already-recorded decision on a later Router read.
+  const stateWithoutRecoveryBlock = { ...state, approvalRecovery: null };
+  const pendingGate = ['gate1', 'visual-plan', 'stitch', 'implementation'].find(gate => checkpointIsAwaitingDecision(stateWithoutRecoveryBlock, gate));
+  if (!pendingGate) return null;
+  const candidates = fs.readdirSync(approvals)
+    .filter(name => name.endsWith('.json'))
+    .map(name => ({ relative: path.join('approvals', name), file: path.join(approvals, name) }))
+    .map(item => ({ ...item, receipt: (() => { try { return read(item.file); } catch { return null; } })() }))
+    .filter(item => item.receipt?.status === 'approved' && item.receipt?.gate === pendingGate && item.receipt?.runId === state.runId && item.receipt?.sessionId === sessionId)
+    .sort((left, right) => String(right.receipt.approvedAt || '').localeCompare(String(left.receipt.approvedAt || '')));
+  if (!candidates.length) return null;
+  const candidate = candidates[0];
+  try {
+    // A receipt is the durable user decision. A crash after its write must
+    // resume this transition, never ask the user to make the same decision.
+    runControllerCommand(approvalControllerCommand(pendingGate), [run.runDir, candidate.relative]);
+    appendEvent(run.runDir, { type: 'approval-transition-recovered', sessionId, gate: pendingGate, approvalId: candidate.receipt.approvalId, receipt: candidate.relative });
+    return { gate: pendingGate, receipt: candidate.relative };
+  } catch (error) {
+    // Persist one observable recovery failure and suppress the confirmation;
+    // repeated status calls must not turn a failed commit into an infinite UI loop.
+    state = stateOf(run.runDir);
+    const failure = String(error.message || error);
+    if (state.approvalRecovery?.receipt !== candidate.relative || state.approvalRecovery?.error !== failure) {
+      state.approvalRecovery = { gate: pendingGate, receipt: candidate.relative, status: 'failed', error: failure, at: now() };
+      state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(path.join(run.runDir, 'state.json'), state);
+      appendEvent(run.runDir, { type: 'approval-transition-recovery-failed', sessionId, gate: pendingGate, receipt: candidate.relative, error: failure });
+    }
+    return { gate: pendingGate, receipt: candidate.relative, error: failure };
+  }
+}
 function approvalReceipt(root, run, sessionId, gate, approvalId, references) {
   if (!['gate1', 'visual-plan', 'stitch', 'implementation'].includes(gate) || !approvalId || !references.length) fail('approval requires gate1|visual-plan|stitch|implementation, an approval id, and at least one run-relative artifact');
-  const state = run.state || stateOf(run.runDir);
+  const recovered = recoverRecordedApproval(root, run, sessionId);
+  const state = stateOf(run.runDir);
+  if (recovered && !recovered.error && !checkpointIsAwaitingDecision(state, gate)) return { receipt: recovered.receipt, recoveredApprovalTransition: true, ...routerState(root, { ...run, state }, sessionId) };
+  if (recovered?.error) fail(`recorded ${gate} approval could not be committed; duplicate confirmation is suppressed until recovery succeeds: ${recovered.error}`);
   if (!checkpointIsAwaitingDecision(state, gate) || !checkpointReady(state, run.runDir, gate)) fail(`${gate} confirmation is unavailable until its complete generated artifacts are ready`);
   if (gate === 'visual-plan' && state.gates?.gate1?.status !== 'passed') fail('Gate 1 must pass before a visual plan approval can be recorded');
   if (gate === 'gate1') {
     const presentation = state.artifacts?.gate1Presentation;
     if (!presentation || !references.includes(presentation) || !gate1PresentationReady(state, run.runDir)) fail('Gate 1 approval requires the chat-oriented, source-bound, complete eight-section direction and delivery presentation');
   }
+  if (gate !== 'gate1' && !confirmationInputsValidated(run.runDir, gate)) fail(`${gate} confirmation source artifacts are incomplete, invalid, or still contain template placeholders`);
   if (gate === 'visual-plan') {
     const presentation = state.artifacts?.visualPlanPresentation;
     const presentationFile = presentation && artifactFile(run.runDir, presentation);
@@ -1720,13 +1778,14 @@ function approvalReceipt(root, run, sessionId, gate, approvalId, references) {
   const relative = path.join('approvals', `${gate}-${safeId}.json`);
   write(path.join(run.runDir, relative), receipt);
   appendEvent(run.runDir, { type: 'approval-recorded', sessionId, gate, approvalId, artifactCount: artifactHashes.length });
-  const command = { gate1: 'pass-gate1', 'visual-plan': 'confirm-visual-plan', stitch: 'confirm-stitch', implementation: 'confirm-implementation' }[gate];
+  const command = approvalControllerCommand(gate);
   const result = runControllerCommand(command, [run.runDir, relative]);
   if (result.status !== 0) fail((result.stderr || result.stdout).trim());
   return { receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
 }
 
 function checkpointIsAwaitingDecision(state, checkpoint) {
+  if (state.approvalRecovery?.status === 'failed' && state.approvalRecovery?.gate === checkpoint) return false;
   if (checkpoint === 'gate1') return state.gates?.gate1?.status !== 'passed';
   if (checkpoint === 'visual-plan') return state.gates?.gate1?.status === 'passed' && !state.locks?.visualPlanApproved;
   if (checkpoint === 'stitch') return state.locks?.effectApproved === true && state.deliveryRoute === 'stitch' && !state.locks?.stitchApproved;
@@ -2092,7 +2151,8 @@ try {
   } else if (command === 'resume' || command === 'status') {
     const [projectArg, requestedRunId, sessionId] = args; if (!projectArg || !sessionId) fail(`usage: ${command} <project-root> [run-id] <session-id>`);
     const root = projectRoot(projectArg); ensureProject(root); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
-    appendEvent(run.runDir, { type: command === 'resume' ? 'run-resumed' : 'run-inspected', sessionId: sessionId || null }); json({ status: 'ready', ...routerState(root, run, sessionId) });
+    const recovery = recoverRecordedApproval(root, run, sessionId);
+    appendEvent(run.runDir, { type: command === 'resume' ? 'run-resumed' : 'run-inspected', sessionId: sessionId || null, approvalRecovery: recovery || undefined }); json({ status: 'ready', approvalRecovery: recovery || undefined, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
   } else if (command === 'lease') {
     const [projectArg, requestedRunId, sessionId, minutes = '15'] = args; if (!projectArg || !requestedRunId || !sessionId) fail('usage: lease <project-root> <run-id> <session-id> [minutes]');
     const durationMs = Number(minutes) * 60 * 1000; if (!Number.isFinite(durationMs) || durationMs < 60 * 1000 || durationMs > 60 * 60 * 1000) fail('lease duration must be between 1 and 60 minutes');

@@ -260,6 +260,34 @@ function validateGate1(runDir) {
   return { state, contract };
 }
 
+// A user confirmation is an admission boundary, not the first time we learn
+// whether its machine-readable inputs are valid. Keep the source artifacts for
+// every later confirmation independently schema-validated and free of template
+// placeholders before the Router is allowed to render that confirmation.
+function validateConfirmationCheckpoint(runDir, checkpoint) {
+  const state = validateFile('run-state.schema.json', path.join(runDir, 'state.json'));
+  const sourceArtifacts = {
+    'visual-plan': [
+      ['visualExecutionPlan', 'visual-execution-plan.schema.json', 'Visual Execution Plan']
+    ],
+    stitch: [
+      ['stitchFreeze', 'stitch-freeze.schema.json', 'Stitch Freeze'],
+      ['stitchParityEvidence', 'stitch-parity-evidence.schema.json', 'Stitch Parity Evidence']
+    ],
+    implementation: [
+      ['visualBundle', 'visual-bundle.schema.json', 'Visual Bundle'],
+      ['implementationMap', 'implementation-map.schema.json', 'Implementation Map']
+    ]
+  };
+  const artifacts = sourceArtifacts[checkpoint];
+  if (!artifacts) throw new Error(`unsupported confirmation checkpoint: ${checkpoint}`);
+  for (const [artifact, schema, label] of artifacts) {
+    const value = validateFile(schema, requireArtifact(runDir, state, artifact, `${artifact}.json`));
+    rejectPlaceholders(value, label);
+  }
+  return state;
+}
+
 function validateGate2(runDir) {
   const { state, contract } = validateGate1(runDir);
   if (state.gates.gate1.status !== 'passed') throw new Error('Gate 1 has not passed');
@@ -525,6 +553,11 @@ try {
   } else if (command === 'pre-gate1') {
     validateGate1(path.resolve(args[0] || '.'));
     console.log('APEX pre-Gate 1 validation passed');
+  } else if (command === 'pre-confirmation') {
+    const [runDir, checkpoint] = args;
+    if (!runDir || !checkpoint) throw new Error('usage: pre-confirmation <run-dir> <visual-plan|stitch|implementation>');
+    validateConfirmationCheckpoint(path.resolve(runDir), checkpoint);
+    console.log(`APEX pre-confirmation validation passed: ${checkpoint}`);
   } else if (command === 'gate3') {
     validateGate3(path.resolve(args[0] || '.'));
     console.log('APEX Gate 3 validation passed');

@@ -8,6 +8,11 @@ const hash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSyn
 const textHash = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const fail = message => { console.error(`Confirmation presentation failed: ${message}`); process.exit(1); };
+const hasPlaceholder = value => {
+  if (typeof value === 'string') return /(^replace$|\breplace[-\w ]*|<[^>]+>)/i.test(value);
+  if (Array.isArray(value)) return value.some(hasPlaceholder);
+  return Boolean(value && typeof value === 'object' && Object.values(value).some(hasPlaceholder));
+};
 const [command, runArg, checkpoint] = process.argv.slice(2);
 if (command !== 'compile' || !runArg || !['stitch', 'implementation'].includes(checkpoint)) fail('usage: confirmation-presentation.mjs compile <run-dir> <stitch|implementation>');
 const runDir = path.resolve(runArg);
@@ -19,6 +24,7 @@ let body, sources, headings, sectionContracts, requiredFacts;
 if (checkpoint === 'stitch') {
   const freezeRef = artifacts.stitchFreeze, parityRef = artifacts.stitchParityEvidence;
   const freezeFile = resolve(freezeRef), parityFile = resolve(parityRef), freeze = read(freezeFile), parity = read(parityFile);
+  if (hasPlaceholder(freeze) || hasPlaceholder(parity)) fail('Stitch confirmation source artifacts still contain template placeholders');
   if (!freeze.canvasUrl || !Array.isArray(freeze.approvedScreens) || !freeze.approvedScreens.length || parity.status !== 'passed') fail('Stitch confirmation requires a current canvas URL, approved screens, and passed parity evidence');
   if (!freeze.generationInput?.contentLock || !freeze.generationInput?.layoutLock || !freeze.generationInput?.analyticsLock) fail('Stitch confirmation requires current content, layout, and analytics locks');
   headings = ['候选范围与入口', '已冻结页面与视口', '差异与一致性证据', '真实来源与锁定内容', '风险、限制与可调整项', '确认后的实施影响'];
@@ -36,6 +42,7 @@ if (checkpoint === 'stitch') {
 } else {
   const bundleRef = artifacts.visualBundle, mapRef = artifacts.implementationMap;
   const bundleFile = resolve(bundleRef), mapFile = resolve(mapRef), bundle = read(bundleFile), map = read(mapFile);
+  if (hasPlaceholder(bundle) || hasPlaceholder(map)) fail('Implementation confirmation source artifacts still contain template placeholders');
   if (!bundle.visualSourceManifest?.path || !bundle.implementationBaseline?.kind || !Array.isArray(map.entries) || !map.entries.length) fail('Implementation confirmation requires frozen source, baseline, and at least one implementation target');
   if (map.entries.some(item => !Array.isArray(item.runtimeTarget) || !item.runtimeTarget.length || !Array.isArray(item.acceptance) || !item.acceptance.length)) fail('Every implementation target requires formal runtime targets and acceptance criteria');
   headings = ['实施目标与范围', '正式代码目标', '来源物化与依赖', '数据、交互与响应式约束', '验证、风险与保护边界', '确认后的执行链'];
@@ -59,7 +66,7 @@ const sectionProof = headings.map((heading, index) => {
 });
 const completeSections = sectionProof.every(section => section.substantiveChars >= 40)
   && new Set(sectionProof.map(section => section.sha256)).size === sectionProof.length
-  && !/TO_REPLACE|\[object Object\]/.test(body);
+  && !/TO_REPLACE|\[object Object\]|(^|\n)\s*(replace|<[^>]+>)/im.test(body);
 if (!completeSections) fail('generated confirmation body has an empty or incomplete section');
 const presentationRef = `${checkpoint}-presentation.md`, manifestRef = `${checkpoint}-presentation-manifest.json`;
 const writeAtomically = (file, value) => {
