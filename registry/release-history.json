@@ -1891,6 +1891,18 @@
         "scripts/visual-sandbox-runtime.mjs"
       ],
       "releasedAt": "2026-09-20T09:32:32.043Z"
+    },
+    {
+      "from": "4.35.0",
+      "to": "4.35.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-20T09:42:31.696Z"
     }
   ]
 }

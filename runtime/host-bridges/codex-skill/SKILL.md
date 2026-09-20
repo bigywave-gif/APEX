@@ -67,7 +67,7 @@ Bridge，再将该 session 的绑定版本与哈希重绑到主目录版本，�
 4. 修改项目代码前先获取 `lease`，再执行 `authorize ... implement <lease-id>`；没有当前项目、run 与 session 绑定的 lease，禁止实施。
 5. 所有项目中间产物只允许写入 `<project-root>/.apex/`。严禁将项目 run、截图、运行时 Demo、Stitch HTML、测试证据、缓存或用户资料写入 APEX Core。
 6. Gate 2 后需要隔离代码改动时，先取得 lease 和 `prepare_workspace` 授权，再通过受控 action 创建该 run 的 Git worktree；不得把 worktree 当作绕过 Router 的项目根。
-7. 用户明确终止/取消当前 APEX 执行时，使用 `cancel`：它只回收当前 session 绑定 Run 的临时工件，并先停止该 Run 登记的临时 Demo 服务和端口；只保留最小取消回执，绝不清理其它 session/Run、项目正式服务或已获批准的正式代码。不得把宿主的普通回合停止自动当作取消。并发实施仍使用 `queue-mutation` / `claim-mutation` 的 FIFO 队列，不得争抢或手工覆盖 lease。
+7. 只有用户原话明确表达“取消/终止/停止当前 APEX 执行（或当前任务/Run）”时，宿主才可把该原话传给 `cancel`；Router 会拒绝没有当前执行目标、或同时包含“修改、调整、重新分析、重新设计、方案有问题、优化”等修订语义的取消请求。后者必须走当前 checkpoint 的 `revise`，不能删除 Run。通过校验的 `cancel` 只回收当前 session 绑定 Run 的临时工件，并先停止该 Run 登记的临时 Demo 服务和端口；只保留最小取消回执，绝不清理其它 session/Run、项目正式服务或已获批准的正式代码。不得把宿主的普通回合停止自动当作取消。并发实施仍使用 `queue-mutation` / `claim-mutation` 的 FIFO 队列，不得争抢或手工覆盖 lease。
 8. 用户对 Gate 候选提出编辑或拒绝时，用 `review ... edited|rejected` 留存复核事实，再按 `restart` 或当前受控阶段处理；不得把拒绝视为批准。
 
 对于已有 APEX 运行脚本，先调用 `authorize` 取得 `authorizationRef`，再使用：

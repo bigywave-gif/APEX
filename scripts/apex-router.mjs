@@ -290,6 +290,13 @@ function isCurrentRunChild(runDir, candidate) {
   return path.dirname(resolved) === root;
 }
 function pause(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function assertExplicitCurrentRunCancellation(userInstruction) {
+  const text = String(userInstruction || '').trim().replace(/\s+/g, ' ');
+  const cancellation = /(?:取消|终止|结束|停止)\s*(?:当前\s*)?(?:APEX\s*)?(?:执行|任务|运行|流程|run|execution|task|workflow)|\b(?:cancel|terminate|stop)\s+(?:the\s+)?current\s+(?:apex\s+)?(?:run|execution|task|workflow)\b/i.test(text);
+  const revision = /修改|调整|重新分析|重新设计|方案有问题|优化|改动|revise|modify|redesign|reanaly[sz]e/i.test(text);
+  if (!cancellation || revision) fail('cancel requires an unambiguous user instruction to terminate the current APEX execution; plan revisions must use revise');
+  return 'explicit-current-run-cancellation';
+}
 function processIsLive(pid) {
   const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', timeout: 1000 });
   const status = String(result.stdout || '').trim();
@@ -1973,20 +1980,21 @@ try {
     const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
     json({ status: 'revision-recorded', ...recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) });
   } else if (command === 'cancel') {
-    const [projectArg, requestedRunId, sessionId, reason = 'cancelled-by-user'] = args;
-    if (!projectArg || !requestedRunId || !sessionId) fail('usage: cancel <project-root> <run-id> <session-id> [reason]');
+    const [projectArg, requestedRunId, sessionId, userInstruction, reason = 'cancelled-by-user'] = args;
+    if (!projectArg || !requestedRunId || !sessionId || !userInstruction) fail('usage: cancel <project-root> <run-id> <session-id> <explicit-user-cancel-text> [reason]');
+    const cancellationIntent = assertExplicitCurrentRunCancellation(userInstruction);
     const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId)); const state = stateOf(run.runDir);
     if (state.lifecycle === 'cancelled' && fs.existsSync(path.join(run.runDir, cancellationReceiptName))) { json({ status: 'cancelled', idempotent: true, cancellation: read(path.join(run.runDir, cancellationReceiptName)), ...routerState(root, run, sessionId) }); }
     else if (state.lifecycle === 'cancelled') {
       const releasedLease = releaseLeaseForRun(root, run, sessionId, 'cancelled-run-reclamation');
       appendEvent(run.runDir, { type: 'cancelled-run-reclamation-started', sessionId, reason, releasedLease });
-      const cancellation = reclaimCancelledRun(root, run, sessionId, reason);
+      const cancellation = reclaimCancelledRun(root, run, sessionId, `${cancellationIntent}:${reason}`);
       json({ status: 'cancelled', idempotent: false, recoveredCancellation: true, cancellation, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
     }
     else {
       const releasedLease = releaseLeaseForRun(root, run, sessionId, 'run-cancelled');
       appendEvent(run.runDir, { type: 'run-cancelled', sessionId, reason, releasedLease });
-      const cancellation = reclaimCancelledRun(root, run, sessionId, reason);
+      const cancellation = reclaimCancelledRun(root, run, sessionId, `${cancellationIntent}:${reason}`);
       json({ status: 'cancelled', idempotent: false, cancellation, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
     }
   } else if (command === 'skip') {

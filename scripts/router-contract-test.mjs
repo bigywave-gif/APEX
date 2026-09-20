@@ -57,7 +57,9 @@ try {
   fs.writeFileSync(path.join(cancelRunDir, 'visual-sandbox-runtime.json'), `${JSON.stringify({ schemaVersion: '3.0', runId: 'run-cancel', runtimeRoot: 'visual-sandbox', url: `http://127.0.0.1:${cancelPort}/`, pid: child.pid, status: 'running' })}\n`);
   fs.writeFileSync(path.join(cancelRunDir, 'runtime-services.json'), `${JSON.stringify({ schemaVersion: '1.0', runId: 'run-cancel', services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json' }] })}\n`);
   expect(run(router, ['lease', root, 'run-cancel', 'session-cancel', '5']), 'cancellation must release a current run mutation lease');
-  const cancelled = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', 'user-terminated-current-run']), 'current-run cancellation must reclaim temporary artifacts');
+  reject(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '修改当前方案并重新分析']), 'cancel requires an unambiguous user instruction', 'revision language must never be misclassified as a destructive run cancellation');
+  if (!fs.existsSync(path.join(cancelRunDir, 'visual-sandbox')) || !fs.existsSync(path.join(cancelRunDir, 'evidence', 'browser', 'screen.png'))) throw new Error('a rejected cancellation intent must not reclaim any current-run artifact');
+  const cancelled = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行', 'user-terminated-current-run']), 'current-run cancellation must reclaim temporary artifacts');
   cancellationRuntimePid = null;
   if (cancelled.idempotent || cancelled.cancellation?.receipt !== 'cancellation-receipt.json' || !cancelled.cancellation?.removedEntries?.includes('visual-sandbox') || !cancelled.cancellation?.services?.stopped?.some(item => item.pid === child.pid)) throw new Error('cancellation must report both run-local artifact reclamation and the stopped Demo service');
   const cancelEntries = fs.readdirSync(cancelRunDir).sort();
@@ -67,7 +69,7 @@ try {
   if (fs.existsSync(path.join(root, '.apex', 'locks', 'project-mutation.lock')) || !fs.existsSync(otherRunSentinel)) throw new Error('cancellation must release only its own lease while preserving other-session data');
   const stoppedProcess = spawnSync('/bin/ps', ['-p', String(child.pid), '-o', 'stat='], { encoding: 'utf8' });
   if (String(stoppedProcess.stdout || '').trim() && !String(stoppedProcess.stdout).includes('Z')) throw new Error('cancellation must stop the run-local Demo process');
-  const repeatedCancel = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', 'repeat']), 'cancellation must be idempotent');
+  const repeatedCancel = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行', 'repeat']), 'cancellation must be idempotent');
   if (!repeatedCancel.idempotent || repeatedCancel.cancellation?.type !== 'run-cancellation-reclamation') throw new Error('repeated cancellation must return the retained cancellation receipt without recreating artifacts');
   reject(run(runController, ['init', root, 'direct-run', 'greenfield']), 'cannot be executed', 'direct run-controller state mutation must be denied');
   reject(run(runController, ['init', root, 'spoofed-run', 'greenfield'], { APEX_ROUTER_COMMAND: 'init' }), 'cannot be executed', 'spoofed Router environment must not mutate state');

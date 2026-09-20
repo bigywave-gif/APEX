@@ -45,7 +45,7 @@ worktree。运行状态、确认、证据和交付契约仍只保存在原项目
 
 ## 取消、排队与人工复核
 
-- 用户终止时，`cancel` 只针对当前 session 绑定的当前 Run：先终止并验证该 Run 登记的本地
+- 用户终止时，`cancel` 只接受明确指向当前 APEX 执行、任务、Run 或工作流的用户原话；含“修改、调整、重新分析、重新设计、方案有问题、优化”等修订语义的输入必须被拒绝为取消并走 `revise`。通过该意图校验后，`cancel` 只针对当前 session 绑定的当前 Run：先终止并验证该 Run 登记的本地
   Demo 服务/端口，再递归回收该 Run 的所有临时工件、候选、缓存、截图、证据、审批与 Checkpoint，
   并清空 `state.artifacts`。它只保留 `state.json`、`events.ndjson` 与最小
   `cancellation-receipt.json`，以说明已回收的条目和已停止服务；绝不删除其他 session/Run、项目
