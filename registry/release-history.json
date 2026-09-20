@@ -1936,6 +1936,28 @@
         "scripts/router-contract-test.mjs"
       ],
       "releasedAt": "2026-09-20T10:05:52.817Z"
+    },
+    {
+      "from": "4.36.1",
+      "to": "4.36.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/codex-lifecycle-hook-contract-test.mjs",
+        "scripts/codex-stop-continuation.mjs"
+      ],
+      "releasedAt": "2026-09-20T10:21:03.959Z"
+    },
+    {
+      "from": "4.36.2",
+      "to": "4.36.3",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/visual-sandbox-runtime-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-20T10:25:52.652Z"
     }
   ]
 }

@@ -33,9 +33,10 @@ try {
   if (refreshed.apexVersion === 'stale' || refreshed.bridgeHash === 'stale') throw new Error('PreTool refresh guard did not refresh a nested bound session');
   const stopping = execute(stop, { project_root: nested, sessionId });
   const decision = JSON.parse(stopping.stdout || '{}');
-  if (stopping.status !== 0 || decision.decision !== 'block' || !String(decision.reason || '').includes('APEX 正在自动完成当前受控步骤') || String(decision.reason || '').includes('Current concrete step')) throw new Error(`Stop guard did not block automatic APEX work without leaking a technical command chain: ${(stopping.stderr || stopping.stdout).trim()}`);
+  if (stopping.status !== 0 || decision.decision !== 'block' || !String(decision.reason || '').includes('APEX 当前自动步骤尚未产生完成回执') || String(decision.reason || '').includes('Current concrete step')) throw new Error(`Stop guard did not block automatic APEX work without leaking a technical command chain: ${(stopping.stderr || stopping.stdout).trim()}`);
   const repeatedStopping = execute(stop, { project_root: nested, sessionId });
-  if (repeatedStopping.status !== 0 || repeatedStopping.stdout.trim() !== '{}') throw new Error(`Stop guard must suppress an unchanged repeated continuation instead of creating an infinite loop: ${(repeatedStopping.stderr || repeatedStopping.stdout).trim()}`);
+  const repeatedDecision = JSON.parse(repeatedStopping.stdout || '{}');
+  if (repeatedStopping.status !== 0 || repeatedDecision.decision !== 'block') throw new Error(`Stop guard must keep an unchanged automatic node blocked until it has a Router receipt: ${(repeatedStopping.stderr || repeatedStopping.stdout).trim()}`);
   const state = JSON.parse(fs.readFileSync(path.join(root, '.apex', 'runs', 'hook-contract-run', 'state.json'), 'utf8'));
   if (state.phase !== 'G-01 PRODUCT') throw new Error('lifecycle hooks must not advance the run state');
   // A failed controlled action is a terminal blocking report, never a reason

@@ -78,6 +78,8 @@ Gate 1 与视觉方案的用户可读正文也属于该边界。Existing 局部�
 
 所有活跃 APEX 阶段的用户交互由 Router 的 `userInteraction` 与 `terminalResponseContract` 共同裁决，而非聊天 UI 默认按钮。宿主结束每个回合前必须重新读取 Router；`terminalResponseContract.allowed: false` 时必须继续执行 `mustContinueAction`，不得用阶段状态结束回合；允许结束时也只能输出 `allowedKinds`、逐字使用 `exactLabels` 并先满足 `requiredPresentation`。关键阀门必须显示其精确 `confirmation.label`：`确认需求与交付方案`、`确认视觉方案`、`确认 Stitch 内容` 或 `确认实施冻结`；不得以“确认”“继续”或含混文案代替。Router 只有在该阀门的完整生成工件和机器校验均已就绪时才可暴露该标签：Gate 1 为 `pre-gate1` 校验通过；视觉方案为 `visual-execution-plan.json` 加十节完整的 `visual-plan-presentation.md`；Stitch 为已选择 Stitch 路线、冻结候选、一致性证据，以及由 `confirmation-presentation.mjs` 在同一受控动作中产出的六节 `stitch-presentation.md` 与来源清单；实施为已冻结 Visual Bundle、Implementation Map，以及同样受控生成并绑定来源的六节 `implementation-presentation.md` 与来源清单。范围清单、重做声明、阶段说明和未完成草稿一律不可确认。只有用户明确执行该阀门确认才能向下流转；在此之前，任何补充都按 `unconfirmedInputPolicy` 视作当前工件调整，自动执行“反馈提取 → `revise` → 工件重建”，仍回到同一明确确认提示。若 Gate 1 已确认后又出现改变功能、数据、API、权限、范围或验收的新需求，必须执行 `revise ... gate1 visible ...`；Router 撤销旧 Gate 1 和全部派生视觉/实施锁，保留 Existing 正式只读基线，并重建八节需求与交付方案。不得只在聊天中“记录”后继续沿用旧方案。`genericContinueForbidden: true` 时，宿主必须持续执行当前工作，直至出现明确的 Gate 确认、`stitch|direct-code` 路线选择、Demo 或阻断报告，中间不得显示“继续”或把内部处理拆成新的用户操作。
 
+重复 Stop 不构成自动节点的完成信号。只要 `terminalResponseContract.allowed` 为 `false` 且不存在带回执的 `blockingOperation`，宿主必须保持当前回合受控，即使 `mustContinueAction` 与 `currentStep` 未变化；未变化只表示该动作尚未完成，不能以“已提示一次”为由放行。此规则覆盖 Gate 1、视觉方案、运行时 Demo、Stitch、实施冻结和 Gate 2/3 验证的所有自动节点。
+
 ### 自动节点完整性（不得以阶段文案代替可执行链）
 
 `scripts/workflow-node-registry.mjs` 是 Router 自动节点的唯一注册表。每个 `executionDirective.currentStep` 必须同时带有注册的 `nodeId`、受控执行器、输入策略、必需输出、完成条件、状态提交方式、重试策略和失败策略；没有注册项、动作不匹配或 Router 声明的输出少于注册输出时，Router 必须作为 Core 配置错误拒绝返回该步骤，不能把不完整步骤暴露成用户等待状态。

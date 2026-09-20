@@ -45,7 +45,13 @@ try {
   fs.unlinkSync(path.join(runDir, 'visual-sandbox-runtime.json')); delete JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime;
   const restartState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); delete restartState.artifacts.visualSandboxRuntime; fs.writeFileSync(stateFile, `${JSON.stringify(restartState, null, 2)}\n`);
   const formalChangeAuthorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'formal-change start authorization');
-  spawn(process.execPath, ['-e', `const fs=require('fs'); setTimeout(()=>fs.writeFileSync(${JSON.stringify(path.join(project, 'server', 'api.js'))}, 'export const api = false;\\n'), 20);`], { detached: true, stdio: 'ignore' }).unref();
+  // The boundary check surrounds an asynchronous local-server startup. Start
+  // a proven-live mutator before the synchronous action begins; a one-shot
+  // detached 20ms timer was scheduler-racy and could run only after the action
+  // had already finished.
+  const mutator = spawn(process.execPath, ['-e', `const fs=require('fs'); const file=${JSON.stringify(path.join(project, 'server', 'api.js'))}; let revision=0; const write=()=>{try{fs.writeFileSync(file, 'export const api = '+(revision++)+';\\n')}catch{}}; write(); const timer=setInterval(write, 2); process.send('ready'); setTimeout(()=>{clearInterval(timer);process.exit(0)}, 1000);`], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  await new Promise((resolve, reject) => { const timeout = setTimeout(() => reject(new Error('formal-source mutator did not become ready')), 1000); mutator.once('message', () => { clearTimeout(timeout); resolve(); }); mutator.once('error', error => { clearTimeout(timeout); reject(error); }); });
+  pids.push(mutator.pid);
   const formalChange = run(action, ['run', project, 'run-runtime', 'session-runtime', formalChangeAuthorization.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir]);
   if (formalChange.status === 0) throw new Error('a changed frozen formal source must block run-local Demo generation');
   const formalReceipt = JSON.parse(fs.readFileSync(path.join(runDir, 'operations', `${path.basename(formalChangeAuthorization.authorizationRef, '.json')}.json`), 'utf8'));

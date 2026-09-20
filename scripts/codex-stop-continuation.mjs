@@ -18,20 +18,6 @@ import { sessionBridge } from './codex-session-bridge.mjs';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
 function output(value) { process.stdout.write(`${JSON.stringify(value)}\n`); }
-function continuationNoticeFile(projectRoot, runId, sessionId) {
-  const hash = crypto.createHash('sha256').update(sessionId).digest('hex');
-  return path.join(projectRoot, '.apex', 'runs', runId, 'hook-state', `stop-continuation-${hash}.json`);
-}
-function continuationFingerprint(status) {
-  const directive = status.executionDirective || {};
-  return crypto.createHash('sha256').update(JSON.stringify({
-    revision: status.revision ?? status.stateRevision ?? null,
-    phase: status.phase ?? null,
-    action: directive.action ?? null,
-    currentStep: directive.currentStep?.id ?? null,
-    blockingOperation: status.terminalResponseContract?.blockingOperation?.receipt ?? null
-  })).digest('hex');
-}
 function sessionFile(projectRoot, sessionId) {
   const hash = crypto.createHash('sha256').update(sessionId).digest('hex');
   return path.join(projectRoot, '.apex', 'sessions', `${hash}.json`);
@@ -102,30 +88,14 @@ try {
   // not convert it into an infinite Stop-hook continuation loop; the Router
   // has already classified it and supplied its immutable operation receipt.
   if (contract.allowed !== false || !contract.mustContinueAction || contract.blockingOperation) { output({}); process.exit(0); }
-  // Stop-hook feedback is delivered through the host conversation in some
-  // Codex versions. Do not leak a long command chain as if it were a user
-  // request; the agent already has the structured currentStep in Router status
-  // and must use that as the execution authority.  A Stop hook can run more
-  // than once without any action having executed.  Re-injecting the same
-  // continuation in that situation creates a visible infinite loop, not
-  // progress.  Persist a run-local, session-specific fingerprint and emit at
-  // most one reminder for an unchanged Router state.  A state revision, action
-  // or concrete step change creates a new fingerprint and re-enables the
-  // protection for the genuinely next automatic step.
-  const noticeFile = continuationNoticeFile(projectRoot, binding.runId, binding.sessionId);
-  const fingerprint = continuationFingerprint(status);
-  try {
-    const previous = fs.existsSync(noticeFile) ? JSON.parse(fs.readFileSync(noticeFile, 'utf8')) : null;
-    if (previous?.fingerprint === fingerprint) { output({}); process.exit(0); }
-    fs.mkdirSync(path.dirname(noticeFile), { recursive: true });
-    fs.writeFileSync(noticeFile, `${JSON.stringify({ fingerprint, action: contract.mustContinueAction, currentStep: status.executionDirective?.currentStep?.id || null, recordedAt: new Date().toISOString() })}\n`);
-  } catch {
-    // The continuation guard remains safe if its optional deduplication record
-    // cannot be read or written; do not make unrelated work fail closed.
-  }
+  // A repeated Stop event with an unchanged automatic node means the required
+  // action did not produce a Router receipt. The former one-shot de-duplication
+  // treated that as permission to end the turn, stranding every automatic
+  // chain after one progress message. Keep the turn blocked until Router state
+  // advances. Receipt-backed failures above remain the sole terminal exception.
   output({
     decision: 'block',
-    reason: 'APEX 正在自动完成当前受控步骤。请继续执行 Router 已授权的具体工作；不要向用户显示“继续”或阶段性结论。仅在明确确认点、Demo 路线选择、交付证据或带实际操作回执的阻断报告处结束。'
+    reason: 'APEX 当前自动步骤尚未产生完成回执。请继续执行 Router 已授权的具体工作；不要向用户显示“继续”、阶段性结论或文件卡片。仅在明确确认点、Demo 路线选择、交付证据或带实际操作回执的阻断报告处结束。'
   });
 } catch {
   // A hook must never block unrelated Codex work merely because an APEX run
