@@ -78,23 +78,19 @@ function record(runDir, stage, input) {
   const output = path.join(stageDirectory(runDir, stage), `${advisory.roleId}.json`); write(output, advisory); validate('role-advisory.schema.json', output);
   console.log(JSON.stringify({ stage, roleId: advisory.roleId, advisory: output }));
 }
-function degrade(runDir, stage, roleId, reason) {
-  const selection = loadSelection(runDir, stage);
-  if (!selection.selectedRoles.includes(roleId)) die(`${roleId} was not selected for ${stage}`);
-  if (!reason || reason.length < 3) die('degrade requires a concrete observed failure reason');
-  const advisory = {
-    schemaVersion: '1.0', roleId, stage, adapterVersion: '1.0.0', inputBindings: selection.inputBindings,
-    findings: [{ id: `${roleId}-degraded`, classification: 'unverified', statement: `The role advisory could not complete: ${reason}`, evidence: [`controlled-role-fallback:${reason}`] }],
-    recommendations: [{ id: `${roleId}-fallback`, choice: 'Continue with the existing APEX evidence-bound chain.', rationale: 'This role is advisory-only; the Router, frozen contracts and required machine validators remain authoritative.', alternatives: ['Treat the advisory failure as a user confirmation'], acceptance: ['The final Gate and required machine validators remain complete.'] }],
-    status: 'ready'
-  };
-  const output = path.join(stageDirectory(runDir, stage), `${roleId}.json`); write(output, advisory); validate('role-advisory.schema.json', output);
-  console.log(JSON.stringify({ stage, roleId, advisory: output, degraded: true, reason }));
+function degrade() {
+  // A selected role is part of the stage's declared professional evidence.
+  // Writing an invented ready advisory after it failed made a Gate look
+  // complete even though its required review never occurred.  The guarded
+  // action itself must fail and leave its receipt as the single blocking fact.
+  die('degrade is prohibited for selected role advisories; record a verified advisory or return the controlled operation failure');
 }
 function summarize(runDir, stage) {
   const selection = loadSelection(runDir, stage); const entries = selection.selectedRoles.map(roleId => {
     const file = path.join(stageDirectory(runDir, stage), `${roleId}.json`); if (!fs.existsSync(file)) die(`selected ${stage} role has no recorded advisory: ${roleId}`);
-    const advisory = read(file); validate('role-advisory.schema.json', file); return { roleId, file, advisory };
+    const advisory = read(file); validate('role-advisory.schema.json', file);
+    if (advisory.findings.some(item => item.classification === 'unverified')) die(`selected ${stage} role contains unverified findings: ${roleId}`);
+    return { roleId, file, advisory };
   });
   const facts = entries.flatMap(entry => entry.advisory.findings.filter(item => item.classification === 'fact').map(item => `- ${entry.roleId}: ${item.statement}`));
   const recommendations = entries.flatMap(entry => entry.advisory.recommendations.map(item => `- ${entry.roleId}/${item.id}: ${item.choice}。${item.rationale}`));
@@ -119,14 +115,19 @@ function verify(runDir, stage) {
   for (const name of stages) {
     const item = manifest.stages?.[name]; if (!item || item.status !== 'ready' || !item.selectedRoles.length || item.selectedRoles.length !== item.advisories.length) die(`role manifest stage is incomplete: ${name}`);
     const summary = path.resolve(runDir, item.summary); if (!summary.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(summary)) die(`role summary is missing: ${name}`);
-    for (const advisory of item.advisories) { const file = path.resolve(runDir, advisory.path); if (!file.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(file) || hash(file) !== advisory.sha256) die(`role advisory hash does not match: ${advisory.roleId}`); }
+    for (const advisory of item.advisories) {
+      const file = path.resolve(runDir, advisory.path);
+      if (!file.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(file) || hash(file) !== advisory.sha256) die(`role advisory hash does not match: ${advisory.roleId}`);
+      const content = read(file);
+      if (content.findings.some(finding => finding.classification === 'unverified')) die(`selected role advisory is not evidence-complete: ${advisory.roleId}`);
+    }
   }
   console.log(JSON.stringify({ status: 'passed', stages }));
 }
 
 const [command, runArg, stage, input] = process.argv.slice(2);
 assertRoot();
-if (!command || !runArg || !stage || !['select', 'record', 'degrade', 'summarize', 'verify'].includes(command)) die('usage: select|record|degrade|summarize|verify <run-dir> <baseline|gate1|visual|implementation|verify> [advisory.json|role-id reason]');
+if (!command || !runArg || !stage || !['select', 'record', 'degrade', 'summarize', 'verify'].includes(command)) die('usage: select|record|degrade|summarize|verify <run-dir> <baseline|gate1|visual|implementation|verify> [advisory.json]');
 const runDir = path.resolve(runArg); const action = actionFor(stage);
 try { requireRouterAction(runDir, action); } catch (error) { die(error.message); }
 if (command === 'select') select(runDir, stage);

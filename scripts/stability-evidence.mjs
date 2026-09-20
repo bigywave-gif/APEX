@@ -18,6 +18,19 @@ if (command !== 'verify' || !runArg || !matrixArg) die('usage: verify <run-dir> 
 const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
 const matrix = read(path.resolve(matrixArg)); const stateFile = path.join(runDir, 'state.json'); const state = read(stateFile);
 const failures = []; const names = new Set();
+const sourceProvenance = (() => {
+  const evidencePath = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
+  if (!fs.existsSync(evidencePath)) return { ready: false, reason: 'formal runtime browser capture is missing' };
+  const capture = read(evidencePath);
+  const bindings = capture.sourceBindings || [];
+  if (capture.kind !== 'runtime' || capture.status !== 'passed' || !bindings.length) return { ready: false, reason: 'formal runtime browser capture has no passed source binding evidence' };
+  const expected = new Set(bindings.flatMap(binding => binding.sourceSelectionIds || []));
+  if (!expected.size || (capture.sourceSelectionIds || []).some(id => !expected.has(id)) || [...expected].some(id => !(capture.sourceSelectionIds || []).includes(id))) return { ready: false, reason: 'formal runtime browser capture source-selection set diverges from its frozen bindings' };
+  const missing = (capture.evidence || []).flatMap(entry => (entry.sourceBindings || []).filter(binding => !binding.rendered).map(binding => `${entry.id}:${binding.sourceMarker}`));
+  if (missing.length || (capture.evidence || []).some(entry => entry.status !== 'captured' || [...expected].some(id => !(entry.sourceSelections || []).includes(id)))) return { ready: false, reason: `formal runtime source bindings are not rendered in every captured viewport (${missing.join(', ') || 'selection coverage missing'})` };
+  return { ready: true, evidence: 'evidence/runtime-browser-capture.json', sourceSelectionIds: [...expected].sort(), bindings: bindings.map(binding => ({ visualNode: binding.visualNode, selector: binding.selector, sourceMarker: binding.sourceMarker, sourceSelectionIds: binding.sourceSelectionIds })) };
+})();
+if (!sourceProvenance.ready) failures.push(`formal runtime source provenance is incomplete: ${sourceProvenance.reason}`);
 const bundle = read(path.join(runDir, state.artifacts.visualBundle || 'visual-bundle.json'));
 if (matrix.responsiveContractId !== bundle.responsive?.contractId) failures.push('runtime state matrix is not bound to the frozen responsive contract');
 const visual = read(path.join(runDir, state.artifacts.visualReference || 'visual-reference.json'));
@@ -40,5 +53,9 @@ if (state.track === 'existing') {
   for (const check of protectedVisualEvidenceChecks(runDir, scopeHash, scope.protected?.visualNodes, matrix.interactions)) if (!check.passed) failures.push(`protected visual node changed or has invalid zero-diff evidence: ${check.visualNode}`);
 }
 if (failures.length || matrix.status !== 'passed') die([...(failures.length ? failures : []), ...(matrix.status !== 'passed' ? ['matrix status must be passed'] : [])].join('; '));
-const output = path.join(runDir, 'runtime-state-matrix.json'); if (path.resolve(matrixArg) !== output) write(output, matrix); state.artifacts.runtimeStateMatrix = 'runtime-state-matrix.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+matrix.sourceProvenance = sourceProvenance;
+// The normal invocation passes the canonical output path as matrixArg.  Always
+// write after enrichment; conditional writes here silently discarded the
+// newly derived provenance while still reporting success.
+const output = path.join(runDir, 'runtime-state-matrix.json'); write(output, matrix); state.artifacts.runtimeStateMatrix = 'runtime-state-matrix.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
 console.log(JSON.stringify({ evidence: output, status: 'passed', viewports: matrix.viewports.length, states: matrix.states.length }));

@@ -70,7 +70,9 @@
     "visualExecutionPlan": null,
     "visualPlanPresentation": null,
     "visualPlanPresentationManifest": null,
+    "demoSourceManifest": null,
     "visualSandboxFiles": null,
+    "visualSandboxRuntime": null,
     "runtimeDemo": null,
     "designCandidates": null,
     "domainModel": null,
@@ -81,9 +83,13 @@
     "stitchFreeze": null,
     "visualReference": null,
     "stitchParityEvidence": null,
+    "stitchPresentation": null,
+    "stitchPresentationManifest": null,
     "implementationParityEvidence": null,
     "visualBundle": null,
     "implementationMap": null,
+    "implementationPresentation": null,
+    "implementationPresentationManifest": null,
     "runtimeStateMatrix": null,
     "verificationPlan": null,
     "verificationBundle": null,
@@ -92,6 +98,9 @@
     "dependencyLock": null,
     "gate1VisualOutput": null
   },
+  "deliveryRoute": null,
+  "pendingDeliveryRoute": null,
+  "pendingDeliveryRouteReceipt": null,
   "checkpoints": [],
   "updatedAt": "1970-01-01T00:00:00.000Z"
 }

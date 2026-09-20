@@ -13,37 +13,119 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { canonicalApexRoot } from './apex-paths.mjs';
+import { sessionBridge } from './codex-session-bridge.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
 function output(value) { process.stdout.write(`${JSON.stringify(value)}\n`); }
+function continuationNoticeFile(projectRoot, runId, sessionId) {
+  const hash = crypto.createHash('sha256').update(sessionId).digest('hex');
+  return path.join(projectRoot, '.apex', 'runs', runId, 'hook-state', `stop-continuation-${hash}.json`);
+}
+function continuationFingerprint(status) {
+  const directive = status.executionDirective || {};
+  return crypto.createHash('sha256').update(JSON.stringify({
+    revision: status.revision ?? status.stateRevision ?? null,
+    phase: status.phase ?? null,
+    action: directive.action ?? null,
+    currentStep: directive.currentStep?.id ?? null,
+    blockingOperation: status.terminalResponseContract?.blockingOperation?.receipt ?? null
+  })).digest('hex');
+}
 function sessionFile(projectRoot, sessionId) {
   const hash = crypto.createHash('sha256').update(sessionId).digest('hex');
   return path.join(projectRoot, '.apex', 'sessions', `${hash}.json`);
 }
+function firstString(source, keys) {
+  for (const key of keys) if (typeof source[key] === 'string' && source[key].trim()) return source[key];
+  return null;
+}
+function comparableSessionId(value) {
+  return String(value || '').trim().replace(/^codex-root-/, '');
+}
+function sameCodexThread(left, right) {
+  const a = comparableSessionId(left);
+  const b = comparableSessionId(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // APEX historically stored `codex-root-<thread-prefix>`, while current
+  // desktop hooks supply the full host thread UUID. Accept only the shared
+  // UUID prefix (minimum eight characters), never a loose substring.
+  const min = Math.min(a.length, b.length);
+  return min >= 8 && (a.startsWith(b) || b.startsWith(a));
+}
+function boundSession(start, incomingSessionId) {
+  let cursor = path.resolve(start);
+  while (true) {
+    const exact = sessionFile(cursor, incomingSessionId);
+    if (fs.existsSync(exact)) {
+      const binding = JSON.parse(fs.readFileSync(exact, 'utf8'));
+      return { projectRoot: cursor, binding };
+    }
+    const bridge = sessionBridge(cursor, incomingSessionId);
+    if (bridge) {
+      const mapped = sessionFile(cursor, bridge.apexSessionId);
+      if (fs.existsSync(mapped)) return { projectRoot: cursor, binding: JSON.parse(fs.readFileSync(mapped, 'utf8')) };
+    }
+    const sessionsRoot = path.join(cursor, '.apex', 'sessions');
+    if (fs.existsSync(sessionsRoot)) {
+      for (const entry of fs.readdirSync(sessionsRoot)) {
+        if (!entry.endsWith('.json')) continue;
+        try {
+          const binding = JSON.parse(fs.readFileSync(path.join(sessionsRoot, entry), 'utf8'));
+          if (sameCodexThread(binding.sessionId, incomingSessionId)) return { projectRoot: cursor, binding };
+        } catch {
+          // Ignore a transient or malformed unrelated session record.
+        }
+      }
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) return null;
+    cursor = parent;
+  }
+}
 
 try {
   const input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
-  const projectRoot = typeof input.cwd === 'string' ? path.resolve(input.cwd) : null;
-  const sessionId = typeof input.session_id === 'string' ? input.session_id : null;
-  if (!projectRoot || !sessionId || fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) { output({}); process.exit(0); }
-  const bindingFile = sessionFile(projectRoot, sessionId);
-  if (!fs.existsSync(bindingFile)) { output({}); process.exit(0); }
-  const binding = JSON.parse(fs.readFileSync(bindingFile, 'utf8'));
+  const cwd = firstString(input, ['cwd', 'workspace_path', 'workspacePath', 'project_root', 'projectRoot']);
+  const sessionId = firstString(input, ['session_id', 'sessionId', 'thread_id', 'threadId']);
+  if (!cwd || !sessionId || fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) { output({}); process.exit(0); }
+  const bound = boundSession(cwd, sessionId);
+  if (!bound) { output({}); process.exit(0); }
+  const { projectRoot, binding } = bound;
   if (!binding.runId || binding.lifecycle === 'closed') { output({}); process.exit(0); }
-  const result = spawnSync(process.execPath, [router, 'status', projectRoot, binding.runId, sessionId], { encoding: 'utf8', timeout: 10000 });
+  const result = spawnSync(process.execPath, [router, 'status', projectRoot, binding.runId, binding.sessionId], { encoding: 'utf8', timeout: 10000 });
   if (result.status !== 0) { output({}); process.exit(0); }
   const status = JSON.parse(result.stdout);
   const contract = status.terminalResponseContract || {};
-  if (contract.allowed !== false || !contract.mustContinueAction) { output({}); process.exit(0); }
-  const directive = status.executionDirective || {};
-  const chain = Array.isArray(directive.requiredChain) ? directive.requiredChain.join(' → ') : contract.mustContinueAction;
-  const currentStep = directive.currentStep ? ` Current concrete step: ${directive.currentStep.title} [${directive.currentStep.id}]. It must produce ${Array.isArray(directive.currentStep.produces) && directive.currentStep.produces.length ? directive.currentStep.produces.join(', ') : 'the next Router state'} and then re-read Router.` : '';
-  const subActions = Array.isArray(directive.actionAuthorization?.internalSubActions) && directive.actionAuthorization.internalSubActions.length
-    ? ` Required internal sub-actions: ${directive.actionAuthorization.internalSubActions.map(item => `${item.command} (${item.requiredArtifact})`).join(', ')}.` : '';
+  // A real failed controlled action is a valid terminal blocking report. Do
+  // not convert it into an infinite Stop-hook continuation loop; the Router
+  // has already classified it and supplied its immutable operation receipt.
+  if (contract.allowed !== false || !contract.mustContinueAction || contract.blockingOperation) { output({}); process.exit(0); }
+  // Stop-hook feedback is delivered through the host conversation in some
+  // Codex versions. Do not leak a long command chain as if it were a user
+  // request; the agent already has the structured currentStep in Router status
+  // and must use that as the execution authority.  A Stop hook can run more
+  // than once without any action having executed.  Re-injecting the same
+  // continuation in that situation creates a visible infinite loop, not
+  // progress.  Persist a run-local, session-specific fingerprint and emit at
+  // most one reminder for an unchanged Router state.  A state revision, action
+  // or concrete step change creates a new fingerprint and re-enables the
+  // protection for the genuinely next automatic step.
+  const noticeFile = continuationNoticeFile(projectRoot, binding.runId, binding.sessionId);
+  const fingerprint = continuationFingerprint(status);
+  try {
+    const previous = fs.existsSync(noticeFile) ? JSON.parse(fs.readFileSync(noticeFile, 'utf8')) : null;
+    if (previous?.fingerprint === fingerprint) { output({}); process.exit(0); }
+    fs.mkdirSync(path.dirname(noticeFile), { recursive: true });
+    fs.writeFileSync(noticeFile, `${JSON.stringify({ fingerprint, action: contract.mustContinueAction, currentStep: status.executionDirective?.currentStep?.id || null, recordedAt: new Date().toISOString() })}\n`);
+  } catch {
+    // The continuation guard remains safe if its optional deduplication record
+    // cannot be read or written; do not make unrelated work fail closed.
+  }
   output({
     decision: 'block',
-    reason: `APEX continuation is mandatory: execute the authorized ${contract.mustContinueAction} chain now: ${chain}.${currentStep}${subActions} Do not emit a progress-only final response. Re-read Router after each operation; end only at its exact named confirmation, Demo route choice, delivery evidence, or an observed blocking report with an operation receipt.`
+    reason: 'APEX 正在自动完成当前受控步骤。请继续执行 Router 已授权的具体工作；不要向用户显示“继续”或阶段性结论。仅在明确确认点、Demo 路线选择、交付证据或带实际操作回执的阻断报告处结束。'
   });
 } catch {
   // A hook must never block unrelated Codex work merely because an APEX run

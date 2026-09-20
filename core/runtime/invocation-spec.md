@@ -69,9 +69,15 @@ Gate 1 与视觉方案的用户可读正文也属于该边界。Existing 局部�
 1. Gate 1：确认需求方向、目标用户、产品与功能范围、信息架构、数据/API/权限、风险、交付边界与质量门槛。确认前先用聊天语言解释“当前确认什么、重点看什么、确认后自动发生什么、如何提出调整”，再完整展示 `gate1-presentation.md` 的八节正文：需求方向与成功标准；用户、场景与核心任务；轨道判断与正式基线；产品范围、页面与功能边界；信息架构、数据、API 与权限；交付路径、技术约束与不包含项；质量门槛、验证与验收；已知事实、假设、待决项与风险。文件列表、功能清单、原始 JSON 和一句摘要不能代替正文。
 2. 视觉实施方案确认：Gate 1 确认后，必须先自动完成视觉方案生成，再完整展示并要求“确认视觉方案”；确认前禁止生成运行时 Demo。视觉方案确认需求拆解、页面布局、风格/颜色/字体/特效、内容和组件来源，以及每条动效的库、精确版本、API、待安装计划、性能和降级风险；若采用 3D/WebGL，还须确认 Three/Babylon 运行时、renderer、模型/纹理/环境资源、性能预算、静态降级和 reduced-motion。
    Gate 1 通过、正在分析、正在比较候选、已写入体验策略或“下一步将生成”等内容仅为内部进度，不得结束用户回合。Gate 1 通过后缺少 `visual-execution-plan.json` 是 Router 指定的 `plan_visual` 自动工作条件，不是阻断条件：宿主必须先取得授权、实际执行候选分析与方案编译；未产生失败 operation receipt 前不得以“工件尚未生成”向用户报告无法继续。`plan_visual` 成功后，Router 必须在 `confirmation.presentation.content` 返回完整十节展示稿；宿主必须在同一消息完整渲染该内容后才能显示“确认视觉方案”。
-3. 运行时 Demo 生成（视觉流）：视觉实施方案确认后，Router 直接授权在隔离沙箱中生成可访问、可交互的运行时 Demo 并展示该 Demo。此时 `executionDirective` 强制宿主在同一执行回合完成生成与登记，禁止向用户显示“继续”、再次确认或进度轮询。它是唯一用户可审阅的视觉产物；DOM、源码来源、动效帧与内部截图均登记为机器证据，不另行展示或确认“效果图”。
+3. 运行时 Demo 生成（视觉流）：视觉实施方案确认后，Router 直接授权在隔离沙箱中生成可访问、可交互的运行时 Demo 并展示该 Demo。此时 `executionDirective` 强制宿主在同一执行回合完成生成与登记，禁止向用户显示“继续”、再次确认或进度轮询。它是唯一用户可审阅的视觉产物；DOM、源码来源、动效帧与内部截图均登记为机器证据，不另行展示或确认“效果图”。若用户在该自动链尚未完成登记时已明确说“直接代码/直接生成代码”，宿主必须调用 `select-route` 写入当前 Run、当前 session 的 `pendingDeliveryRoute` 回执；该输入不得被当作视觉反馈、重新确认或方案撤销。相同 Demo 登记完成后 Router 自动应用这条路线，继续产出实施冻结。运行时来源展示名到规范包名的受控标准化（例如 `Apache ECharts` 到 `echarts`）只有在 Router 逐字段比较证明其余视觉、交互、内容、版本与来源均不变，并能绑定原视觉确认回执时，才可自动恢复原视觉确认并续跑 Demo；否则它仍是影响视觉方案的变更，必须回到“确认视觉方案”。
 
-所有活跃 APEX 阶段的用户交互由 Router 的 `userInteraction` 与 `terminalResponseContract` 共同裁决，而非聊天 UI 默认按钮。宿主结束每个回合前必须重新读取 Router；`terminalResponseContract.allowed: false` 时必须继续执行 `mustContinueAction`，不得用阶段状态结束回合；允许结束时也只能输出 `allowedKinds`、逐字使用 `exactLabels` 并先满足 `requiredPresentation`。关键阀门必须显示其精确 `confirmation.label`：`确认需求与交付方案`、`确认视觉方案`、`确认 Stitch 内容` 或 `确认实施冻结`；不得以“确认”“继续”或含混文案代替。Router 只有在该阀门的完整生成工件和机器校验均已就绪时才可暴露该标签：Gate 1 为 `pre-gate1` 校验通过；视觉方案为 `visual-execution-plan.json` 加十节完整的 `visual-plan-presentation.md`；Stitch 为已选择 Stitch 路线且已有冻结候选和一致性证据；实施为已冻结 Visual Bundle 与 Implementation Map。范围清单、重做声明、阶段说明和未完成草稿一律不可确认。只有用户明确执行该阀门确认才能向下流转；在此之前，任何补充都按 `unconfirmedInputPolicy` 视作当前工件调整，自动执行“反馈提取 → `revise` → 工件重建”，仍回到同一明确确认提示。若 Gate 1 已确认后又出现改变功能、数据、API、权限、范围或验收的新需求，必须执行 `revise ... gate1 visible ...`；Router 撤销旧 Gate 1 和全部派生视觉/实施锁，保留 Existing 正式只读基线，并重建八节需求与交付方案。不得只在聊天中“记录”后继续沿用旧方案。`genericContinueForbidden: true` 时，宿主必须持续执行当前工作，直至出现明确的 Gate 确认、`stitch|direct-code` 路线选择、Demo 或阻断报告，中间不得显示“继续”或把内部处理拆成新的用户操作。
+所有活跃 APEX 阶段的用户交互由 Router 的 `userInteraction` 与 `terminalResponseContract` 共同裁决，而非聊天 UI 默认按钮。宿主结束每个回合前必须重新读取 Router；`terminalResponseContract.allowed: false` 时必须继续执行 `mustContinueAction`，不得用阶段状态结束回合；允许结束时也只能输出 `allowedKinds`、逐字使用 `exactLabels` 并先满足 `requiredPresentation`。关键阀门必须显示其精确 `confirmation.label`：`确认需求与交付方案`、`确认视觉方案`、`确认 Stitch 内容` 或 `确认实施冻结`；不得以“确认”“继续”或含混文案代替。Router 只有在该阀门的完整生成工件和机器校验均已就绪时才可暴露该标签：Gate 1 为 `pre-gate1` 校验通过；视觉方案为 `visual-execution-plan.json` 加十节完整的 `visual-plan-presentation.md`；Stitch 为已选择 Stitch 路线、冻结候选、一致性证据，以及由 `confirmation-presentation.mjs` 在同一受控动作中产出的六节 `stitch-presentation.md` 与来源清单；实施为已冻结 Visual Bundle、Implementation Map，以及同样受控生成并绑定来源的六节 `implementation-presentation.md` 与来源清单。范围清单、重做声明、阶段说明和未完成草稿一律不可确认。只有用户明确执行该阀门确认才能向下流转；在此之前，任何补充都按 `unconfirmedInputPolicy` 视作当前工件调整，自动执行“反馈提取 → `revise` → 工件重建”，仍回到同一明确确认提示。若 Gate 1 已确认后又出现改变功能、数据、API、权限、范围或验收的新需求，必须执行 `revise ... gate1 visible ...`；Router 撤销旧 Gate 1 和全部派生视觉/实施锁，保留 Existing 正式只读基线，并重建八节需求与交付方案。不得只在聊天中“记录”后继续沿用旧方案。`genericContinueForbidden: true` 时，宿主必须持续执行当前工作，直至出现明确的 Gate 确认、`stitch|direct-code` 路线选择、Demo 或阻断报告，中间不得显示“继续”或把内部处理拆成新的用户操作。
+
+### 自动节点完整性（不得以阶段文案代替可执行链）
+
+`scripts/workflow-node-registry.mjs` 是 Router 自动节点的唯一注册表。每个 `executionDirective.currentStep` 必须同时带有注册的 `nodeId`、受控执行器、输入策略、必需输出、完成条件、状态提交方式、重试策略和失败策略；没有注册项、动作不匹配或 Router 声明的输出少于注册输出时，Router 必须作为 Core 配置错误拒绝返回该步骤，不能把不完整步骤暴露成用户等待状态。
+
+“文件存在”不是步骤完成。确认正文至少要满足标题顺序、每节实质内容、无模板占位符、各节内容不重复、当前来源哈希与受控动作回执；Stitch 与实施冻结还必须保存每节正文的哈希和对应事实字段。正文和清单必须先原子写入，再原子发布 `state.json` 引用；因此异常最多留下未引用的可重建临时工件，不能留下可确认的半正文。任何未能通过这些后置条件的动作只能继续重建其内部输入，或在已有实际失败回执时返回一次带类型的阻断报告，绝不能显示确认按钮或泛化“继续”。
 
 该连续执行约束不止适用于 Gate 1→视觉方案和视觉方案→Demo。Demo 路线选择后，Stitch 路线必须自动同步、导出并校验候选，直到可完整展示“确认 Stitch 内容”；直接代码路线必须自动编译 Visual Bundle、物化已选来源并生成 Implementation Map，直到可完整展示“确认实施冻结”。实施冻结确认后必须自动运行 Gate 2 机器校验并开启实施权限。任何自动阶段的缺少工件在**实际受控操作执行前**都只能被标记为待完成工作，不能被报告为阻断、不能显示泛化确认或“继续”；只有失败 operation receipt、可观察错误与缺失清单同时存在时才能结束为阻断报告。
 4. 交付路线确认：Demo 生成完成后，用户明确选择 `stitch` 或 `direct-code`；普通“继续”不能代替选择。
@@ -87,6 +93,8 @@ Gate 1 与视觉方案的用户可读正文也属于该边界。Existing 局部�
 用户也可明确要求跳过当前人工确认并直接进入下一步；宿主仅在收到“跳过/不需要本次确认/直接下一步”等明确指令时调用 `skip`。普通“继续”、提示词补充、查看工件、沉默或超时仍停留在当前确认点，绝不自动跳过。`skip` 仍要求该点的完整工件与机器前置，且不绕过 Gate 2、严格复刻或后续确认。
 
 Gate 3 前用 `verification-planner.mjs generate <run-dir>` 将 Project Inventory 中项目声明的测试、构建、静态检查脚本编译为可审阅的验证计划。它只提出安全的已声明命令；视觉、无障碍、性能、接口契约等无法从代码安全推断的证据会明确列为缺口，必须补充，不能被“自动通过”。
+
+在正式页验证中，来源证明是自动步骤而不是新的确认点：Browser Capture 自动从冻结的 Visual Source Manifest 导出每个节点的选择器、`data-apex-source` 标记与来源选择 ID，并在桌面、平板、移动端逐一核验。通过后将证据写入 `runtime-state-matrix.json.sourceProvenance`；没有这份浏览器绑定证据时，验证链必须继续修复或采集，不能跳过到 Proof/Gate 3，也不能让行业复核承担发现基础标记缺失的职责。
 
 ## 响应式布局规范
 

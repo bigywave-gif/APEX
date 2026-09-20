@@ -1,6 +1,6 @@
 {
   "name": "@bigywave/apex",
-  "version": "4.24.0",
+  "version": "4.34.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "APEX user-intent-driven full-stack delivery system",
@@ -14,6 +14,8 @@
     "status": "node scripts/preflight.mjs --json",
     "test": "node scripts/portable-install-contract-test.mjs",
     "test:router": "node scripts/router-contract-test.mjs",
+    "test:workflow": "node scripts/workflow-node-registry-contract-test.mjs",
+    "test:hooks": "node scripts/codex-lifecycle-hook-contract-test.mjs",
     "test:roles": "node scripts/role-advisory-contract-test.mjs",
     "test:role-quality": "node scripts/role-quality-evaluator.mjs audit",
     "release:audit": "node scripts/release-audit.mjs"

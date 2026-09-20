@@ -53,10 +53,25 @@ const runDir = path.resolve(runArg);
 // A Gate 1 presentation is not incidental context: it is the user-facing
 // output of analyze_requirement.  Other contracts remain record_context-only.
 const permittedActions = command === 'gate1-presentation' ? ['record_context', 'analyze_requirement'] : command === 'site' ? 'compile_visual_bundle' : 'record_context';
-try { requireRouterAction(runDir, permittedActions); } catch (error) { die(error.message); }
+let authorizationStatus;
+try { authorizationStatus = requireRouterAction(runDir, permittedActions); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
-if (command !== 'site' && state.gates?.gate1?.status === 'passed') die('Gate 1 is frozen; revise the requirement through the Router instead of replacing a contract');
+function authorizedExistingScopeRecovery() {
+  // Gate 1 freezes the user-approved requirement and delivery contract.  It
+  // does not freeze the mechanical protected-file complement used to prove an
+  // Existing baseline.  The latter can become stale after Gate 1 while the
+  // requirement itself remains unchanged.  Accept this narrow repair only
+  // when Router currently directs the exact recovery step; arbitrary scope
+  // edits after Gate 1 remain forbidden.
+  if (command !== 'scope' || state.track !== 'existing') return false;
+  return authorizationStatus?.existingVisualBaseline?.ready === false
+    && authorizationStatus.executionDirective?.action === 'collect_existing_baseline'
+    && authorizationStatus.executionDirective?.currentStep?.id === 'freeze-change-scope'
+    && authorizationStatus.executionDirective?.currentStep?.authorizationAction === 'record_context';
+}
+const scopeRecovery = authorizedExistingScopeRecovery();
+if (command !== 'site' && state.gates?.gate1?.status === 'passed' && !scopeRecovery) die(`Gate 1 is frozen; revise the requirement through the Router instead of replacing a contract (authorizedRecovery=${command === 'scope' && state.track === 'existing' ? JSON.stringify({ baselineReady: authorizationStatus?.existingVisualBaseline?.ready, action: authorizationStatus?.executionDirective?.action, step: authorizationStatus?.executionDirective?.currentStep?.id, stepAuthorization: authorizationStatus?.executionDirective?.currentStep?.authorizationAction }) : 'not-applicable'})`);
 if (command === 'gate1-presentation') {
   const content = fs.readFileSync(path.resolve(inputArg), 'utf8');
   if (!completeSections(content, gate1PresentationSections)) die('Gate 1 presentation must contain substantive content in all eight APEX-defined direction sections');

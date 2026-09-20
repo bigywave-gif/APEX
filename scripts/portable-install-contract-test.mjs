@@ -16,6 +16,7 @@ for (const file of ['manifest.yaml', 'scripts/apex-router.mjs', 'scripts/preflig
 if (!fs.existsSync(path.join(codexHome, 'skills', 'apex', 'SKILL.md'))) throw new Error('portable install did not publish the bridge');
 const hooks = JSON.parse(fs.readFileSync(path.join(codexHome, 'hooks.json'), 'utf8'));
 if (!(hooks.hooks?.Stop || []).some(group => (group.hooks || []).some(hook => hook.type === 'command' && hook.command.includes('codex-stop-continuation.mjs')))) throw new Error('portable install did not publish the required APEX Stop continuation hook');
+if (!(hooks.hooks?.PreToolUse || []).some(group => (group.hooks || []).some(hook => hook.type === 'command' && hook.command.includes('codex-pretool-session-refresh.mjs')))) throw new Error('portable install did not publish the required APEX session refresh hook');
 const maintainerHome = path.join(path.sep, 'Users', 'fredyw');
 for (const name of fs.readdirSync(path.join(apexRoot, 'scripts')).filter(value => value.endsWith('.mjs'))) if (fs.readFileSync(path.join(apexRoot, 'scripts', name), 'utf8').includes(maintainerHome)) throw new Error(`hard-coded maintainer path remains in scripts/${name}`);
 const preflight = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'preflight.mjs'), '--json'], { encoding: 'utf8', env });
@@ -24,5 +25,7 @@ if (!['ready', 'ready-with-risks', 'blocked'].includes(report.status) || fs.real
 const router = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'router-contract-test.mjs')], { encoding: 'utf8', env, timeout: 120000 });
 if (router.status !== 0) throw new Error((router.stderr || router.stdout || 'portable Router contract failed').trim());
 const routerReport = JSON.parse(router.stdout);
+const lifecycleHooks = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'codex-lifecycle-hook-contract-test.mjs')], { encoding: 'utf8', env, timeout: 30000 });
+if (lifecycleHooks.status !== 0) throw new Error((lifecycleHooks.stderr || lifecycleHooks.stdout || 'portable lifecycle hook contract failed').trim());
 fs.rmSync(root, { recursive: true, force: true });
-console.log(JSON.stringify({ passed: true, preflightStatus: report.status, routerChecks: routerReport.checks }));
+console.log(JSON.stringify({ passed: true, preflightStatus: report.status, routerChecks: routerReport.checks, lifecycleHookChecks: JSON.parse(lifecycleHooks.stdout).checks }));

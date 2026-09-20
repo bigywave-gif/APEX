@@ -13,14 +13,21 @@ const roleScript = 'role-advisory.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-role-advisory-'));
 function run(script, args) { return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' }); }
 function expect(result, message) { if (result.status !== 0) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); return JSON.parse(result.stdout); }
+function reject(result, pattern, message) { if (result.status === 0 || !pattern.test(`${result.stderr || ''}\n${result.stdout || ''}`)) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); }
 try {
   const intake = expect(run(router, ['intake', root, 'role-run', 'greenfield', 'full', 'interactive', 'role-session']), 'new role-chain run intake must succeed');
   if (intake.nextRequiredAction !== 'analyze_requirement') throw new Error('new role-chain run must retain the normal Gate 1 automatic action');
   const runDir = path.join(root, '.apex', 'runs', 'role-run');
   const authorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'role selection must receive a normal analyze_requirement authorization');
+  if (!authorization.authorizationToken?.stateHash) throw new Error('Router authorization must expose the immutable authorization token without overwriting it with the run authorization mode');
   const selected = expect(run(action, ['run', root, 'role-run', 'role-session', authorization.authorizationRef, 'analyze_requirement', roleScript, 'select', runDir, 'gate1']), 'role selector must run through the action gateway');
   if (!selected.selectedRoles.includes('product-manager') || !selected.selectedRoles.includes('senior-project-manager')) throw new Error('Gate 1 role selector must activate product and delivery professionals');
   const selection = JSON.parse(fs.readFileSync(path.join(runDir, 'advisories', 'gate1', 'selection.json'), 'utf8'));
+  const failedRole = selection.selectedRoles[0];
+  const failedAuthorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'a controlled failed role attempt must receive an authorization');
+  reject(run(action, ['run', root, 'role-run', 'role-session', failedAuthorization.authorizationRef, 'analyze_requirement', roleScript, 'degrade', runDir, 'gate1', failedRole, 'simulated advisory failure']), /degrade is prohibited/, 'selected role failures must not be converted into an unverified ready advisory');
+  const duplicateAuthorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'a new authorization can be obtained only to test duplicate failure protection');
+  reject(run(action, ['run', root, 'role-run', 'role-session', duplicateAuthorization.authorizationRef, 'analyze_requirement', roleScript, 'degrade', runDir, 'gate1', failedRole, 'simulated advisory failure']), /identical controlled operation already failed/, 'a fresh authorization must not restart an identical failed controlled operation');
   for (const roleId of selection.selectedRoles) {
     const advisory = {
       schemaVersion: '1.0', roleId, stage: 'gate1', adapterVersion: '1.0.0', inputBindings: selection.inputBindings,

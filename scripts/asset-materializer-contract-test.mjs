@@ -20,7 +20,11 @@ try {
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   state.gates.gate1 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] };
   state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.locks.effectApproved = true; state.locks.visualApproved = true; state.locks.stitchSkipped = true; state.phase = 'G-07 COMPILE'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; state.artifacts.visualSourceManifest = 'visual-source-manifest.json'; state.artifacts.runtimeSourceLock = 'runtime-source-lock.json';
-  fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ sourceSelections: [{ id: 'lucide-alert', visualNodes: ['alert-icon'], kind: 'icon', sourceType: 'approved-candidate', sourceId: 'lucide', resourceId: 'triangle-alert.svg', version: '0.468.0', materialization: 'inline-transfer', parameters: {} }] }));
+  fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ sourceSelections: [
+    { id: 'lucide-alert', visualNodes: ['alert-icon'], kind: 'icon', sourceType: 'approved-candidate', sourceId: 'lucide', resourceId: 'triangle-alert.svg', version: '0.468.0', materialization: 'inline-transfer', parameters: {} },
+    { id: 'layout', kind: 'layout', visualNodes: ['alert-icon'] }, { id: 'component', kind: 'component', visualNodes: ['alert-icon'] }, { id: 'style', kind: 'style', visualNodes: ['alert-icon'] }, { id: 'font', kind: 'font', visualNodes: ['alert-icon'] },
+    { id: 'content', kind: 'content', visualNodes: ['alert-icon'], parameters: { origin: 'test.intent', fields: ['alert'], implementation: 'render alert text' } }
+  ] }));
   fs.mkdirSync(path.join(runDir, 'visual-sandbox', 'node_modules', 'lucide', 'icons'), { recursive: true });
   fs.writeFileSync(path.join(runDir, 'visual-sandbox', 'node_modules', 'lucide', 'icons', 'triangle-alert.svg'), '<svg data-lucide="triangle-alert"/>');
   const icon = path.join(runDir, 'visual-sandbox', 'node_modules', 'lucide', 'icons', 'triangle-alert.svg');

@@ -33,6 +33,9 @@ const invalidates = new Set((context.changed || []).flatMap(item => item.invalid
 if (changed.some(item => ['siteContract', 'functionalFreeze', 'stitchFreeze', 'visualBundle', 'implementationMap', 'dependencyLock'].includes(item.name)) || invalidates.has('gate2')) {
   state.gates.gate2 = { status: 'revoked', at: new Date().toISOString(), evidence: ['recovery-input-changed'] };
   state.locks.implementationAllowed = false;
+  state.gates.proof = { status: 'revoked', at: new Date().toISOString(), evidence: ['upstream-gate2-revoked'] };
+  state.gates.gate3 = { status: 'revoked', at: new Date().toISOString(), evidence: ['upstream-gate2-revoked'] };
+  for (const artifact of ['runtimeStateMatrix', 'verificationPlan', 'verificationBundle', 'industryBenchmarkEvidence', 'evidenceProvenance']) state.artifacts[artifact] = null;
 }
 if (changed.length || invalidates.has('gate3')) state.gates.gate3 = { status: 'revoked', at: new Date().toISOString(), evidence: ['recovery-input-changed'] };
 state.revision = Number(state.revision || 0) + 1;

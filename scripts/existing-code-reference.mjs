@@ -30,7 +30,12 @@ const stateFile = path.join(runDir, 'state.json'); const state = JSON.parse(fs.r
 const entries = [...new Set(scope.codeEntrypoints || [])].map(item => path.resolve(projectRoot, item));
 if (!entries.length) die('baseline input must declare target codeEntrypoints');
 for (const entry of entries) if (!inside(projectRoot, entry) || !fs.existsSync(entry) || !fs.statSync(entry).isFile()) die(`target code entrypoint is missing: ${rel(projectRoot, entry)}`);
-const snapshotRoot = path.join(runDir, 'code-reference'); const copies = path.join(snapshotRoot, 'files');
+// Reference copies are immutable content-addressed objects.  Earlier versions
+// erased `code-reference/` before rebuilding; that is unsafe under host
+// project-deletion policies and can destroy evidence needed to diagnose a
+// failed run.  A rebuild now creates/reuses only the exact object for each
+// source hash and switches the state to the new manifest atomically later.
+const snapshotRoot = path.join(runDir, 'code-reference'); const copies = path.join(snapshotRoot, 'objects');
 const priorReferenceFile = path.join(runDir, 'code-reference.json'); const integrityIndexFile = path.join(runDir, 'source-integrity-index.json');
 if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
   try {
@@ -47,10 +52,21 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
 }
 const pending = [...entries]; const selected = new Set();
 while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; selected.add(file); const content = fs.readFileSync(file, 'utf8'); for (const dependency of imports(projectRoot, file, content)) if (!selected.has(dependency)) pending.push(dependency); }
-fs.rmSync(snapshotRoot, { recursive: true, force: true }); fs.mkdirSync(copies, { recursive: true });
+fs.mkdirSync(copies, { recursive: true });
 const aggregate = crypto.createHash('sha256'); let totalBytes = 0; const nodes = [];
 const integrityFiles = [];
-const files = [...selected].sort((a, b) => rel(projectRoot, a).localeCompare(rel(projectRoot, b))).map(file => { const content = fs.readFileSync(file); const relative = rel(projectRoot, file); const copyPath = path.join('code-reference', 'files', relative).split(path.sep).join('/'); const copy = path.join(runDir, copyPath); fs.mkdirSync(path.dirname(copy), { recursive: true }); fs.writeFileSync(copy, content); const hash = sha(content); aggregate.update(relative); aggregate.update('\0'); aggregate.update(hash); aggregate.update('\0'); totalBytes += content.length; for (const item of markers(content)) nodes.push({ id: `${relative}:${item.marker}`, sourcePath: relative, marker: item.marker, kind: item.kind }); integrityFiles.push({ path: relative, copyPath, sha256: hash, sourceFingerprint: fingerprint(file), copyFingerprint: fingerprint(copy) }); return { path: relative, sha256: hash, bytes: content.length, copyPath, language: path.extname(file).slice(1) || 'text' }; });
+const files = [...selected].sort((a, b) => rel(projectRoot, a).localeCompare(rel(projectRoot, b))).map(file => {
+  const content = fs.readFileSync(file); const relative = rel(projectRoot, file); const hash = sha(content); const hashSegment = hash.slice('sha256:'.length);
+  const copyPath = path.join('code-reference', 'objects', hashSegment, relative).split(path.sep).join('/'); const copy = path.join(runDir, copyPath);
+  fs.mkdirSync(path.dirname(copy), { recursive: true });
+  if (fs.existsSync(copy)) {
+    if (sha(fs.readFileSync(copy)) !== hash) die(`immutable code-reference object hash collision: ${copyPath}`);
+  } else fs.writeFileSync(copy, content, { flag: 'wx' });
+  aggregate.update(relative); aggregate.update('\0'); aggregate.update(hash); aggregate.update('\0'); totalBytes += content.length;
+  for (const item of markers(content)) nodes.push({ id: `${relative}:${item.marker}`, sourcePath: relative, marker: item.marker, kind: item.kind });
+  integrityFiles.push({ path: relative, copyPath, sha256: hash, sourceFingerprint: fingerprint(file), copyFingerprint: fingerprint(copy) });
+  return { path: relative, sha256: hash, bytes: content.length, copyPath, language: path.extname(file).slice(1) || 'text' };
+});
 if (!nodes.length) die('target code closure has no mappable page skeleton nodes');
 const sourceTreeHash = `sha256:${aggregate.digest('hex')}`; const skeletonPayload = { sourceTreeHash, entrypoints: entries.map(entry => rel(projectRoot, entry)), nodes }; const skeletonHash = sha(Buffer.from(JSON.stringify(skeletonPayload)));
 const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, excludedDirectories: [...ignored].sort() };

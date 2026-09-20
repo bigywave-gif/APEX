@@ -82,11 +82,18 @@ if (command === 'evaluate') {
   console.log(JSON.stringify({ strategy: strategyFile, evidence: output, status: result.status, score: result.score, threshold: result.threshold })); if (result.status !== 'passed') process.exitCode = 2;
 } else {
   const candidatesFile = path.resolve(inputArg); const candidates = read(candidatesFile); const state = read(path.join(runDir, 'state.json')); const strategyFile = path.join(runDir, state.artifacts.experienceStrategy || 'experience-strategy.json');
-  if (state.locks?.effectApproved) die('design candidates are frozen after visual approval; use a visual revision before replacing them');
+  const output = path.join(runDir, 'design-candidates.json');
+  // Downstream bundle workers may re-check the selected candidate. That is a
+  // read-only verification, not a replacement of the user-approved choice.
+  const frozenVerification = state.locks?.effectApproved === true;
+  if (frozenVerification && candidatesFile !== output) die('design candidates are frozen after visual approval; a different candidate file requires a visual revision');
   if (!fs.existsSync(strategyFile) || candidates.strategyHash !== hash(strategyFile)) die('design candidates must bind the current experience strategy');
   const ids = candidates.candidates?.map(item => item.id) || [];
-  if (new Set(ids).size !== ids.length || !ids.includes(candidates.selectedCandidateId)) die('candidate ids must be unique and selectedCandidateId must exist');
+  if (ids.length < 2 || new Set(ids).size !== ids.length || !ids.includes(candidates.selectedCandidateId)) die('at least two uniquely identified candidates and a selectedCandidateId are required');
   for (const item of candidates.candidates || []) { const image = path.resolve(runDir, item.image.path); if (!image.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(image) || hash(image) !== item.image.sha256) die(`candidate image is missing or hash-mismatched: ${item.id}`); }
-  const output = path.join(runDir, 'design-candidates.json'); if (path.resolve(candidatesFile) !== output) write(output, candidates); updateState(runDir, { designCandidates: 'design-candidates.json' });
-  console.log(JSON.stringify({ candidates: output, status: 'passed', selectedCandidateId: candidates.selectedCandidateId }));
+  if (!frozenVerification) {
+    if (candidatesFile !== output) write(output, candidates);
+    updateState(runDir, { designCandidates: 'design-candidates.json' });
+  }
+  console.log(JSON.stringify({ candidates: output, status: 'passed', mode: frozenVerification ? 'verified-frozen-candidates' : 'recorded-candidates', selectedCandidateId: candidates.selectedCandidateId }));
 }

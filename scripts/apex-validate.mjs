@@ -159,7 +159,8 @@ function validateRoleStage(runDir, state, stage) {
     const file = resolveArtifact(runDir, item.path, '');
     const receipt = item.operationReceipt && operationIndex[item.operationReceipt];
     if (!file.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(file) || hashFile(file) !== item.sha256 || receipt?.status !== 'succeeded' || receipt.script !== 'role-advisory.mjs' || receipt.outputFileHashes?.[item.path] !== item.sha256) throw new Error(`controlled role advisory is missing, stale, or not a controlled output: ${item.roleId}`);
-    validateFile('role-advisory.schema.json', file);
+    const advisory = validateFile('role-advisory.schema.json', file);
+    if (advisory.findings.some(finding => finding.classification === 'unverified')) throw new Error(`selected role advisory is not evidence-complete: ${item.roleId}`);
   }
 }
 
@@ -185,10 +186,26 @@ function assertStyleBaseline(style, expectedMode) {
 function assertExistingCodeReferenceUnchanged(runDir, state) {
   const reference = validateFile('code-reference.schema.json', requireArtifact(runDir, state, 'codeReference', 'code-reference.json'));
   const projectRoot = path.resolve(reference.projectRoot);
+  // Once Gate 2 has opened, the Existing snapshot remains immutable evidence,
+  // but files inside the frozen implementation closure are expected to differ.
+  // Treating those approved production changes as baseline drift makes every
+  // post-implementation Gate 3 validation self-contradictory.
+  const changedTargets = (() => {
+    if (state.gates?.gate2?.status !== 'passed') return new Set();
+    const scopeFile = requireArtifact(runDir, state, 'changeScope', 'change-scope.json');
+    const mapFile = requireArtifact(runDir, state, 'implementationMap', 'implementation-map.json');
+    const scope = validateFile('change-scope.schema.json', scopeFile);
+    const map = validateFile('implementation-map.schema.json', mapFile);
+    if (map.scopeControl?.changeScopeHash !== hashFile(scopeFile) || map.scopeControl?.implementationPolicy !== 'deny-outside-change-closure') throw new Error('post-Gate-2 Existing changes are not bound to the frozen implementation closure');
+    const allowed = new Set(scope.affected?.runtimeTargets || []);
+    for (const entry of map.entries || []) if ((entry.runtimeTarget || []).some(target => !allowed.has(target))) throw new Error(`Implementation Map escapes the Existing change closure: ${entry.visualNode || '<unknown>'}`);
+    return allowed;
+  })();
   for (const item of reference.files) {
     const source = path.resolve(projectRoot, item.path); const copy = path.resolve(runDir, item.copyPath);
     if (!source.startsWith(`${projectRoot}${path.sep}`) || !copy.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(source) || !fs.existsSync(copy)) throw new Error(`Existing code reference is missing: ${item.path}`);
-    if (hashFile(source) !== item.sha256 || hashFile(copy) !== item.sha256) throw new Error(`Existing code changed after the scoped reference was captured: ${item.path}`);
+    if (hashFile(copy) !== item.sha256) throw new Error(`Existing code reference copy changed after capture: ${item.path}`);
+    if (!changedTargets.has(item.path) && hashFile(source) !== item.sha256) throw new Error(`Existing code changed outside the approved scoped implementation closure: ${item.path}`);
   }
   return reference;
 }

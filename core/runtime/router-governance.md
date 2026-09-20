@@ -6,7 +6,7 @@ APEX Bridge Skill 负责让 Codex 命中和进入 APEX；`apex-router.mjs` 是�
 session、阶段、审批与动作授权的唯一代码化入口；`apex-action.mjs` 只执行已登记且
 已经授权的 APEX 运行脚本。原有 Gate、Stitch、Existing、视觉、验证和质量脚本均保留，
 
-为防止宿主把自动阶段误结束为聊天回复，所有 APEX 安装必须部署 `scripts/install-codex-stop-hook.mjs`。该 Hook 在 Codex 的 `Stop` 生命周期复核当前 session 的 Router 状态；只有 `terminalResponseContract.allowed: true` 或有已执行动作产生的阻断回执时才允许结束回合。
+为防止宿主把自动阶段误结束为聊天回复，所有 APEX 安装必须部署 `scripts/install-codex-stop-hook.mjs`。该 Hook 在 Codex 的 `Stop` 生命周期复核当前 session 的 Router 状态；只有 `terminalResponseContract.allowed: true` 或有已执行动作产生的阻断回执时才允许结束回合。Bridge 顶部还必须声明同一回合结束硬约束，避免宿主未派发 Stop 生命周期时把基线、快照、截图、角色或进度文字误作为最终答复；任何此类输出后仍须重新读取 Router 并继续 `currentStep`。
 由能力注册表声明并经 Router 分阶段调用。
 
 ## Session 隔离
@@ -38,8 +38,8 @@ worktree。运行状态、确认、证据和交付契约仍只保存在原项目
 - 任意状态变更会改变 state hash 并使旧授权失效。
 - 代码编辑、依赖安装、迁移与发布还必须取得项目 mutation lease。
 - `apex-action.mjs` 为每个授权动作写入不可复用到其他命令的 operation receipt。相同授权、
-  动作、脚本和参数的重试只返回已完成结果；参数不同、运行中或失败的 receipt 必须取得新授权，
-  防止重复执行产生副作用。
+  动作、脚本和参数的重试只返回已完成结果；每个操作还以 `run + stateHash + action + script + inputDigest`
+  形成稳定 `operationKey`。相同 `operationKey` 的失败不能靠新授权重复执行，只有状态、输入或观察到的原因实际变化后才可重试，防止无限循环和重复副作用。
 - “可确认”状态必须同时满足两项：完整的用户可读方案及其登记回执，以及该阶段全部自动前置工件。任何缺失的领域模型、API 契约、Existing 基线、专业角色摘要或站点契约都只能触发同一受控动作的自动补齐，绝不得登记或渲染为“确认 XXX 方案”。
 - Router 在自动阶段必须同时返回 `executionDirective.currentStep`，明确当前内部工作、所需产物、当前授权动作与完成后的重新读取规则。任何单项基线采集、代码快照、浏览器截图或角色选择完成后都必须继续读取 Router；它们只能推进自动链，不能构成用户可见终点或等待指令。
 

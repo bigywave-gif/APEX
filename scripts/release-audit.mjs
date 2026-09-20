@@ -52,7 +52,7 @@ try {
 const guardedActionScripts = {
   analyze_requirement: ['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs'],
   plan_visual: ['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs'],
-  generate_visual: ['visual-sandbox-writer.mjs', 'browser-capture.mjs', 'runtime-visual-baseline.mjs', 'visual-reference-compiler.mjs', 'visual-sandbox-dependency.mjs', 'experience-evaluator.mjs'],
+  generate_visual: ['demo-source-compiler.mjs', 'visual-sandbox-writer.mjs', 'visual-sandbox-runtime.mjs', 'browser-capture.mjs', 'runtime-visual-baseline.mjs', 'visual-reference-compiler.mjs', 'visual-sandbox-dependency.mjs', 'experience-evaluator.mjs'],
   'collect_existing_baseline': ['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs', 'role-advisory.mjs'],
   'sync_stitch': ['stitch-sync.mjs', 'stitch-ui-importer.mjs'],
   observe_stitch: ['stitch-sync.mjs'],
@@ -93,12 +93,18 @@ for (const file of files(path.join(apexRoot, 'scripts'), file => file.endsWith('
 for (const file of files(path.join(apexRoot, 'core/runtime/schemas'), file => file.endsWith('.json'))) { try { JSON.parse(fs.readFileSync(file, 'utf8')); results.push(check(`json:${path.basename(file)}`, true, 'valid JSON')); } catch (error) { results.push(check(`json:${path.basename(file)}`, false, error.message)); } }
 const routerContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'router-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('router-contract', routerContract.status === 0, (routerContract.stderr || routerContract.stdout || 'ok').trim()));
+const lifecycleHookContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'codex-lifecycle-hook-contract-test.mjs')], { encoding: 'utf8' });
+results.push(check('codex-lifecycle-hook-contract', lifecycleHookContract.status === 0, (lifecycleHookContract.stderr || lifecycleHookContract.stdout || 'ok').trim()));
 const roleAdvisoryContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'role-advisory-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('role-advisory-contract', roleAdvisoryContract.status === 0, (roleAdvisoryContract.stderr || roleAdvisoryContract.stdout || 'ok').trim()));
 const roleQualityAudit = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'role-quality-evaluator.mjs'), 'audit'], { encoding: 'utf8' });
 results.push(check('role-quality-evaluation', roleQualityAudit.status === 0, (roleQualityAudit.stderr || roleQualityAudit.stdout || 'ok').trim()));
 const sandboxWriterContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'visual-sandbox-writer-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('visual-sandbox-writer-contract', sandboxWriterContract.status === 0, (sandboxWriterContract.stderr || sandboxWriterContract.stdout || 'ok').trim()));
+const sandboxRuntimeContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'visual-sandbox-runtime-contract-test.mjs')], { encoding: 'utf8', timeout: 30000 });
+results.push(check('visual-sandbox-runtime-contract', sandboxRuntimeContract.status === 0, (sandboxRuntimeContract.stderr || sandboxRuntimeContract.stdout || 'ok').trim()));
+const demoSourceCompilerContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'demo-source-compiler-contract-test.mjs')], { encoding: 'utf8' });
+results.push(check('demo-source-compiler-contract', demoSourceCompilerContract.status === 0, (demoSourceCompilerContract.stderr || demoSourceCompilerContract.stdout || 'ok').trim()));
 const runtimeBaselineContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'runtime-visual-baseline-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('runtime-visual-baseline-contract', runtimeBaselineContract.status === 0, (runtimeBaselineContract.stderr || runtimeBaselineContract.stdout || 'ok').trim()));
 const visualSourceContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'visual-source-contract-test.mjs')], { encoding: 'utf8' });
@@ -113,7 +119,7 @@ const portableInstallContract = spawnSync(process.execPath, [path.join(apexRoot,
 results.push(check('portable-install-contract', portableInstallContract.status === 0, (portableInstallContract.stderr || portableInstallContract.stdout || 'ok').trim()));
 results.push(check('package-manifest', fs.existsSync(path.join(apexRoot, 'package.json')), 'package.json must expose install, preflight, test and release audit commands'));
 results.push(check('executable-preflight', fs.existsSync(path.join(apexRoot, 'scripts', 'preflight.mjs')), 'scripts/preflight.mjs must be present'));
-results.push(check('stop-continuation-hook', fs.existsSync(path.join(apexRoot, 'scripts', 'codex-stop-continuation.mjs')) && fs.existsSync(path.join(apexRoot, 'scripts', 'install-codex-stop-hook.mjs')), 'APEX must ship the Codex Stop continuation hook and its installer'));
+results.push(check('codex-lifecycle-hooks', fs.existsSync(path.join(apexRoot, 'scripts', 'codex-stop-continuation.mjs')) && fs.existsSync(path.join(apexRoot, 'scripts', 'install-codex-stop-hook.mjs')) && fs.existsSync(path.join(apexRoot, 'scripts', 'codex-pretool-session-refresh.mjs')) && fs.existsSync(path.join(apexRoot, 'scripts', 'install-codex-session-refresh-hook.mjs')), 'APEX must ship the Codex Stop continuation and PreToolUse session refresh hooks with installers'));
 results.push(check('host-skill-dependencies', fs.existsSync(path.join(apexRoot, 'registry', 'host-skill-dependencies.json')), 'required host Skills must have machine-readable sources and install commands'));
 results.push(check('resolver-support', fs.existsSync(path.join(apexRoot, 'registry', 'assets', 'resolver-support.json')), 'resolver support levels must be machine-readable'));
 results.push(check('license-declaration', ['LICENSE', 'LICENSE.md', 'COPYING'].some(file => fs.existsSync(path.join(apexRoot, file))), 'public distribution must declare its license before release'));

@@ -59,6 +59,8 @@ const displayPath = path.join(runDir, 'evidence', 'existing-browser-capture.json
 if (!fs.existsSync(displayPath)) die('real frontend display evidence is required before Existing Baseline capture');
 const display = read(displayPath);
 if (display.kind !== 'existing' || display.status !== 'passed' || !Array.isArray(display.evidence) || display.evidence.some(item => item.status !== 'captured' || !item.screenshot || !item.domHtml)) die('real frontend display evidence is incomplete or is not an immutable Existing capture');
+const sourceSnapshot = display.sourceSnapshot;
+if (!sourceSnapshot || sourceSnapshot.codeReference !== state.artifacts.codeReference || sourceSnapshot.codeReferenceSha256 !== hash(fs.readFileSync(codeReferencePath)) || sourceSnapshot.sourceTreeHash !== codeReference.sourceTreeHash || sourceSnapshot.pageSkeleton !== state.artifacts.pageSkeleton || sourceSnapshot.pageSkeletonSha256 !== hash(fs.readFileSync(skeletonPath)) || sourceSnapshot.pageSkeletonHash !== pageSkeleton.skeletonHash) die('Existing browser display evidence is not bound to the current code reference and page skeleton; recapture it before freezing the baseline');
 const baseline = read(path.resolve(inputArg));
 baseline.schemaVersion = '3.0';
 baseline.capturedAt = new Date().toISOString();

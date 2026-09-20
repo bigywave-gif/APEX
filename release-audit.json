@@ -1,17 +1,17 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-09-07T14:10:15.398Z",
+  "auditedAt": "2026-09-20T07:58:34.772Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"bumped\",\"from\":\"4.23.3\",\"version\":\"4.24.0\",\"level\":\"minor\",\"reason\":\"materially extended APEX runtime capability or contract\",\"changed\":[\"runtime/host-bridges/codex-skill/SKILL.md\",\"scripts/apex-action.mjs\",\"scripts/apex-router.mjs\",\"scripts/codex-stop-continuation.mjs\",\"scripts/contract-recorder.mjs\",\"scripts/role-advisory.mjs\",\"scripts/router-contract-test.mjs\"]}"
+      "detail": "{\"status\":\"current\",\"version\":\"4.34.0\",\"changed\":[]}"
     },
     {
       "id": "global-bridge-published",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"59890f0278fadb39d0b27c6f13be5f04046fe7685f588152b07583ba8030ff4d\"}"
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"9d608c9b315446dc0991cd0380d11b5510f957caaa1cf7f372c0244164d52168\"}"
     },
     {
       "id": "manifest-semver",
@@ -46,7 +46,7 @@
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.24.0 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.34.0 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",
@@ -71,7 +71,7 @@
     {
       "id": "router-guard:generate_visual",
       "status": "passed",
-      "detail": "6 scripts guarded for generate_visual"
+      "detail": "8 scripts guarded for generate_visual"
     },
     {
       "id": "router-guard:collect_existing_baseline",
@@ -219,7 +219,27 @@
       "detail": "ok"
     },
     {
+      "id": "syntax:codex-lifecycle-hook-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:codex-pretool-session-refresh.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:codex-session-bridge.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
       "id": "syntax:codex-stop-continuation.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:confirmation-presentation.mjs",
       "status": "passed",
       "detail": "ok"
     },
@@ -235,6 +255,16 @@
     },
     {
       "id": "syntax:contract-verifier.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:demo-source-compiler-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:demo-source-compiler.mjs",
       "status": "passed",
       "detail": "ok"
     },
@@ -260,6 +290,11 @@
     },
     {
       "id": "syntax:industry-benchmark.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:install-codex-session-refresh-hook.mjs",
       "status": "passed",
       "detail": "ok"
     },
@@ -434,6 +469,16 @@
       "detail": "ok"
     },
     {
+      "id": "syntax:visual-sandbox-runtime-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:visual-sandbox-runtime.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
       "id": "syntax:visual-sandbox-writer-contract-test.mjs",
       "status": "passed",
       "detail": "ok"
@@ -450,6 +495,16 @@
     },
     {
       "id": "syntax:visual-source.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:workflow-node-registry-contract-test.mjs",
+      "status": "passed",
+      "detail": "ok"
+    },
+    {
+      "id": "syntax:workflow-node-registry.mjs",
       "status": "passed",
       "detail": "ok"
     },
@@ -686,7 +741,12 @@
     {
       "id": "router-contract",
       "status": "passed",
-      "detail": "{\"status\":\"passed\",\"checks\":50}"
+      "detail": "{\"status\":\"passed\",\"checks\":52}"
+    },
+    {
+      "id": "codex-lifecycle-hook-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":8}"
     },
     {
       "id": "role-advisory-contract",
@@ -704,6 +764,16 @@
       "detail": "{\"status\":\"passed\",\"checks\":5}"
     },
     {
+      "id": "visual-sandbox-runtime-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":6}"
+    },
+    {
+      "id": "demo-source-compiler-contract",
+      "status": "passed",
+      "detail": "{\"status\":\"passed\",\"checks\":5}"
+    },
+    {
       "id": "runtime-visual-baseline-contract",
       "status": "passed",
       "detail": "{\"status\":\"passed\",\"checks\":5}"
@@ -711,7 +781,7 @@
     {
       "id": "visual-source-contract",
       "status": "passed",
-      "detail": "{\"status\":\"passed\",\"checks\":4}"
+      "detail": "{\"status\":\"passed\",\"checks\":5}"
     },
     {
       "id": "asset-materializer-contract",
@@ -731,7 +801,7 @@
     {
       "id": "portable-install-contract",
       "status": "passed",
-      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":50}"
+      "detail": "{\"passed\":true,\"preflightStatus\":\"blocked\",\"routerChecks\":52,\"lifecycleHookChecks\":8}"
     },
     {
       "id": "package-manifest",
@@ -744,9 +814,9 @@
       "detail": "scripts/preflight.mjs must be present"
     },
     {
-      "id": "stop-continuation-hook",
+      "id": "codex-lifecycle-hooks",
       "status": "passed",
-      "detail": "APEX must ship the Codex Stop continuation hook and its installer"
+      "detail": "APEX must ship the Codex Stop continuation and PreToolUse session refresh hooks with installers"
     },
     {
       "id": "host-skill-dependencies",

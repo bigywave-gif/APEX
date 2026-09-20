@@ -14,4 +14,10 @@ export function requireRouterAction(runDir, expectedActions) {
   if (!fs.existsSync(expectedRun) || path.resolve(runDir) !== expectedRun) throw new Error('Router authorization run does not match this runtime invocation');
   const verification = spawnSync(process.execPath, [router, 'verify-authorization', projectRoot, runId, sessionId, reference, issuedAction], { encoding: 'utf8' });
   if (verification.status !== 0) throw new Error((verification.stderr || verification.stdout).trim());
+  // Return the authoritative Router snapshot used for verification.  Callers
+  // with a narrowly permitted recovery path can make their decision from the
+  // same state that authorized the operation, rather than racing a second
+  // status call after other run-local metadata has been written.
+  try { return JSON.parse(verification.stdout); }
+  catch { throw new Error('Router authorization verification returned invalid JSON'); }
 }

@@ -112,7 +112,7 @@ Gate 3 前必须调用 `evidence-provenance.mjs seal`，将浏览器、测试、
 层级引导、进度解释或风险提示之一的动效不得进入效果图或代码。产品交付禁止无限循环；`delight`
 仅可在已声明的任务完成后，以不超过 1200ms 的一次性反馈出现。
 
-Gate 3 前，浏览器规格可在 screen 中声明 `motionSamples: [{ id, timestampMs }]` 采集关键时间点截图；
+Gate 3 前，浏览器规格可在 screen 中声明 `motionSamples: [{ id, timestampMs }]` 采集关键时间点截图；每帧由 `browser-capture.mjs` 写入 SHA-256，运行时基线至少两帧必须具有不同指纹，静态页面不得用多张相同截图伪装动效；
 随后用 `motion-contract.mjs verify <run-dir> <motion-evidence.json>` 验证每条动效至少两张运行时样本、
 触发事件的结构化运行时 trace、trace 哈希、前后状态和 reduced-motion 证据。trace 内容必须实际包含
 该动效 ID、事件、前后状态、通过结果和时间戳；缺少合同、合同哈希不匹配、事件—状态闭环、trace 内容/哈希、
@@ -123,6 +123,8 @@ Gate 3 前，浏览器规格可在 screen 中声明 `motionSamples: [{ id, times
 ## Visual Source Gate
 
 `visual-source.mjs compile <run-dir> <source-manifest.json>` 必须在正式效果图工件登记后、实施冻结前执行。每个视觉节点都要锁定布局、组件、样式和内容来源；图标、图表、图示、素材和动效出现时也必须锁定具体资源。宿主 Skill 名称、APEX 官方注册来源和 native-web 能力会被校验；任何新增候选库必须在 `dependency-lock.json` 中有精确锁定。Implementation Map 必须保留同一来源 ID、代码目标、选择器和 `data-apex-source` 标记；Gate 2 / Gate 3 审计不接受“相似替代”或未标记代码。
+
+正式项目的 Gate 3 浏览器采集不得依赖手写的空 `requiredSourceSelectionIds`。`browser-capture.mjs` 必须从已冻结的 Visual Source Manifest 和 Visual Execution Plan 自动导出每个正式节点的 `selector + data-apex-source marker + sourceSelectionIds`，并在每个采集视口验证该选择器上的精确标记。采集结果必须把已渲染标记映射回全部来源选择，`runtime-state-matrix.json.sourceProvenance` 必须保存该映射；缺少标记、标记未在对应选择器上渲染、或来源选择覆盖不完整，都只能回到受控的 implementation/verify 自动步骤，不得等到行业基准复核才暴露为 Gate 3 失败。
 
 来源不是只写入 `dependency-lock.json`。选中 `inline-transfer` / `generated-source` 时，必须由 `asset-materializer.mjs collect` 从效果图已运行的精确文件中冻结全部组件、样式、图标或字体文件；Gate 2 必须看到该冻结清单，Gate 3 必须逐文件验证项目副本。选中 `runtime-package` 时，必须由 `runtime-materializer.mjs install` 在 Gate 2 后按锁定版本安装最小必需 package，再由 `audit` 验证项目 package manifest、pattern 组件/样式/动效文件哈希以及实施目标的真实 import/API 使用；不得仅凭包名、来源标记或相似 CSS 放行。
 

@@ -5,6 +5,19 @@ description: Use for every frontend, UI, visual-design, UX, interaction, page-vi
 
 # APEX Bridge Skill（以 manifest.version 为准）
 
+## 回合结束硬约束（优先于任何阶段说明）
+
+对于已绑定的 APEX run，基线采集、代码快照、DOM/截图采集、需求拆解、体验评估、角色
+advisory、候选比较、工件写入和登记都只是**自动链内部步骤**，绝不能单独作为对用户的
+结束输出。每次完成任一内部步骤后，必须立即重新调用 Router `status`，读取
+`terminalResponseContract` 与 `executionDirective.currentStep`，并继续当前受控动作。
+
+只有以下四类结果允许结束回合：Router 已暴露的完整命名确认（且聊天导读与完整用户工件
+均已输出）、已生成并可访问的运行时 Demo 路线选择、已完成的交付结果，或携带实际操作
+回执/观察错误/缺失工件的一次性阻断报告。若 `terminalResponseContract.allowed` 为 `false`，
+任何“已完成基线”“已采集截图”“正在生成”“下一步将……”或文件卡片都只能作为 commentary，
+不得结束、不得要求继续、不得等待用户。
+
 ## 唯一主目录
 
 所有新建、继续和恢复中的 Codex session 只允许使用当前用户的 Codex 主目录：
@@ -35,15 +48,20 @@ description: Use for every frontend, UI, visual-design, UX, interaction, page-vi
 
 已打开 session 在下一次 APEX Router 调用时必须自动加载当前 Core/Bridge：Router 先同步全局
 Bridge，再将该 session 的绑定版本与哈希重绑到主目录版本，随后才返回状态、授权或执行动作。
-旧绑定仅保留为 `previousBridge` 审计记录，不能要求用户新开 session、手动刷新或显式交接。
-任何会改变阶段、确认或实现权限的裁决都只以这次自动刷新后的 Router 输出为准。
+安装器还会注册非阻断的 `PreToolUse` 刷新守卫：已绑定 session 的下一次工具调用前，会执行
+`refresh-session`，使旧会话在进入 APEX 工具链前重绑当前 Core。旧绑定仅保留为
+`previousBridge` 审计记录，不能要求用户新开 session、手动刷新或显式交接。任何会改变阶段、确认或实现权限的裁决都只以这次自动刷新后的 Router 输出为准。
+
+注意：已被 Codex 宿主注入到模型上下文的历史 Skill 文本不能由 APEX 文件自行回写。若宿主提供
+“用户消息前 / BeforeTurn”生命周期，应将同一个 `refresh-session` 守卫接入该事件，才能在模型开始
+阅读新消息前完成热更新；当前已知 Hook 配置仅安全使用 `PreToolUse` 与 `Stop`，不得伪造未受支持的 Hook。
 
 ## 代码化调用路由
 
 本 Skill 是 Codex 的发现与接入层，不是 Gate、阶段或工具权限的裁决者。每次
 命中后都必须先由 `apex-router.mjs` 返回项目、run、当前阶段与 `allowedActions`。
 
-1. 每个新 Codex session 都是一次新的 APEX 调用，必须执行 `node scripts/apex-router.mjs intake <project-root> <new-run-id> auto [scope] [authorization] <session-id>`；不得自动复用任何旧 run。`auto` 是默认且必须使用的轨道判定：只以项目正式代码为依据——Git 仓库优先读取已跟踪源码，非 Git 仓库排除 `.apex`、visual-sandbox、runtime-demo 和临时目录后读取项目源码。只有正式代码中存在页面/视图/UI 入口时才为 Existing；只有 API、数据模型、服务端或无正式页面时为 Greenfield，并自动把既有 API/数据模型作为保留契约输入。Gate 2 前的 Demo、沙箱代码、截图、Stitch 工件和其他 run 产物绝不能成为轨道判断依据，也不能把 Greenfield 改判成 Existing。不得将“没有 Existing 视觉基线”呈现为阻断、要求用户回复“按 Greenfield 重启”，或要求用户手选轨道；只有用户明确指定 Existing/Greenfield 时才传显式轨道。
+1. 每个新 Codex session 都是一次新的 APEX 调用，必须执行 `node scripts/apex-router.mjs intake <project-root> <new-run-id> auto [scope] [authorization] <session-id>`；不得自动复用任何旧 run。`session-id` 优先使用宿主提供的真实 thread/session 标识；若宿主仅允许内部别名，PreTool Hook 必须在该 session 执行 Router 命令时记录“真实 host thread → 精确 APEX 别名”的项目内桥接记录，Stop Hook 只能使用这一**精确映射**继续对应 run，绝不能扫描、猜测、闲置、接管或影响同项目的其它 session/run。`auto` 是默认且必须使用的轨道判定：只以项目正式代码为依据——Git 仓库优先读取已跟踪源码，非 Git 仓库排除 `.apex`、visual-sandbox、runtime-demo 和临时目录后读取项目源码。只有正式代码中存在页面/视图/UI 入口时才为 Existing；只有 API、数据模型、服务端或无正式页面时为 Greenfield，并自动把既有 API/数据模型作为保留契约输入。Gate 2 前的 Demo、沙箱代码、截图、Stitch 工件和其他 run 产物绝不能成为轨道判断依据，也不能把 Greenfield 改判成 Existing。不得将“没有 Existing 视觉基线”呈现为阻断、要求用户回复“按 Greenfield 重启”，或要求用户手选轨道；只有用户明确指定 Existing/Greenfield 时才传显式轨道。
 2. 仅同一 session 可以执行 `node scripts/apex-router.mjs resume <project-root> [run-id] <session-id>` 恢复其已绑定 run。若用户明确说“重新执行 / 从头开始 / 重新按照需求执行”，必须使用 `restart`：创建全新 run，从入口重新完成需求、真实产品页面基线、Gate 1 与视觉方案；旧 run 仅保留审计，不得继承 Gate、方案、基线、工件或授权。只有明确的同一任务补充/澄清才使用 `reinvoke ... continue`；独立任务使用 `reinvoke ... new-task`。不得直接再次 intake。跨 session 默认必须新建 run；后续如需交接，必须使用显式交接流程。
 3. 只可执行 Router 返回的 `allowedActions`；直接请求 Visual、Implement、Verify 或 Release 也不能绕过该规则。
 4. 修改项目代码前先获取 `lease`，再执行 `authorize ... implement <lease-id>`；没有当前项目、run 与 session 绑定的 lease，禁止实施。
@@ -77,13 +95,15 @@ Gate 1 的自动链必须实际完成“需求/交付契约 → 体验策略 →
 
 - 所有 APEX run 同时遵守五项不可互相牺牲的运行约束：**流程严格**（只按 Router 路由与既定 Gate 推进）、**内容完整**（用户可读叙事和机器工件均齐备才出现确认）、**执行连续**（确认阀门之间自动完成全部工作）、**执行高效**（增量索引、变更闭包和受控并行，避免重复全量扫描）、**Token 合理**（只加载当前阶段索引、摘要、已冻结契约和变化依赖闭包）。不得以提速为由跳步骤或省工件，也不得以完整为由每轮重读无关文件；Router 返回的 `operatingConstraints` 是宿主每一回合的执行边界。
 - 向用户提出任何确认时必须遵守 `confirmation.presentation.renderPolicy`。先用自然聊天语言完整渲染 `chatOrientation`：说明“当前确认什么、重点看什么、确认后自动发生什么、未确认时如何调整”；随后在同一条**持续流式输出**中完整展示对应用户可读工件，最后才显示唯一的精确确认标签。若 `confirmation.presentation.streaming.enabled` 为真，宿主必须先立即输出其 `start`，再按 `sections` 顺序持续输出 `progressFormat` 与该节正文；每节输出后继续生成下一节，不能等待全文完成才首次响应。正文使用说明、标题、清单和必要表格，禁止以原始 JSON、内部哈希或文件列表作为主要阅读内容；哈希仅进入来源与审计附录。确认按钮、确认文案、通用“继续”、部分批准或文件卡片在流式输出期间一律禁止；只有所有章节、来源绑定和最终校验完成后，才可以显示精确确认标签。Gate 1 必须完整展示八节需求方向与交付方案；视觉方案必须完整展示十节视觉实施方案；Stitch 必须展示候选、差异、一致性、来源、风险和可调整项；实施冻结必须展示代码目标、来源物化、依赖、验证、风险和可调整项。宿主未完成“聊天导读 + 完整正文”时不得显示确认按钮、不得记录 approval。
+- **确认恢复语义**：只要 Router 返回 `terminalResponseContract.allowedKinds: ["named-confirmation"]`、`confirmation.approvalStatus: "pending-user-confirmation"` 或 `confirmationPending: true`，该确认就尚未通过。即使刚完成基线重建、工件重登记或恢复到原确认节点，也必须在聊天中完整重新呈现当前工件，并仅显示 `exactLabels` 中的确认标签；链接、文件卡片或“查看重建方案”不能替代正文。此状态严禁输出“无需确认”“不重复请求确认”“确认已沿用”“方案已自动通过”或“已恢复并继续执行”。只有 Router 显示相应 Gate 为 `passed` 且没有待确认 checkpoint 时，才能宣称确认已通过。
 - APEX 是唯一的流程编排者。`impeccable`、`ui-ux-pro-max-skill`、`taste-skill`、`google-design-md` 及任何设计 Skill 只能作为**内部非交互能力**：从当前需求、Existing 基线或 Greenfield 标准中提炼产品定位、信息架构、审美约束、候选比较与设计上下文。不得执行这些 Skill 的独立 `init`、项目上下文确认、命令推荐、`PRODUCT.md` / `DESIGN.md` 确认或任何“继续”流程。若其原生指令称缺少 `PRODUCT.md`、`DESIGN.md` 或其他上下文文件，宿主必须自动将其生成为当前 run 的内部工件，再继续 APEX 分析；这些文件不是用户确认点，也不能先于需求分析向用户提问。
 - 每次向用户渲染任何按钮、提问、阶段文本或结束当前回合前，宿主必须重新调用 Router `status`，并同时服从 `userInteraction`、`nextRequiredDecision`、`capabilityExecution` 与 `terminalResponseContract`。`terminalResponseContract.allowed: false` 时只能继续执行 `mustContinueAction`；阶段说明只能作为 commentary，不能结束回合。`allowed: true` 时也只能输出 `allowedKinds` 并逐字使用 `exactLabels`，且必须先满足 `requiredPresentation`。`capabilityExecution.mode: internal-non-interactive` 时，能力池的初始化、候选检索、文档生成和方案生成必须在同一自动执行链完成；禁止呈现 `确认产品定位`、`确认 PRODUCT.md`、`确认 DESIGN.md`、`生成视觉方案`、泛化 `确认` 或 `继续`。唯一可见的人机阀门仍只为 Router 给出的四个精确确认标签及 Demo 后的两项路线选择。
 - 自动链运行较久时，宿主必须读取 `executionDirective.streamingProgress`：立即以其 `start` 发送 commentary，并在每个 `requiredChain` 步骤实际完成后按其 `format` 更新。该进度不是确认、不是“继续”也不是一轮可结束的最终答复；必须持续执行到完整方案、Demo 路线选择或带操作回执的实际阻断报告。禁止只沉默等待全文或只在末尾输出文件卡片。
 - 不得跳过 Preflight、Intent Brief、Gate 1、Gate 2 或 Gate 3。
+- `generate_visual` 是一个不可拆开的自动链，不是“写出沙盒文件”就完成。宿主每完成一个受控子步骤都必须重新读取 Router 的 `executionDirective.currentStep`，并在同一回合持续执行：编译来源清单 → 物化 Run-local 源码 → 启动 `visual-sandbox-runtime.mjs` 并取得真实 URL → 生成 `runtime-browser-spec.json` 并采集 DOM/截图/动效证据 → 编译 `runtime-visual-baseline-input.json` 与运行时来源锁 → 从冻结截图发出 `visual-reference` → 登记真实候选 → 登记 Runtime Demo。`currentStep` 为 null 而必需产物未齐全属于 Router 缺陷，宿主不得输出阶段总结、文件卡片或“继续执行当前任务”来结束回合。
 - `generate_visual` 成功后，宿主必须直接展示 `runtime-demo.json` 中的可访问 Demo URL、入口视口、交互状态与运行时来源摘要（`runtime-source-lock.json` 的选中组件/样式/图标/动效文件）；不得另行生成、展示或要求确认静态效果图。内部浏览器截图只允许用于 Stitch 导入和机器一致性校验。Demo 页面是用户进入 Stitch 或直接代码路线前唯一的视觉审阅对象。
-- `generate_visual` 的四项产物 `runtimeDemo`、`designCandidates`、`visualReference`、`gate1VisualOutput` 完成后，宿主必须先取得 `register_runtime_demo` 的当前 Router 授权，再调用 `register-runtime-demo <project-root> <run-id> <session-id> <authorization-ref>`。该命令只接受成功 `generate_visual` operation receipt 中逐文件哈希匹配的当前输出；登记前不得调用 `select-route`、`sync_stitch`、实施冻结或 Gate 2，也不得以手填工件代替登记。
-- Demo 产品原型源码只能通过 `visual-sandbox-writer.mjs materialize` 写入当前项目的 `<project-root>/.apex/runs/<run-id>/visual-sandbox`；manifest 也必须位于同一 run。用户目录中的孤立 `.apex`、APEX Core、其他项目、系统临时目录及正式 `src/app/pages/public` 均不是合法 Demo 写入目标。`apex-action` 对每个 `generate_visual` 受控动作执行正式项目树前后 SHA-256 快照，`.apex` 之外发生任何变化即判定动作失败。宿主不得用 `apply_patch`、shell 重定向或设计 Skill 绕过该写入器。
+- `generate_visual` 的四项产物 `runtimeDemo`、`designCandidates`、`visualReference`、`gate1VisualOutput` 完成后，宿主必须先取得 `register_runtime_demo` 的当前 Router 授权，再调用 `register-runtime-demo <project-root> <run-id> <session-id> <authorization-ref>`。该命令只接受成功 `generate_visual` operation receipt 中逐文件哈希匹配的当前输出；登记前不得调用 `sync_stitch`、实施冻结或 Gate 2，也不得以手填工件代替登记。唯一例外是：视觉方案已确认、Demo 正在自动生成时，用户明确输入“直接代码/直接生成代码”，宿主必须立即调用 `select-route` 记录当前 Run 与当前 session 的待生效 direct-code 回执；它不是路线执行、视觉反馈或重新确认。登记同一 Demo 后，Router 自动应用该回执，跳过 Stitch 并继续实施冻结。
+- Demo 产品原型源码只能通过 `visual-sandbox-writer.mjs materialize` 写入当前项目的 `<project-root>/.apex/runs/<run-id>/visual-sandbox`；manifest 也必须位于同一 run。视觉确认后的首个 `generate_visual` 子步骤固定为 `compile-demo-source-manifest`：宿主先在当前 run 自动生成 `demo-source-input.json`，覆盖全部已选来源，并为 Existing 绑定每项来源与冻结 `page-skeleton` 节点；然后必须以当前 `generate_visual` 授权调用 `demo-source-compiler.mjs compile` 生成 `demo-source-manifest.json`，最后才可调用写入器。每个 `sourceBinding` 的声明文件还必须实际渲染对应的 `data-apex-source-selection="<id>"` 标记；仅写 JSON 绑定而页面未使用来源会被拒绝。清单缺失、无效或过时是可重建的内部输入问题，必须重建并重试，绝不能向用户报告缺失、要求确认或结束回合。用户目录中的孤立 `.apex`、APEX Core、其他项目、系统临时目录及正式 `src/app/pages/public` 均不是合法 Demo 写入目标。`apex-action` 对每个 `generate_visual` 受控动作执行正式项目树前后 SHA-256 快照，`.apex` 之外发生任何变化即判定动作失败。宿主不得用 `apply_patch`、shell 重定向或设计 Skill 绕过该写入器。
 - 用户只在 `gate1`、`visual-plan`、`stitch`、`implementation` 当前确认点使用 `skip` 跳过当前人工确认并进入下一阶段；Router 必须登记原因与完整工件哈希。`visual-plan` 是 Gate 1 后唯一的视觉方案确认：APEX 必须调用 `google-design-md` 和至少一项 `ui-ux-pro-max-skill`、`impeccable` 或 `taste-skill`，结合用户任务、现有页面、信息密度、技术栈、无障碍和性能约束，按布局、样式、组件、字体及适用的图标、图表、动效逐类比较至少两项真实候选。每项比较必须说明平台适配、视觉高级感/整体性、落地成本，明确选中与拒绝理由；不得因候选库多就混搭，也不得仅列库名或用审美偏好替代分析。再展示并冻结每个布局、颜色/Token、字体、组件、图标、样式、动效和在线候选的精确来源、版本、资源 ID、参数与落地方式，收敛为同一设计系统；确认后 `generate_visual` 只能消费这份选择表并自动生成正式运行时 Demo，代码只能物化其中已选的最小精确资源。运行时 Demo是工件与 Stitch 输入，不是新的用户确认点。`skip stitch` 仍只豁免人工确认，必须已有 Stitch 工件。仅当用户明确要求“跳过 Stitch 步骤”时，才可使用 `skip-stage … stitch`：它跳过 Stitch 生成与确认，以已生成运行时 Demo作为实施基线，仍要求来源锁定、实施确认、Gate 2 和以运行时 Demo为基线的 Gate 3；“继续”等措辞绝不触发该路径。
 - 只有用户明确要求“跳过/不需要本次确认/直接下一步”才可调用 `skip`；“继续”、调整提示词、查看、沉默和超时均不得被推断为跳过或批准。
 - 不得用桥接 skill 替代 APEX Core 本体。
@@ -96,11 +116,11 @@ Gate 1 的自动链必须实际完成“需求/交付契约 → 体验策略 →
 - “确认视觉方案”前必须展示并冻结 `visual-plan-presentation.md`；它不是目标摘要，且必须逐节列出：1 目标与范围；2 信息架构与布局；3 颜色、字体、间距、圆角等视觉 Token；4 组件与关键交互；5 图标、图表、素材；6 动效、reduced-motion 与性能；7 响应式与加载/空/错误状态；8 每项真实库/项目来源、版本、资源 ID、参数与物化方式；9 每类至少两项候选的适配/审美/成本比较及选用理由；10 Existing 的现状问题、改什么、为什么、收益（Greenfield 则最终选择与依据）、代码影响和验收。缺任一节或未同时冻结 `visual-execution-plan.json`，不得展示“确认视觉方案”。
 - Existing 局部任务的 Gate 1 与视觉方案正文必须通过当前 `change-scope.json` 的机器展示边界：完整章节只展开受影响闭包，保护页面、节点、数据视图和代码目标不得出现在正文；未调整内容仅以固定 Existing 基线句引用。presentation manifest 缺少通过结果、正文被手改或 Router 复核不通过时不得显示确认，必须自动重建当前工件。
 - 视觉方案尚未实际生成时，`userInteraction` 必须为 `no-user-input`，不得显示“确认视觉方案”或“确认”。范围清单、待办列表、重建声明和“下一步将生成”均不是视觉方案、不得确认。只有上述两个工件均存在且完整时，才切换为唯一的“确认视觉方案”。
-- `executionDirective.terminalUserResponseAllowed: false` 与 `terminalResponseContract.allowed: false` 是硬性连续执行约束：诸如“Gate 1 已通过”“正在生成视觉方案”“已进入视觉阶段”“已开始改造”“下一步将比较候选”，以及只展示 `experience-strategy.json`、文件修改卡片或进度摘要，只能作为不结束当前回合的 commentary，绝不能成为一轮最终用户响应。宿主必须在同一回合继续授权并完成 Router 指定链；成功后重新读取 Router，只在它返回完整展示稿确认或已登记 Demo 的路线选择时结束。Router 会把 `visual-plan-presentation.md` 全文直接放入 `confirmation.presentation.content`，宿主必须原样完整渲染其聊天导读和十节正文，再显示“确认视觉方案”。只有包含可观察错误与缺失工件的一次性 blocking report 可以提前终止。
+- `executionDirective.terminalUserResponseAllowed: false` 与 `terminalResponseContract.allowed: false` 是硬性连续执行约束：诸如“Gate 1 已通过”“正在生成视觉方案”“已进入视觉阶段”“已开始改造”“下一步将比较候选”，以及只展示 `experience-strategy.json`、文件修改卡片或进度摘要，只能作为不结束当前回合的 commentary，绝不能成为一轮最终用户响应。宿主必须在同一回合继续授权并完成 Router 指定链；成功后重新读取 Router，只在它返回完整展示稿确认或已登记 Demo 的路线选择时结束。四个命名确认都必须读取并完整渲染 `confirmation.presentation.content`：Gate 1 为八节正文，视觉方案为十节正文，Stitch 为候选/差异/一致性/来源/风险/影响六节正文，实施冻结为范围/目标/来源与依赖/约束/验证与风险/执行链六节正文。Stitch 与实施冻结正文必须是当前 Run 内由 `confirmation-presentation.mjs` 写出的工件，其 manifest 必须绑定当前来源哈希和成功 action receipt；禁止在宿主临时拼接、缓存或复用旧正文。若 `contentRequiredInUserMessage` 为 true 但正文为空，宿主不得展示按钮或结束回合，必须继续当前自动链直至重建。只有包含可观察错误与缺失工件的一次性 blocking report 可以提前终止。
 - **Intake / restart / reinvoke 的强制续跑**：这些命令返回的 `routerState` 是内部控制结果，不是可直接呈现的聊天答复。只要其 `terminalResponseContract.allowed === false`，宿主必须立即以 `executionDirective.actionAuthorization.action` 获取当前授权、执行 `executionDirective.requiredChain`，再读取 Router；循环直到取得完整确认稿、运行时 Demo路线选择，或某个实际执行过的动作返回带 operation receipt 的 blocking report。不得把“已创建新运行”“已扫描项目”“正在建立 Existing 基线”“正式代码尚未改动”等任一进度句或文件卡片作为终止消息。此规则同样适用于启动首个 `collect_existing_baseline` 动作；禁止把它留给用户继续、重新调用或再次确认。
 - **逐步续跑协议**：每次 Router `status` 的 `executionDirective.currentStep` 是当前自动链唯一可结束前继续执行的具体工作项。宿主必须先以流式 commentary 报告该项标题，完成其 `produces` 后立即重新读取 Router 并处理新的 `currentStep`；每次状态写入都必须重新授权，不能复用旧授权。`currentStep` 变为下一项、仍处于同一 action 或从 `collect_existing_baseline` 转为 `analyze_requirement` 都不是停顿条件。`baseline-captured-only`、`code-reference-captured-only`、`browser-captured-only` 与阶段概述一律不是可呈现终点；只有 Router 的精确 confirmation、Demo 路线选择、交付证据，或已有失败 operation receipt 的阻断报告才允许结束回合。
-- **宿主硬性终止保护**：安装时必须执行 `scripts/install-codex-stop-hook.mjs`。该 Codex `Stop` Hook 会读取当前 session 绑定的 run 并复核 Router；当 `terminalResponseContract.allowed === false` 时，它会阻止本回合结束并自动注入“继续执行当前受权链”的续跑提示。不得禁用、绕过或用文件卡片代替该保护。此机制只对 APEX 绑定 session 生效，且在 Router 返回精确确认、Demo 路线选择或已执行操作的阻断回执时自动放行。
-- **受控专业角色链**：新 Run 的 `roleChain.enabled: true` 时，角色不是新的对话流程。宿主必须在 Router `executionDirective.requiredChain` 中出现 `select_and_run_*_role_advisories` 的位置，通过当前 action 授权调用 `role-advisory.mjs select`，根据 `advisories/<stage>/selection.json` 选择角色、生成符合 `role-advisory.schema.json` 的结构化 advisory，再逐个 `record` 并 `summarize`。角色仅可读取当前 run 的索引、已冻结契约与变更闭包；不得改项目、改 Router 状态、安装依赖、要求用户确认或自行批准 Gate。`baseline`（Existing）、`gate1`、`visual`、`implementation` 和 `verify` 均在对应阶段自动完成。非关键角色在已实际尝试后失败时，宿主必须用当前 action 调用 `role-advisory.mjs degrade <run> <stage> <role-id> <observed-reason>` 记录 `unverified` 回退，再继续汇总；不得把内部失败转为用户确认或“继续”。角色总结必须被综合进 Gate 1 八节和视觉方案十节的“内部专业协作摘要”；用户仍只看到四个 Router 精确确认和 Demo 路线选择。没有已记录并哈希匹配的当前 stage summary 时，不得展示该 Gate。旧 Run 没有 `roleChain` 字段时可继续按原有规则恢复，不得被这项升级误阻断。
+- **宿主硬性终止保护**：安装时必须执行 `scripts/install-codex-stop-hook.mjs`。该 Codex `Stop` Hook 会读取当前 session 绑定的 run 并复核 Router；只有在没有失败动作回执且 `terminalResponseContract.allowed === false` 时，它才阻止本回合结束并注入“继续执行当前受权链”的续跑提示。不得禁用、绕过或用文件卡片代替该保护。已有 `blockingOperation` 时，宿主必须输出一次包含回执、观察错误、失败类别和下一项实际修复条件的阻断报告；不得重试、不得再次注入续跑提示、不得显示“继续”。此机制只对 APEX 绑定 session 生效，且在 Router 返回精确确认、Demo 路线选择、交付或已执行操作的阻断回执时自动放行。
+- **受控专业角色链**：新 Run 的 `roleChain.enabled: true` 时，角色不是新的对话流程。宿主必须在 Router `executionDirective.requiredChain` 中出现 `select_and_run_*_role_advisories` 的位置，通过当前 action 授权调用 `role-advisory.mjs select`，根据 `advisories/<stage>/selection.json` 选择角色、生成符合 `role-advisory.schema.json` 的结构化 advisory，再逐个 `record` 并 `summarize`。角色仅可读取当前 run 的索引、已冻结契约与变更闭包；不得改项目、改 Router 状态、安装依赖、要求用户确认或自行批准 Gate。`baseline`（Existing）、`gate1`、`visual`、`implementation` 和 `verify` 均在对应阶段自动完成。被当前阶段选中的任何角色失败时，宿主必须保留该次受控 action 的失败回执并由 Router 输出一次真实阻断；不得写入 `unverified` advisory、不得降级汇总、不得把失败转为用户确认或“继续”。未被条件选择的角色仅记录为不适用。角色总结必须被综合进 Gate 1 八节和视觉方案十节的“内部专业协作摘要”；用户仍只看到四个 Router 精确确认和 Demo 路线选择。没有已记录并哈希匹配的当前 stage summary 时，不得展示该 Gate。旧 Run 没有 `roleChain` 字段时可继续按原有规则恢复，不得被这项升级误阻断。
 - 自动链的“所需工件尚未生成”绝不是阻断理由：例如 Gate 1 已通过而 `visual-execution-plan.json` 缺失时，宿主必须先按 `executionDirective.actionAuthorization` 取得 `plan_visual` 授权、完成需求/候选分析与十节方案编译；不得把该文件缺失写成“当前无法继续”。仅当该动作已经实际执行失败，且可提供失败的 operation receipt、观察到的错误和缺失工件时，才可输出一次阻断报告。批准 Gate 1 的回执若返回 `mustContinueAction: plan_visual`，同一回合不得停止、不得要求用户补充操作、不得重新确认。
 - Gate 1 若 `gate1-presentation.md` 已写入但 Router 仍返回 `analyze_requirement`，宿主必须将它视为“尚未受控登记”的自动工作：重新读取当前状态、取得当前 `analyze_requirement` 授权、调用 `register-gate1-presentation`，再重新读取 Router。不得报告“内部状态注册缺失”、不得调用 `apex-run.mjs`、不得把该可修复链路暴露为用户的权限请求。
 - 当当前 `delivery-contract.json` 声明 `backend` 或 `api-contract` 时，`analyze_requirement` 的自动链必须在生成 Gate 1 正文前派生并登记 `domain-model.json` 与 `api-contract.json`：分别取得 `record_context` 当前授权，经 `apex-action.mjs` 调用 `contract-recorder.mjs domain|api`，再继续体验评估、角色汇总、八节正文与登记。它们不是额外确认，也不能因缺失而显示 Gate 1 按钮、阶段状态或文件卡片后结束。实施冻结自动链同样必须从已经确认的 `visual-execution-plan.json` 派生并登记 `site-contract.json`（`compile_visual_bundle` 授权下的 `contract-recorder.mjs site`），再编译 Visual Bundle；缺失 Site Contract 是待执行内部工作，不是用户阻断。

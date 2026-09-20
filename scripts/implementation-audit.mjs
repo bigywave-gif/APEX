@@ -44,7 +44,13 @@ for (const entry of map.entries || []) {
   if (!entry.apiContracts?.length && contract.capabilities.includes('backend')) errors.push(`${entry.visualNode}: backend delivery requires API contract mapping`);
   const source = sourceManifest?.bindings?.find(item => item.visualNode === entry.visualNode);
   const sourceTargets = (entry.runtimeTarget || []).map(target => path.resolve(projectRoot, target)).filter(fs.existsSync);
-  const markerPresent = source && sourceTargets.some(target => fs.readFileSync(target, 'utf8').includes(source.sourceMarker));
+  // The source marker must be emitted as a DOM attribute, not merely mentioned
+  // in a comment, configuration object, or generated-run artifact.  Gate 3
+  // binds its browser evidence to this exact marker.
+  const markerPresent = source && sourceTargets.some(target => {
+    const content = fs.readFileSync(target, 'utf8');
+    return content.includes(`data-apex-source="${source.sourceMarker}"`) || content.includes(`data-apex-source='${source.sourceMarker}'`);
+  });
   if (!source || !entry.sourceBindings || entry.sourceBindings.selector !== source.selector || entry.sourceBindings.implementation !== source.implementation || entry.sourceBindings.sourceMarker !== source.sourceMarker || !markerPresent) errors.push(`${entry.visualNode}: frozen visual source binding is missing, diverged, or not emitted in code`);
   if (source) for (const sourceId of [source.layoutSourceId, source.componentSourceId, source.styleSourceId, source.fontSourceId, ...(source.iconSourceIds || []), ...(source.assetSourceIds || [])]) { const selected = sourceManifest.sources.find(item => item.id === sourceId); if (selected?.materialization === 'runtime-package' && !importsPackage(sourceTargets, selected.sourceId)) errors.push(`${entry.visualNode}: runtime package ${selected.sourceId} is not imported by its frozen implementation target`); }
   checks.push({ visualNode: entry.visualNode, status: missingTargets.length || missingSelectors.length ? 'failed' : 'passed', runtimeTarget: entry.runtimeTarget, testSelectors: entry.testSelectors });

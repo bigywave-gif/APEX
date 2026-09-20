@@ -109,7 +109,9 @@ APEX 以 [Apache License 2.0](LICENSE) 发布。
 
 ### `scripts/`
 
-除 Router、Gate、Visual 与验证脚本外，APEX 提供 `role-advisory.mjs`：它把产品、交付、UX/UI、按需的图表/动效、实施审查与证据核验记录为当前 run 的结构化 advisory。角色不直接改项目、不创建额外确认；Router 仅在既有 Gate 的完整方案中汇总其结论。
+除 Router、Gate、Visual 与验证脚本外，APEX 提供 `role-advisory.mjs`：它把产品、交付、UX/UI、按需的图表/动效、实施审查与证据核验记录为当前 run 的结构化 advisory。角色不直接改项目、不创建额外确认；Router 仅在既有 Gate 的完整方案中汇总其结论。被当前阶段选中的角色必须输出可验证结论；失败保留受控操作回执并阻断当前 Gate，不能以 `unverified` 建议伪造通过。
+
+每个受控动作还绑定 `run + stateHash + action + script + inputDigest` 的稳定操作键。新的授权不是新的输入：相同操作键的失败只能作为一次可审计阻断，只有运行状态、真实输入或已观察到的环境原因改变后才允许重试。运行时视觉基线同样要求至少两帧真实浏览器截图具有不同 SHA-256，避免静态页面以重复截图伪造动效证据。
 
 放 Router、受控动作入口和 Gate 校验器。`apex-router.mjs` 是唯一公开的状态、登记与 Gate 命令入口；`apex-run.mjs` 刻意拒绝直接执行或导入，防止绕过 Router；`apex-validate.mjs`负责 Schema、锁关系和实现权限验证。
 
@@ -123,7 +125,7 @@ npm run preflight
 npm test
 ```
 
-默认安装到当前用户的 `~/.codex/apex/APEX`，同步 `~/.codex/skills/apex/SKILL.md`，并合并安装 APEX 的 Codex `Stop` Hook。该 Hook 只在当前 Codex session 绑定了未完成 APEX Run 时阻止提前结束，直到 Router 到达精确确认阀门、Demo 路线选择或真实阻断回执。若宿主设置了 `CODEX_HOME`，三者都以该目录为根。安装器不会覆盖非空 Core、不会改业务项目，也不会自动下载第三方 Skill；Preflight 会列出真实缺失项、来源与显式安装命令。
+默认安装到当前用户的 `~/.codex/apex/APEX`，同步 `~/.codex/skills/apex/SKILL.md`，并合并安装 APEX 的 Codex `Stop` Hook 与非阻断 `PreToolUse` 会话刷新 Hook。前者只在当前 Codex session 绑定了未完成 APEX Run 时阻止提前结束；后者会在已绑定旧 session 的下一次工具调用前重绑当前 Core/Bridge。若宿主设置了 `CODEX_HOME`，三者都以该目录为根。安装器不会覆盖非空 Core、不会改业务项目，也不会自动下载第三方 Skill；Preflight 会列出真实缺失项、来源与显式安装命令。Codex 若未来提供用户消息前 Hook，可复用同一 `refresh-session` 守卫实现模型开始回答前的完全热更新；当前不伪造未支持的事件。
 
 ## 使用方式
 
