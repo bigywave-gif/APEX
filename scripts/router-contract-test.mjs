@@ -24,13 +24,21 @@ const existingCodeReferenceSource = fs.readFileSync(path.join(apexRoot, 'scripts
 if (/fs\.rmSync\(snapshotRoot/.test(existingCodeReferenceSource) || !existingCodeReferenceSource.includes("'code-reference', 'objects'")) throw new Error('Existing code-reference capture must use immutable run-local objects and may not delete its snapshot root');
 const core = path.resolve(path.join(process.env.CODEX_HOME || path.join(process.env.HOME || '', '.codex'), 'apex', 'APEX'));
 const sandboxRuntime = path.join(apexRoot, 'scripts', 'visual-sandbox-runtime.mjs');
-function run(script, args, env = {}) { return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { ...process.env, APEX_TEST_LEGACY_ROLE_CHAIN: '1', ...env } }); }
+function run(script, args, env = {}) {
+  const invocation = script === router && args[0] === 'intake' && args.length === 7 ? [...args, '确认调用 APEX'] : args;
+  return spawnSync(process.execPath, [script, ...invocation], { encoding: 'utf8', env: { ...process.env, APEX_TEST_LEGACY_ROLE_CHAIN: '1', ...env } });
+}
 function expect(result, message) { if (result.status !== 0) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); return JSON.parse(result.stdout); }
 function reject(result, fragment, message) { const output = `${result.stderr || ''}\n${result.stdout || ''}`; if (result.status === 0 || !output.includes(fragment)) throw new Error(`${message}: ${output.trim()}`); }
 function freePort() { const result = spawnSync(process.execPath, ['-e', "const net=require('net'); const server=net.createServer(); server.listen(0,'127.0.0.1',()=>{ console.log(server.address().port); server.close(); });"], { encoding: 'utf8' }); if (result.status !== 0) throw new Error('unable to allocate a test port'); return Number(result.stdout.trim()); }
 const roots = [];
 let cancellationRuntimePid = null;
 try {
+  const consentBoundary = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-consent-')); roots.push(consentBoundary);
+  reject(spawnSync(process.execPath, [router, 'intake', consentBoundary, 'without-consent', 'auto', 'standard', 'interactive', 'consent-session'], { encoding: 'utf8' }), 'explicit-user-apex-consent', 'omitted consent must never create an APEX Run');
+  reject(spawnSync(process.execPath, [router, 'intake', consentBoundary, 'host-plan-is-not-consent', 'auto', 'standard', 'interactive', 'consent-session', '我会使用 APEX 规划这次改造'], { encoding: 'utf8' }), 'explicit APEX consent', 'a host plan that says it will use APEX must never be accepted as user consent');
+  const consented = expect(run(router, ['intake', consentBoundary, 'with-consent', 'auto', 'standard', 'interactive', 'consent-session', '确认调用 APEX']), 'an explicit user APEX consent must create a Run');
+  if (consented.status !== 'created' || !fs.readFileSync(path.join(consentBoundary, '.apex', 'runs', 'with-consent', 'events.ndjson'), 'utf8').includes('确认调用 APEX')) throw new Error('Run creation must retain the original explicit user APEX consent for audit');
   const apiOnly = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-api-only-')); roots.push(apiOnly);
   fs.writeFileSync(path.join(apiOnly, 'server.ts'), 'export const api = true;\n');
   fs.mkdirSync(path.join(apiOnly, '.apex', 'runs', 'old-demo', 'visual-sandbox', 'src'), { recursive: true });
@@ -272,7 +280,8 @@ try {
   reject(run(router, ['resume', root, 'run-a', 'session-a']), 'session is bound to run run-a-restarted', 'restarted session must not resume its old run');
   const continued = expect(run(router, ['reinvoke', root, 'session-a', 'continue']), 'same-session follow-up must continue the bound run');
   if (continued.runId !== 'run-a-restarted' || continued.disposition !== 'continue') throw new Error('continue reinvocation must retain the bound run without creating a new context');
-  const newTask = expect(run(router, ['reinvoke', root, 'session-a', 'new-task', 'run-a-new-task', 'greenfield', 'standard', 'interactive', 'unrelated-user-request']), 'same-session new task must create a clean run');
+  reject(run(router, ['reinvoke', root, 'session-a', 'new-task', 'run-a-new-task-without-consent', 'greenfield', 'standard', 'interactive', 'unrelated-user-request']), 'explicit APEX consent', 'a separate task must not inherit APEX consent from the prior Run');
+  const newTask = expect(run(router, ['reinvoke', root, 'session-a', 'new-task', 'run-a-new-task', 'greenfield', 'standard', 'interactive', 'unrelated-user-request', '确认调用 APEX']), 'same-session new task must create a clean run');
   if (newTask.runId !== 'run-a-new-task' || newTask.replacedRunId !== 'run-a-restarted' || newTask.phase !== 'G-01 PRODUCT') throw new Error('new-task reinvocation must bind a fresh run at the entry phase');
   if (fs.existsSync(path.join(root, '.apex', 'runs', 'run-a-restarted'))) throw new Error('new-task reinvocation must purge the retired Run-ID directory');
   if (!fs.existsSync(path.join(root, '.apex', 'runs', 'run-b'))) throw new Error('new-task reinvocation must preserve other-session Run-ID directories');

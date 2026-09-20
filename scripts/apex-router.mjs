@@ -297,6 +297,18 @@ function assertExplicitCurrentRunCancellation(userInstruction) {
   if (!cancellation || revision) fail('cancel requires an unambiguous user instruction to terminate the current APEX execution; plan revisions must use revise');
   return 'explicit-current-run-cancellation';
 }
+
+// Creating a Run is itself a stateful operation: it creates a project-local
+// execution record, binds the current Codex session, and enables the Stop
+// continuation hook.  Keep that boundary as explicit as destructive actions.
+// A host must pass the user's original authorization, rather than infer it
+// from a UI-related request or its own plan.
+function assertExplicitApexConsent(userInstruction) {
+  const text = String(userInstruction || '').trim();
+  const consent = /^(?:(?:确认|同意|请|可以)(?:使用|调用|启用|启动)?|(?:使用|调用|启用|启动))(?:最新(?:版本)?的?)?\s*APEX\b|^\[APEX\](?:\s|$)|^(?:confirm|use|invoke|enable|start)(?:\s+(?:the\s+)?(?:latest\s+)?)?APEX\b/i.test(text);
+  if (!consent) fail('intake requires the user\'s explicit APEX consent (for example: “确认调用 APEX”); a UI request, plan, or host statement is not consent');
+  return text;
+}
 function processIsLive(pid) {
   const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', timeout: 1000 });
   const status = String(result.stdout || '').trim();
@@ -1928,15 +1940,16 @@ assertCore();
 assertBridgeSynchronized();
 try {
   if (command === 'intake') {
-    const [projectArg, runId, track, scope = 'standard', authorization = 'interactive', sessionId] = args;
-    if (!projectArg || !runId || !['greenfield', 'existing', 'auto'].includes(track) || !sessionId) fail('usage: intake <project-root> <run-id> <greenfield|existing|auto> [lite|standard|full] [interactive|autonomous] <session-id>');
+    const [projectArg, runId, track, scope = 'standard', authorization = 'interactive', sessionId, ...consentWords] = args;
+    if (!projectArg || !runId || !['greenfield', 'existing', 'auto'].includes(track) || !sessionId || !consentWords.length) fail('usage: intake <project-root> <run-id> <greenfield|existing|auto> [lite|standard|full] [interactive|autonomous] <session-id> <explicit-user-apex-consent>');
+    const userConsent = assertExplicitApexConsent(consentWords.join(' '));
     const root = projectRoot(projectArg); ensureProject(root);
     const trackClassification = track === 'auto' ? classifyTrack(root) : { track, reason: 'explicit track requested by host', visualEntrypoint: null, preserveBackend: false };
     const result = runControllerCommand('init', [root, runId, trackClassification.track, scope, authorization]);
     if (result.status !== 0) fail((result.stderr || result.stdout).trim());
     const dir = runDir(root, runId); ['artifacts', 'approvals', 'evidence', 'locks', 'checkpoints'].forEach(name => fs.mkdirSync(path.join(dir, name), { recursive: true }));
     bindSession(root, sessionId, runId);
-    appendEvent(dir, { type: 'run-created', sessionId: sessionId || null, track: trackClassification.track, requestedTrack: track, trackClassification, scope, authorization }); json({ status: 'created', trackClassification, ...routerState(root, { runId, runDir: dir }, sessionId) });
+    appendEvent(dir, { type: 'run-created', sessionId: sessionId || null, track: trackClassification.track, requestedTrack: track, trackClassification, scope, authorization, userConsent }); json({ status: 'created', trackClassification, ...routerState(root, { runId, runDir: dir }, sessionId) });
   } else if (command === 'restart') {
     const [projectArg, runId, track, scope = 'standard', authorization = 'interactive', sessionId, reason = 'user-rejected-pre-confirmation-plan'] = args;
     if (!projectArg || !runId || !['greenfield', 'existing', 'auto'].includes(track) || !sessionId) fail('usage: restart <project-root> <new-run-id> <greenfield|existing|auto> [lite|standard|full] [interactive|autonomous] <session-id> [reason]');
@@ -1954,8 +1967,8 @@ try {
     appendEvent(dir, { type: 'run-restarted-from-entry', sessionId, replacedRunId: retired.runId, replacementReason: reason, retainedGate1, retiredCleanup, track: trackClassification.track, requestedTrack: track, trackClassification, scope, authorization });
     json({ status: 'restarted', replacedRunId: retired.runId, retainedGate1, trackClassification, ...routerState(root, { runId, runDir: dir }, sessionId) });
   } else if (command === 'reinvoke') {
-    const [projectArg, sessionId, mode, runId, track, scope = 'standard', authorization = 'interactive', reason = 'user-submitted-a-second-request'] = args;
-    if (!projectArg || !sessionId || !['continue', 'new-task'].includes(mode)) fail('usage: reinvoke <project-root> <session-id> <continue|new-task> [new-run-id greenfield|existing lite|standard|full interactive|autonomous reason]');
+    const [projectArg, sessionId, mode, runId, track, scope = 'standard', authorization = 'interactive', reason = 'user-submitted-a-second-request', userConsent] = args;
+    if (!projectArg || !sessionId || !['continue', 'new-task'].includes(mode)) fail('usage: reinvoke <project-root> <session-id> <continue|new-task> [new-run-id greenfield|existing lite|standard|full interactive|autonomous reason explicit-user-apex-consent]');
     const root = projectRoot(projectArg); ensureProject(root);
     const previousRunId = assertSessionBinding(root, sessionId);
     if (mode === 'continue') {
@@ -1964,6 +1977,7 @@ try {
       json({ status: 'continued', disposition: 'continue', ...routerState(root, run, sessionId) });
     } else {
       if (!runId || !['greenfield', 'existing', 'auto'].includes(track)) fail('new-task reinvocation requires a new run id and track');
+      const explicitConsent = assertExplicitApexConsent(userConsent);
       const trackClassification = track === 'auto' ? classifyTrack(root) : { track, reason: 'explicit track requested by host', visualEntrypoint: null, preserveBackend: false };
       const result = runControllerCommand('init', [root, runId, trackClassification.track, scope, authorization]);
       if (result.status !== 0) fail((result.stderr || result.stdout).trim());
@@ -1971,7 +1985,7 @@ try {
       const retired = clearSessionHistory(root, sessionId, reason);
       bindSession(root, sessionId, runId);
       const retiredCleanup = purgeRetiredRun(root, retired, dir);
-      appendEvent(dir, { type: 'session-reinvoked', sessionId, disposition: 'new-task', replacedRunId: retired.runId, reason, retiredCleanup, track: trackClassification.track, requestedTrack: track, trackClassification, scope, authorization });
+      appendEvent(dir, { type: 'session-reinvoked', sessionId, disposition: 'new-task', replacedRunId: retired.runId, reason, retiredCleanup, track: trackClassification.track, requestedTrack: track, trackClassification, scope, authorization, userConsent: explicitConsent });
       json({ status: 'created', disposition: 'new-task', replacedRunId: retired.runId, trackClassification, ...routerState(root, { runId, runDir: dir }, sessionId) });
     }
   } else if (command === 'revise') {

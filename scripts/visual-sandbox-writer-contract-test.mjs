@@ -15,7 +15,7 @@ const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-demo-writer-'));
 try {
   fs.mkdirSync(path.join(project, 'server'), { recursive: true });
   fs.writeFileSync(path.join(project, 'server', 'api.js'), 'export const api = true;\n');
-  expect(run(router, ['intake', project, 'run-demo', 'greenfield', 'standard', 'interactive', 'session-demo']), 'intake');
+  expect(run(router, ['intake', project, 'run-demo', 'greenfield', 'standard', 'interactive', 'session-demo', '确认调用 APEX']), 'intake');
   const runDir = path.join(project, '.apex', 'runs', 'run-demo'), stateFile = path.join(runDir, 'state.json');
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   state.gates.gate1 = { status: 'passed', at: new Date().toISOString(), evidence: ['test'] };

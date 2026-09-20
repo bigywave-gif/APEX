@@ -16,7 +16,7 @@ function reject(result, message) { if (result.status === 0) throw new Error(`${m
 function digest(value) { return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`; }
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-visual-source-'));
 try {
-  expect(run(router, ['intake', root, 'run-source', 'greenfield', 'standard', 'interactive', 'source-session']), 'intake');
+  expect(run(router, ['intake', root, 'run-source', 'greenfield', 'standard', 'interactive', 'source-session', '确认调用 APEX']), 'intake');
   const runDir = path.join(root, '.apex', 'runs', 'run-source'); const stateFile = path.join(runDir, 'state.json'); const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   const image = 'approved-effect-image'; const imageHash = digest(image); fs.writeFileSync(path.join(runDir, 'effect.png'), image);
   fs.writeFileSync(path.join(runDir, 'visual-reference.json'), JSON.stringify({ referenceImage: { path: 'effect.png', sha256: imageHash } }));

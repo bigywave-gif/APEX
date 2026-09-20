@@ -14,7 +14,7 @@ function expect(result, message) { if (result.status !== 0) throw new Error(`${m
 function reject(result, message) { if (result.status === 0) throw new Error(`${message}: expected rejection`); }
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-materializer-'));
 try {
-  expect(run(router, ['intake', root, 'run-assets', 'greenfield', 'standard', 'interactive', 'asset-session']), 'intake');
+  expect(run(router, ['intake', root, 'run-assets', 'greenfield', 'standard', 'interactive', 'asset-session', '确认调用 APEX']), 'intake');
   const runDir = path.join(root, '.apex', 'runs', 'run-assets');
   const stateFile = path.join(runDir, 'state.json');
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));

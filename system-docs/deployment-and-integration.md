@@ -3,7 +3,7 @@
 ## 文档登记
 
 - 文档名称：APEX 部署与接入文档
-- 当前版本：4.35.1
+- 当前版本：4.36.1
 - 文档类型：系统级部署与接入主文档
 - 适用对象：平台维护者、迁移执行人、项目接入人
 
@@ -147,6 +147,8 @@ APEX Core 的唯一主目录为 `<CODEX_HOME>/apex/APEX`；`CODEX_HOME` 未设�
 `npm run install:apex` 会将唯一主目录中的 `runtime/host-bridges/codex-skill/SKILL.md` 发布到当前用户的全局 `apex` Skill。每次
 Router 调用会自动同步该 Bridge，因此 APEX Core、Schema、规范或 Skill 更新后，新 session
 和既有 session 的下一次 APEX 调用都会加载最新规则；若发布失败，Router 必须阻断执行。
+
+在用户尚未明确授权前，Bridge 只可询问“是否调用 APEX”；它不得创建 Run、采集项目、生成 APEX 方案或宣称正在使用 APEX。`intake` 还会校验并审计原始授权文本，因此宿主即使误发调用也不会建立运行态。
 
 ### 8. 验证安装闭环
 

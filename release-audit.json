@@ -1,17 +1,17 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-09-20T09:33:44.910Z",
+  "auditedAt": "2026-09-20T10:02:32.413Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"bumped\",\"from\":\"4.34.0\",\"version\":\"4.35.0\",\"level\":\"minor\",\"reason\":\"materially extended APEX runtime capability or contract\",\"changed\":[\"core/runtime/schemas/run-state.schema.json\",\"runtime/host-bridges/codex-skill/SKILL.md\",\"scripts/apex-router.mjs\",\"scripts/router-contract-test.mjs\",\"scripts/trajectory-evaluator.mjs\",\"scripts/visual-sandbox-runtime-contract-test.mjs\",\"scripts/visual-sandbox-runtime.mjs\"]}"
+      "detail": "{\"status\":\"bumped\",\"from\":\"4.35.1\",\"version\":\"4.36.0\",\"level\":\"minor\",\"reason\":\"materially extended APEX runtime capability or contract\",\"changed\":[\"runtime/host-bridges/codex-skill/SKILL.md\",\"scripts/apex-router.mjs\",\"scripts/asset-materializer-contract-test.mjs\",\"scripts/codex-lifecycle-hook-contract-test.mjs\",\"scripts/demo-source-compiler-contract-test.mjs\",\"scripts/role-advisory-contract-test.mjs\",\"scripts/router-contract-test.mjs\",\"scripts/runtime-materializer-contract-test.mjs\",\"scripts/runtime-visual-baseline-contract-test.mjs\",\"scripts/visual-sandbox-runtime-contract-test.mjs\",\"scripts/visual-sandbox-writer-contract-test.mjs\",\"scripts/visual-source-contract-test.mjs\"]}"
     },
     {
       "id": "global-bridge-published",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"708b6956e8f0cb5da87b586799496c3dfd241adbdc70c2d6ebbf1804552fea1c\"}"
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"699f36c7e3398a026a7dd92522d10566a12d1d933c14dbe6f0d8b41181e39073\"}"
     },
     {
       "id": "manifest-semver",
@@ -46,7 +46,7 @@
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.35.0 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.36.0 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",

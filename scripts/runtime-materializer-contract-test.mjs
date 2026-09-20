@@ -16,7 +16,7 @@ function reject(result, message) { if (result.status === 0) throw new Error(`${m
 function digest(file) { return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`; }
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-runtime-materializer-'));
 try {
-  expect(run(router, ['intake', root, 'run-runtime-material', 'greenfield', 'standard', 'interactive', 'runtime-material-session']), 'intake');
+  expect(run(router, ['intake', root, 'run-runtime-material', 'greenfield', 'standard', 'interactive', 'runtime-material-session', '确认调用 APEX']), 'intake');
   const runDir = path.join(root, '.apex', 'runs', 'run-runtime-material'); const stateFile = path.join(runDir, 'state.json'); const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   const packageDir = path.join(root, 'node_modules', 'fixture-motion', 'dist'); fs.mkdirSync(packageDir, { recursive: true });
   const packageJson = path.join(root, 'node_modules', 'fixture-motion', 'package.json'); const component = path.join(packageDir, 'Card.js'); const style = path.join(packageDir, 'Card.css');

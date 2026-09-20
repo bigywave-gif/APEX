@@ -17,7 +17,7 @@ node scripts/apex-validate.mjs hash <files...>
 是 Router 内部控制器，直接调用会被拒绝：
 
 ```bash
-node scripts/apex-router.mjs intake <project-root> <run-id> <track> [scope] [authorization] <session-id>
+node scripts/apex-router.mjs intake <project-root> <run-id> <track> [scope] [authorization] <session-id> <explicit-user-apex-consent>
 node scripts/apex-router.mjs restart <project-root> <new-run-id> <track> [scope] [authorization] <session-id> [reason]
 node scripts/apex-router.mjs reinvoke <project-root> <session-id> <continue|new-task> [new-run-id greenfield|existing lite|standard|full interactive|autonomous reason]
 node scripts/apex-router.mjs approve <project-root> <run-id> <session-id> <gate1|visual-plan|stitch|implementation> <approval-id> <run-relative-artifact> [...]

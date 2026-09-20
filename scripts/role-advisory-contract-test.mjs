@@ -15,7 +15,7 @@ function run(script, args) { return spawnSync(process.execPath, [script, ...args
 function expect(result, message) { if (result.status !== 0) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); return JSON.parse(result.stdout); }
 function reject(result, pattern, message) { if (result.status === 0 || !pattern.test(`${result.stderr || ''}\n${result.stdout || ''}`)) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); }
 try {
-  const intake = expect(run(router, ['intake', root, 'role-run', 'greenfield', 'full', 'interactive', 'role-session']), 'new role-chain run intake must succeed');
+  const intake = expect(run(router, ['intake', root, 'role-run', 'greenfield', 'full', 'interactive', 'role-session', '确认调用 APEX']), 'new role-chain run intake must succeed');
   if (intake.nextRequiredAction !== 'analyze_requirement') throw new Error('new role-chain run must retain the normal Gate 1 automatic action');
   const runDir = path.join(root, '.apex', 'runs', 'role-run');
   const authorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'role selection must receive a normal analyze_requirement authorization');

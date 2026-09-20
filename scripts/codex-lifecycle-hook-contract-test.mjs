@@ -22,7 +22,7 @@ function execute(file, payload) { return spawnSync(process.execPath, [file], { i
 function executeRouter(args) { return spawnSync(process.execPath, [router, ...args], { encoding: 'utf8', env: process.env, timeout: 15000 }); }
 try {
   fs.mkdirSync(nested, { recursive: true });
-  const intake = executeRouter(['intake', root, 'hook-contract-run', 'greenfield', 'standard', 'interactive', sessionId]);
+  const intake = executeRouter(['intake', root, 'hook-contract-run', 'greenfield', 'standard', 'interactive', sessionId, '确认调用 APEX']);
   if (intake.status !== 0) throw new Error((intake.stderr || intake.stdout).trim());
   const bindingPath = path.join(root, '.apex', 'sessions', `${crypto.createHash('sha256').update(sessionId).digest('hex')}.json`);
   const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf8'));
@@ -50,9 +50,9 @@ try {
   const failedStop = execute(stop, { project_root: nested, sessionId });
   if (failedStop.status !== 0 || failedStop.stdout.trim() !== '{}') throw new Error(`Stop guard must release a receipt-backed block instead of looping: ${(failedStop.stderr || failedStop.stdout).trim()}`);
   const opaqueAlias = 'codex-root-opaque-session-alias'; const opaqueRun = 'opaque-alias-run'; const hostThread = '019fc7b2-83b9-71b1-a627-05de8967cd64';
-  const bridgePre = execute(preTool, { workspacePath: nested, threadId: hostThread, tool_input: { cmd: `node ${router} intake ${root} ${opaqueRun} greenfield standard interactive ${opaqueAlias}` } });
+  const bridgePre = execute(preTool, { workspacePath: nested, threadId: hostThread, tool_input: { cmd: `node ${router} intake ${root} ${opaqueRun} greenfield standard interactive ${opaqueAlias} "确认调用 APEX"` } });
   if (bridgePre.status !== 0 || bridgePre.stdout.trim() !== '{}') throw new Error(`PreTool bridge registration failed: ${(bridgePre.stderr || bridgePre.stdout).trim()}`);
-  const opaqueIntake = executeRouter(['intake', root, opaqueRun, 'greenfield', 'standard', 'interactive', opaqueAlias]);
+  const opaqueIntake = executeRouter(['intake', root, opaqueRun, 'greenfield', 'standard', 'interactive', opaqueAlias, '确认调用 APEX']);
   if (opaqueIntake.status !== 0) throw new Error((opaqueIntake.stderr || opaqueIntake.stdout).trim());
   const recoveredStop = execute(stop, { project_root: nested, threadId: hostThread });
   const recoveredDecision = JSON.parse(recoveredStop.stdout || '{}');

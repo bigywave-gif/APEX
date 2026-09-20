@@ -41,7 +41,7 @@ advisory、候选比较、工件写入和登记都只是**自动链内部步骤*
 3. 执行 `node <CODEX_HOME>/apex/APEX/scripts/preflight.mjs`；不得用文字检查冒充可执行预检。
 4. 读取 `<CODEX_HOME>/apex/APEX/runtime/preflight.md`。
 5. 读取 `<CODEX_HOME>/apex/APEX/core/runtime/invocation-spec.md`。
-6. 通过 Preflight 后，先向用户说明 APEX 会带来的 Gate、工件与确认开销；仅在用户明确确认调用 APEX 后，才调用 `<CODEX_HOME>/apex/APEX/scripts/apex-router.mjs` 创建或恢复该项目的当前 APEX 运行态。
+6. 通过 Preflight 后，先向用户说明 APEX 会带来的 Gate、工件与确认开销，并只输出授权提问；在该条回复中不得说“会使用/将使用 APEX”、不得规划 APEX 流程、不得调用 Router、不得创建 Run。仅在用户下一条消息给出明确确认调用 APEX 后，才把**原始确认文本**作为 intake 最后一个参数，调用 `<CODEX_HOME>/apex/APEX/scripts/apex-router.mjs` 创建该项目的当前 APEX 运行态。
 
 每次 APEX Router 调用都会先从主目录自动发布本 Bridge 到全局 Skill，并校验两者哈希
 完全同步；发布失败时 Router 必须阻断，不得允许已发布文件本身处于旧版本。
@@ -61,8 +61,8 @@ Bridge，再将该 session 的绑定版本与哈希重绑到主目录版本，�
 本 Skill 是 Codex 的发现与接入层，不是 Gate、阶段或工具权限的裁决者。每次
 命中后都必须先由 `apex-router.mjs` 返回项目、run、当前阶段与 `allowedActions`。
 
-1. 每个新 Codex session 都是一次新的 APEX 调用，必须执行 `node scripts/apex-router.mjs intake <project-root> <new-run-id> auto [scope] [authorization] <session-id>`；不得自动复用任何旧 run。`session-id` 优先使用宿主提供的真实 thread/session 标识；若宿主仅允许内部别名，PreTool Hook 必须在该 session 执行 Router 命令时记录“真实 host thread → 精确 APEX 别名”的项目内桥接记录，Stop Hook 只能使用这一**精确映射**继续对应 run，绝不能扫描、猜测、闲置、接管或影响同项目的其它 session/run。`auto` 是默认且必须使用的轨道判定：只以项目正式代码为依据——Git 仓库优先读取已跟踪源码，非 Git 仓库排除 `.apex`、visual-sandbox、runtime-demo 和临时目录后读取项目源码。只有正式代码中存在页面/视图/UI 入口时才为 Existing；只有 API、数据模型、服务端或无正式页面时为 Greenfield，并自动把既有 API/数据模型作为保留契约输入。Gate 2 前的 Demo、沙箱代码、截图、Stitch 工件和其他 run 产物绝不能成为轨道判断依据，也不能把 Greenfield 改判成 Existing。不得将“没有 Existing 视觉基线”呈现为阻断、要求用户回复“按 Greenfield 重启”，或要求用户手选轨道；只有用户明确指定 Existing/Greenfield 时才传显式轨道。
-2. 仅同一 session 可以执行 `node scripts/apex-router.mjs resume <project-root> [run-id] <session-id>` 恢复其已绑定 run。若用户明确说“重新执行 / 从头开始 / 重新按照需求执行”，必须使用 `restart`：创建全新 run，从入口重新完成需求、真实产品页面基线、Gate 1 与视觉方案；旧 run 仅保留审计，不得继承 Gate、方案、基线、工件或授权。只有明确的同一任务补充/澄清才使用 `reinvoke ... continue`；独立任务使用 `reinvoke ... new-task`。不得直接再次 intake。跨 session 默认必须新建 run；后续如需交接，必须使用显式交接流程。
+1. 仅在本 session 已收到用户原话中的明确 APEX 授权后，才可执行 `node scripts/apex-router.mjs intake <project-root> <new-run-id> auto [scope] [authorization] <session-id> <explicit-user-apex-consent>`；最后一项必须逐字传入用户授权，Router 会拒绝缺失、UI 请求、模型计划或“我会使用 APEX”等伪授权。未授权时只允许询问，例如：“此改动涉及页面展示与交互。是否调用 APEX？它会增加来源锁、运行时 Demo 与关键确认门。”不得创建或恢复 Run，也不得输出任何 APEX 规划、阶段、进度或工具调用宣告。不得自动复用任何旧 run。`session-id` 优先使用宿主提供的真实 thread/session 标识；若宿主仅允许内部别名，PreTool Hook 必须在该 session 执行 Router 命令时记录“真实 host thread → 精确 APEX 别名”的项目内桥接记录，Stop Hook 只能使用这一**精确映射**继续对应 run，绝不能扫描、猜测、闲置、接管或影响同项目的其它 session/run。`auto` 是默认且必须使用的轨道判定：只以项目正式代码为依据——Git 仓库优先读取已跟踪源码，非 Git 仓库排除 `.apex`、visual-sandbox、runtime-demo 和临时目录后读取项目源码。只有正式代码中存在页面/视图/UI 入口时才为 Existing；只有 API、数据模型、服务端或无正式页面时为 Greenfield，并自动把既有 API/数据模型作为保留契约输入。Gate 2 前的 Demo、沙箱代码、截图、Stitch 工件和其他 run 产物绝不能成为轨道判断依据，也不能把 Greenfield 改判成 Existing。不得将“没有 Existing 视觉基线”呈现为阻断、要求用户回复“按 Greenfield 重启”，或要求用户手选轨道；只有用户明确指定 Existing/Greenfield 时才传显式轨道。
+2. 仅同一 session 可以执行 `node scripts/apex-router.mjs resume <project-root> [run-id] <session-id>` 恢复其已绑定 run。若用户明确说“重新执行 / 从头开始 / 重新按照需求执行”，必须使用 `restart`：创建全新 run，从入口重新完成需求、真实产品页面基线、Gate 1 与视觉方案；旧 run 仅保留审计，不得继承 Gate、方案、基线、工件或授权。只有明确的同一任务补充/澄清才使用 `reinvoke ... continue`；独立任务使用 `reinvoke ... new-task`，且与首次 intake 一样必须附带该新任务的原始明确 APEX 授权，不能沿用旧任务同意。不得直接再次 intake。跨 session 默认必须新建 run；后续如需交接，必须使用显式交接流程。
 3. 只可执行 Router 返回的 `allowedActions`；直接请求 Visual、Implement、Verify 或 Release 也不能绕过该规则。
 4. 修改项目代码前先获取 `lease`，再执行 `authorize ... implement <lease-id>`；没有当前项目、run 与 session 绑定的 lease，禁止实施。
 5. 所有项目中间产物只允许写入 `<project-root>/.apex/`。严禁将项目 run、截图、运行时 Demo、Stitch HTML、测试证据、缓存或用户资料写入 APEX Core。
@@ -85,7 +85,7 @@ Gate 1 的自动链必须实际完成“需求/交付契约 → 体验策略 →
 
 ## 全局路由
 
-每个新建、继续或恢复 session 都必须依据用户当前提示词识别 APEX 是否适用，但不得仅因命中而自动创建 Run 或调用 Router。必须先征询用户是否调用 APEX；仅 `[APEX]`、`确认调用 APEX`、`使用 APEX` 等明确授权才可启动。
+每个新建、继续或恢复 session 都必须依据用户当前提示词识别 APEX 是否适用，但不得仅因命中而自动创建 Run 或调用 Router。必须先征询用户是否调用 APEX；仅 `[APEX]`、`确认调用 APEX`、`使用 APEX` 等明确授权才可启动。首轮固定为“适用原因 + APEX 会增加的 Gate/来源锁/运行时验证 + 是否调用？”；不得在等待答复时承诺使用 APEX、生成 APEX 计划、执行 APEX 工具或显示 APEX 阶段状态。
 
 以下任务及自然语言等价表达均必须命中：页面、前端、界面、UI、UX、视觉、设计、布局、组件、样式、表单、按钮、可见状态、页面权限、响应式、无障碍、交互、动画、截图还原、页面审计、视觉改造、设计系统、体验优化。
 

@@ -17,7 +17,7 @@ const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-sandbox-runtime-'));
 const pids = [];
 try {
   fs.mkdirSync(path.join(project, 'server'), { recursive: true }); fs.writeFileSync(path.join(project, 'server', 'api.js'), 'export const api = true;\n');
-  expect(run(router, ['intake', project, 'run-runtime', 'greenfield', 'standard', 'interactive', 'session-runtime']), 'intake');
+  expect(run(router, ['intake', project, 'run-runtime', 'greenfield', 'standard', 'interactive', 'session-runtime', '确认调用 APEX']), 'intake');
   const runDir = path.join(project, '.apex', 'runs', 'run-runtime'); const stateFile = path.join(runDir, 'state.json'); const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   state.gates.gate1 = { status: 'passed', at: new Date().toISOString(), evidence: ['test'] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.demoSourceManifest = 'demo-source-manifest.json'; state.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json';
   fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ sourceSelections: [
