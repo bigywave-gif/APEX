@@ -1958,6 +1958,17 @@
         "scripts/visual-sandbox-runtime-contract-test.mjs"
       ],
       "releasedAt": "2026-09-20T10:25:52.652Z"
+    },
+    {
+      "from": "4.36.3",
+      "to": "4.36.4",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-20T11:59:09.071Z"
     }
   ]
 }

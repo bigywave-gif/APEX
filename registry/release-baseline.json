@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
-  "version": "4.36.3",
-  "generatedAt": "2026-09-20T10:25:52.653Z",
+  "version": "4.36.4",
+  "generatedAt": "2026-09-20T11:59:09.072Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "94c405131510ab0ee4ab007f2e60e4947c67e4c25b7617eda11908b76fb88a8d",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -62,7 +62,7 @@
     "scripts/apex-action.mjs": "51d2574d898a1c31c8f61b527b152fb095a61ab4f61c0e6512e9fd6e6106826c",
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-recover.mjs": "000a4273408bb2d2ce281374e0141268b2a268aaba161978ae008f6d0af02e9b",
-    "scripts/apex-router.mjs": "40d0936e4792ab9c6b342dd7a4d34d914099c4ec493374a3ea74dcd4ebdf08bc",
+    "scripts/apex-router.mjs": "7b4a80d71f3faea3b8fc2d758f2cbce3fe0d662dcafa61db0600d23a124f02c5",
     "scripts/apex-run.mjs": "46e1524c809022d0d2cb58ea2bc0db8bfe6a746f8d8b0b7f2c53b4b9e19225df",
     "scripts/apex-runtime-guard.mjs": "f1e30bcb63296a31f8a2f6472ef0164f37c90d759b9a7183b0f3c4c89c8e5719",
     "scripts/apex-validate.mjs": "2a92846067679aca0f17d63561ec0e1f531bdf532753f639cd7dd3aabd4bd798",
@@ -100,7 +100,7 @@
     "scripts/role-advisory-contract-test.mjs": "d9fb9898b0a74af41286ae983d3fd957f54cacd2b3416882d2bcd3c59d294516",
     "scripts/role-advisory.mjs": "7c6810699a74b97be26a19f1372a9fadd9c8a5f2d55c61949bc0e819baca24a3",
     "scripts/role-quality-evaluator.mjs": "93bb9028563cc943f82d3e0b73baa5a950f8b6c0f650353dafa06ff40a9565f4",
-    "scripts/router-contract-test.mjs": "00c0f4ec0c2542cfe63ab78a9eb0cb5ad6f5caf7656c677fffabf46dc1cdadda",
+    "scripts/router-contract-test.mjs": "cde8fcffa0e6a895557d0e5c04e87b1ea9d4210363f118ec2b9aa02b6fbe1319",
     "scripts/run-migrate.mjs": "4d0fa81dd81f7f84ccd73ccda572160d9ff77c79efa90484bcf0808ca446d757",
     "scripts/runtime-materializer-contract-test.mjs": "b662cc19b025ef90c2a955c458239fcfcfdb2a7e01c6c41a73850555f85146f2",
     "scripts/runtime-materializer.mjs": "a518c775aa26bda5052533f68dcab40a873f59bcf32141fbfa414c9ce34f438a",

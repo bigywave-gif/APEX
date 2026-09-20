@@ -864,6 +864,20 @@ function substantiveSections(content, sections) {
   });
   return complete && new Set(hashes).size === sections.length;
 }
+function containsGateTemplatePlaceholder(value) {
+  if (typeof value === 'string') return /(^replace$|\breplace[-\w ]*|<[^>]+>)/i.test(value);
+  if (Array.isArray(value)) return value.some(containsGateTemplatePlaceholder);
+  return Boolean(value && typeof value === 'object' && Object.values(value).some(containsGateTemplatePlaceholder));
+}
+function gate1InputArtifactsReady(state, runDir) {
+  try {
+    for (const name of ['intentBrief', 'deliveryContract']) {
+      const file = artifactFile(runDir, state.artifacts?.[name]);
+      if (!file || containsGateTemplatePlaceholder(read(file))) return false;
+    }
+    return true;
+  } catch { return false; }
+}
 function displayList(values, empty = '无') {
   const items = (Array.isArray(values) ? values : []).map(value => typeof value === 'string' ? value : value?.id || value?.path || value?.name || value?.visualNode || '').filter(Boolean);
   return items.length ? items.map(value => `- ${value}`).join('\n') : `- ${empty}`;
@@ -893,7 +907,7 @@ function durableConfirmationPresentationReady(state, runDir, checkpoint, section
 function gate1PresentationReady(state, runDir) {
   const presentation = artifactFile(runDir, state.artifacts?.gate1Presentation);
   const manifestFile = artifactFile(runDir, state.artifacts?.gate1PresentationManifest);
-  if (!presentation || !manifestFile || !substantiveSections(fs.readFileSync(presentation, 'utf8'), gate1PresentationSections)) return false;
+  if (!gate1InputArtifactsReady(state, runDir) || !presentation || !manifestFile || !substantiveSections(fs.readFileSync(presentation, 'utf8'), gate1PresentationSections)) return false;
   try {
     const manifest = read(manifestFile);
     if (manifest.status !== 'ready-for-user-confirmation' || manifest.track !== state.track || manifest.presentationSha256 !== sha256File(presentation)) return false;
@@ -1071,7 +1085,7 @@ function automaticWorkStep(state, runDir, action) {
     return step('continue-gate1-analysis', '转入 Gate 1 需求与交付方案编译', [], 'Existing 基线已有效；重新读取 Router 后必须授权 analyze_requirement 并继续完整 Gate 1 链。', 'analyze_requirement');
   }
   if (action === 'analyze_requirement') {
-    if (!runFile('intentBrief') || !runFile('deliveryContract')) return step('derive-intent-and-delivery', '根据用户需求和冻结基线生成需求及交付契约', ['intent-brief.json', 'delivery-contract.json'], '内部从当前任务和 Existing/Greenfield 基线提炼可验证目标、范围、能力与不包含项；不得显示确认。', 'record_context');
+    if (!runFile('intentBrief') || !runFile('deliveryContract') || !gate1InputArtifactsReady(state, runDir)) return step('derive-intent-and-delivery', '根据用户需求和冻结基线生成需求及交付契约', ['intent-brief.json', 'delivery-contract.json'], '内部从当前任务和 Existing/Greenfield 基线提炼可验证目标、范围、能力与不包含项；初始化模板、Replace 文本或未绑定字段必须在此自动替换，绝不得先展示确认。', 'record_context');
     if (deliveryRequiresApiContracts(state, runDir) && !runFile('domainModel')) return step('record-domain-model', '登记领域模型', ['domain-model-input.json', 'domain-model.json'], '基于当前代码/API 证据生成领域模型输入，再以 record_context 调用 contract-recorder.mjs domain。', 'record_context');
     if (deliveryRequiresApiContracts(state, runDir) && !runFile('apiContract')) return step('record-api-contract', '登记 API 契约', ['api-contract-input.json', 'api-contract.json'], '基于当前代码/API 证据生成 API 契约输入，再以 record_context 调用 contract-recorder.mjs api。', 'record_context');
     if (!runFile('experienceStrategy') || !runFile('experienceQualityEvidence')) return step('evaluate-experience-strategy', '评估体验策略与质量证据', ['experience-strategy.json', 'experience-quality-evidence.json'], '通过 analyze_requirement 调用 experience-evaluator.mjs；质量结论必须绑定当前需求与基线。');
