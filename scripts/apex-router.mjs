@@ -282,6 +282,94 @@ function runDir(root, runId) {
 }
 function stateOf(dir) { const file = path.join(dir, 'state.json'); if (!fs.existsSync(file)) fail(`run state does not exist: ${file}`); return read(file); }
 function appendEvent(dir, event) { fs.appendFileSync(path.join(dir, 'events.ndjson'), `${JSON.stringify({ at: now(), ...event })}\n`); }
+const cancellationReceiptName = 'cancellation-receipt.json';
+const cancellationRetainedEntries = new Set(['state.json', 'events.ndjson', cancellationReceiptName]);
+function isCurrentRunChild(runDir, candidate) {
+  const root = path.resolve(runDir);
+  const resolved = path.resolve(candidate);
+  return path.dirname(resolved) === root;
+}
+function pause(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function processIsLive(pid) {
+  const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', timeout: 1000 });
+  const status = String(result.stdout || '').trim();
+  return Boolean(status) && !status.includes('Z');
+}
+function runtimeRecordCandidates(runDir) {
+  const candidates = [path.join(runDir, 'visual-sandbox-runtime.json')];
+  const registry = path.join(runDir, 'runtime-services.json');
+  if (fs.existsSync(registry)) {
+    try {
+      const services = read(registry).services;
+      if (Array.isArray(services)) for (const service of services) {
+        if (typeof service?.record === 'string' && isCurrentRunChild(runDir, path.join(runDir, service.record))) candidates.push(path.join(runDir, service.record));
+      }
+    } catch {}
+  }
+  return [...new Set(candidates)];
+}
+function stopRunLocalServices(runDir, runId) {
+  const stopped = [], alreadyStopped = [], refused = [];
+  for (const recordFile of runtimeRecordCandidates(runDir)) {
+    if (!fs.existsSync(recordFile)) continue;
+    let record;
+    try { record = read(recordFile); } catch { refused.push({ record: path.basename(recordFile), reason: 'invalid-runtime-record' }); continue; }
+    const pid = Number(record?.pid);
+    const runtimeRoot = typeof record?.runtimeRoot === 'string' ? path.resolve(runDir, record.runtimeRoot) : null;
+    const expectedRoot = path.resolve(runDir, 'visual-sandbox');
+    const canonicalRuntimeRoot = runtimeRoot && fs.existsSync(runtimeRoot) ? fs.realpathSync(runtimeRoot) : null;
+    const canonicalExpectedRoot = fs.existsSync(expectedRoot) ? fs.realpathSync(expectedRoot) : null;
+    if (!Number.isInteger(pid) || pid <= 1 || !canonicalRuntimeRoot || canonicalRuntimeRoot !== canonicalExpectedRoot || !isCurrentRunChild(runDir, runtimeRoot)) {
+      refused.push({ record: path.basename(recordFile), reason: 'runtime-record-not-owned-by-current-run' });
+      continue;
+    }
+    const processInfo = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+    const command = String(processInfo.stdout || '').trim();
+    if (!command) { alreadyStopped.push({ record: path.basename(recordFile), pid }); continue; }
+    if (!command.includes('visual-sandbox-runtime.mjs serve') || !command.includes(`--apex-run-id ${runId}`) || (!command.includes(runtimeRoot) && !command.includes(canonicalExpectedRoot))) {
+      refused.push({ record: path.basename(recordFile), pid, reason: 'pid-command-does-not-match-current-run-runtime' });
+      continue;
+    }
+    try {
+      process.kill(pid, 'SIGTERM');
+      const deadline = Date.now() + 2000;
+      while (processIsLive(pid) && Date.now() < deadline) pause(25);
+      if (processIsLive(pid)) process.kill(pid, 'SIGKILL');
+      pause(25);
+      if (processIsLive(pid)) { refused.push({ record: path.basename(recordFile), pid, reason: 'runtime-stop-did-not-exit' }); continue; }
+      stopped.push({ record: path.basename(recordFile), pid, url: typeof record.url === 'string' ? record.url : null });
+    } catch (error) { refused.push({ record: path.basename(recordFile), pid, reason: `runtime-stop-failed:${error.code || error.message}` }); }
+  }
+  return { stopped, alreadyStopped, refused };
+}
+function reclaimCancelledRun(root, run, sessionId, reason) {
+  const state = stateOf(run.runDir);
+  const services = stopRunLocalServices(run.runDir, run.runId);
+  if (services.refused.length) fail(`refusing cancellation cleanup because a runtime process cannot be proven run-local: ${services.refused.map(item => item.reason).join(', ')}`);
+  const removed = [];
+  for (const entry of fs.readdirSync(run.runDir, { withFileTypes: true })) {
+    if (cancellationRetainedEntries.has(entry.name)) continue;
+    const target = path.join(run.runDir, entry.name);
+    if (!isCurrentRunChild(run.runDir, target)) fail(`refusing to reclaim an entry outside the current run: ${entry.name}`);
+    fs.rmSync(target, { recursive: true, force: true });
+    removed.push(entry.name);
+  }
+  state.lifecycle = 'cancelled';
+  state.revision = Number(state.revision || 0) + 1;
+  state.updatedAt = now();
+  for (const key of Object.keys(state.artifacts || {})) state.artifacts[key] = key === 'roleDecisionSummaries' ? {} : null;
+  state.handoff = null;
+  state.cancellation = { receipt: cancellationReceiptName, at: state.updatedAt, reason, sessionId, temporaryArtifactsReclaimed: true };
+  write(path.join(run.runDir, 'state.json'), state);
+  const receipt = {
+    schemaVersion: '1.0', type: 'run-cancellation-reclamation', projectId: projectId(root), runId: run.runId, sessionId,
+    cancelledAt: state.updatedAt, reason, temporaryArtifactsReclaimed: true, removedEntries: removed,
+    services: { stopped: services.stopped, alreadyStopped: services.alreadyStopped }
+  };
+  write(path.join(run.runDir, cancellationReceiptName), receipt);
+  appendEvent(run.runDir, { type: 'run-temporary-artifacts-reclaimed', sessionId, receipt: cancellationReceiptName, removedEntries: removed, stoppedServices: services.stopped.map(item => item.pid), alreadyStoppedServices: services.alreadyStopped.map(item => item.pid) });
+  return { receipt: cancellationReceiptName, removedEntries: removed, services };
+}
 function revokeDownstreamDeliveryState(state, reason) {
   // Proof and Gate 3 are descendants of Gate 2. A visual or implementation
   // reset must never leave a stale delivery claim active.
@@ -1888,11 +1976,18 @@ try {
     const [projectArg, requestedRunId, sessionId, reason = 'cancelled-by-user'] = args;
     if (!projectArg || !requestedRunId || !sessionId) fail('usage: cancel <project-root> <run-id> <session-id> [reason]');
     const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId)); const state = stateOf(run.runDir);
-    if (state.lifecycle === 'cancelled') { json({ status: 'cancelled', idempotent: true, ...routerState(root, run, sessionId) }); }
+    if (state.lifecycle === 'cancelled' && fs.existsSync(path.join(run.runDir, cancellationReceiptName))) { json({ status: 'cancelled', idempotent: true, cancellation: read(path.join(run.runDir, cancellationReceiptName)), ...routerState(root, run, sessionId) }); }
+    else if (state.lifecycle === 'cancelled') {
+      const releasedLease = releaseLeaseForRun(root, run, sessionId, 'cancelled-run-reclamation');
+      appendEvent(run.runDir, { type: 'cancelled-run-reclamation-started', sessionId, reason, releasedLease });
+      const cancellation = reclaimCancelledRun(root, run, sessionId, reason);
+      json({ status: 'cancelled', idempotent: false, recoveredCancellation: true, cancellation, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
+    }
     else {
-      state.lifecycle = 'cancelled'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(path.join(run.runDir, 'state.json'), state);
-      const releasedLease = releaseLeaseForRun(root, run, sessionId, 'run-cancelled'); appendEvent(run.runDir, { type: 'run-cancelled', sessionId, reason, releasedLease });
-      json({ status: 'cancelled', idempotent: false, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
+      const releasedLease = releaseLeaseForRun(root, run, sessionId, 'run-cancelled');
+      appendEvent(run.runDir, { type: 'run-cancelled', sessionId, reason, releasedLease });
+      const cancellation = reclaimCancelledRun(root, run, sessionId, reason);
+      json({ status: 'cancelled', idempotent: false, cancellation, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
     }
   } else if (command === 'skip') {
     const [projectArg, requestedRunId, sessionId, checkpoint, decisionId, reason, ...references] = args;

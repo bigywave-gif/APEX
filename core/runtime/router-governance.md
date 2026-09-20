@@ -45,9 +45,12 @@ worktree。运行状态、确认、证据和交付契约仍只保存在原项目
 
 ## 取消、排队与人工复核
 
-- `cancel` 将 run 标为 `cancelled`，释放其 mutation lease，并令旧授权因 state hash 变化而失效；
-  它保留所有用户输入、交付物、审计和 Checkpoint。恢复工作应使用显式 `restart` 或新任务，而非
-  将已取消 run 静默重新打开。
+- 用户终止时，`cancel` 只针对当前 session 绑定的当前 Run：先终止并验证该 Run 登记的本地
+  Demo 服务/端口，再递归回收该 Run 的所有临时工件、候选、缓存、截图、证据、审批与 Checkpoint，
+  并清空 `state.artifacts`。它只保留 `state.json`、`events.ndjson` 与最小
+  `cancellation-receipt.json`，以说明已回收的条目和已停止服务；绝不删除其他 session/Run、项目
+  正式代码、正式服务或已落地交付物。取消同时释放当前 Run 的 mutation lease，并令旧授权因 state
+  hash 变化而失效。恢复工作必须使用显式 `restart` 或新任务，而非将已取消 run 静默重新打开。
 - Gate 2 后可通过 `queue-mutation` 进入项目级 FIFO mutation 队列，并由队首使用
   `claim-mutation` 取得 lease；排队不会放宽 Gate 或 lease 校验。
 - 用户不接受确认候选时，使用 `review ... edited|rejected ...` 记录带哈希的复核回执，再由

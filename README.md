@@ -166,7 +166,7 @@ APEX 先编译用户短需求为 Intent Brief 和 Delivery Contract，再按 `Gr
 
 两条轨道在 Visual 阶段汇合：先完成需求拆解、视觉效果描述和完整视觉实施方案确认，随后立即在项目的隔离 run 沙箱中生成并登记可访问、可交互的运行时 Demo。Demo 是唯一用户视觉审阅产物，不再生成或确认静态效果图；工件齐全后，用户明确选择进入 Stitch 或直接代码。Stitch 路线再经过同一 Demo 的严格导入、一致性校验和 Stitch 确认后 Seal；直接代码路线以已登记 Demo、代码目标和实施方案作为冻结基线。两条路线都必须经过实施冻结、Gate 2、正式生产代码落地和 Gate 3，不能以“直接代码”为由跳过确认或验收。
 
-运行状态和产物位于目标项目 `.apex/runs/<run-id>/`；Checkpoint和内容哈希支持增量恢复，不再因中断无条件重跑全部流程。
+运行状态和产物位于目标项目 `.apex/runs/<run-id>/`；Checkpoint和内容哈希支持增量恢复，不再因中断无条件重跑全部流程。用户明确终止当前 APEX Run 时，Router 会先以 Run ID 和沙盒根目录验证并停止该 Run 的临时 Demo 服务/端口，再回收该 Run 的候选、截图、缓存、证据、审批和其他临时文件；仅保留 `state.json`、`events.ndjson` 与 `cancellation-receipt.json`。该操作只影响当前 session 绑定 Run，不会停止项目正式服务、清理其他 session/Run 或回滚已获批准的正式代码。
 
 ## 系统边界
 

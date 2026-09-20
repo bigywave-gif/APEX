@@ -19,6 +19,7 @@ for (const event of events) {
   if (event.type === 'action-authorized') authorized.add(event.tokenId);
   if (event.type === 'action-verified' && !authorized.has(event.tokenId)) errors.push(`event ${event.index}: action verification has no prior authorization`);
   if (event.type === 'run-cancelled' && event.releasedLease !== true && event.releasedLease !== false) errors.push(`event ${event.index}: cancellation lacks lease release result`);
+  if (event.type === 'run-temporary-artifacts-reclaimed' && (!event.receipt || !Array.isArray(event.removedEntries) || !Array.isArray(event.stoppedServices))) errors.push(`event ${event.index}: cancellation reclamation lacks an auditable receipt, removed-entry list, or stopped-service list`);
 }
 const result = { schemaVersion: '3.0', status: errors.length ? 'failed' : 'passed', evaluatedAt: new Date().toISOString(), eventCount: events.length, errors };
 const output = path.join(runDir, 'evidence', 'trajectory-evaluation.json'); write(output, result); console.log(JSON.stringify({ status: result.status, evidence: output, errors })); if (errors.length) process.exitCode = 2;

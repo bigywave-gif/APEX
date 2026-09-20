@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,10 +23,13 @@ const contractRecorder = path.join(apexRoot, 'scripts', 'contract-recorder.mjs')
 const existingCodeReferenceSource = fs.readFileSync(path.join(apexRoot, 'scripts', 'existing-code-reference.mjs'), 'utf8');
 if (/fs\.rmSync\(snapshotRoot/.test(existingCodeReferenceSource) || !existingCodeReferenceSource.includes("'code-reference', 'objects'")) throw new Error('Existing code-reference capture must use immutable run-local objects and may not delete its snapshot root');
 const core = path.resolve(path.join(process.env.CODEX_HOME || path.join(process.env.HOME || '', '.codex'), 'apex', 'APEX'));
+const sandboxRuntime = path.join(apexRoot, 'scripts', 'visual-sandbox-runtime.mjs');
 function run(script, args, env = {}) { return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { ...process.env, APEX_TEST_LEGACY_ROLE_CHAIN: '1', ...env } }); }
 function expect(result, message) { if (result.status !== 0) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); return JSON.parse(result.stdout); }
 function reject(result, fragment, message) { const output = `${result.stderr || ''}\n${result.stdout || ''}`; if (result.status === 0 || !output.includes(fragment)) throw new Error(`${message}: ${output.trim()}`); }
+function freePort() { const result = spawnSync(process.execPath, ['-e', "const net=require('net'); const server=net.createServer(); server.listen(0,'127.0.0.1',()=>{ console.log(server.address().port); server.close(); });"], { encoding: 'utf8' }); if (result.status !== 0) throw new Error('unable to allocate a test port'); return Number(result.stdout.trim()); }
 const roots = [];
+let cancellationRuntimePid = null;
 try {
   const apiOnly = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-api-only-')); roots.push(apiOnly);
   fs.writeFileSync(path.join(apiOnly, 'server.ts'), 'export const api = true;\n');
@@ -41,6 +44,31 @@ try {
   if (formalUiAuto.track !== 'existing' || formalUiAuto.trackClassification?.visualEntrypoint !== 'src/App.tsx') throw new Error('a formal project UI entrypoint must select Existing without asking the user');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-contract-')); roots.push(root);
   expect(run(router, ['intake', root, 'run-a', 'greenfield', 'standard', 'interactive', 'session-a']), 'new session intake must create a run');
+  expect(run(router, ['intake', root, 'run-cancel', 'greenfield', 'standard', 'interactive', 'session-cancel']), 'cancellation regression run must create an isolated session-bound run');
+  expect(run(router, ['intake', root, 'run-cancel-other', 'greenfield', 'standard', 'interactive', 'session-cancel-other']), 'cancellation regression must preserve another session run');
+  const cancelRunDir = path.join(root, '.apex', 'runs', 'run-cancel');
+  const otherRunSentinel = path.join(root, '.apex', 'runs', 'run-cancel-other', 'unrelated-session-sentinel.txt');
+  fs.writeFileSync(otherRunSentinel, 'must survive current-run cancellation\n');
+  const sandboxRoot = path.join(cancelRunDir, 'visual-sandbox'); fs.mkdirSync(sandboxRoot, { recursive: true }); fs.writeFileSync(path.join(sandboxRoot, 'index.html'), '<main>temporary sandbox</main>\n');
+  for (const relative of ['evidence/browser/screen.png', 'cache/playwright-daemon/cache.json', 'approvals/gate1.json', 'operations/temporary-operation.json', 'design-candidates.json']) { const file = path.join(cancelRunDir, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'temporary\n'); }
+  const cancelPort = freePort();
+  const canonicalSandboxRoot = fs.realpathSync(sandboxRoot);
+  const child = spawn(process.execPath, [sandboxRuntime, 'serve', canonicalSandboxRoot, String(cancelPort), '--apex-run-id', 'run-cancel'], { detached: true, stdio: 'ignore' }); child.unref(); cancellationRuntimePid = child.pid;
+  fs.writeFileSync(path.join(cancelRunDir, 'visual-sandbox-runtime.json'), `${JSON.stringify({ schemaVersion: '3.0', runId: 'run-cancel', runtimeRoot: 'visual-sandbox', url: `http://127.0.0.1:${cancelPort}/`, pid: child.pid, status: 'running' })}\n`);
+  fs.writeFileSync(path.join(cancelRunDir, 'runtime-services.json'), `${JSON.stringify({ schemaVersion: '1.0', runId: 'run-cancel', services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json' }] })}\n`);
+  expect(run(router, ['lease', root, 'run-cancel', 'session-cancel', '5']), 'cancellation must release a current run mutation lease');
+  const cancelled = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', 'user-terminated-current-run']), 'current-run cancellation must reclaim temporary artifacts');
+  cancellationRuntimePid = null;
+  if (cancelled.idempotent || cancelled.cancellation?.receipt !== 'cancellation-receipt.json' || !cancelled.cancellation?.removedEntries?.includes('visual-sandbox') || !cancelled.cancellation?.services?.stopped?.some(item => item.pid === child.pid)) throw new Error('cancellation must report both run-local artifact reclamation and the stopped Demo service');
+  const cancelEntries = fs.readdirSync(cancelRunDir).sort();
+  if (JSON.stringify(cancelEntries) !== JSON.stringify(['cancellation-receipt.json', 'events.ndjson', 'state.json'])) throw new Error(`cancellation must retain only the minimal receipt and audit state, received: ${cancelEntries.join(', ')}`);
+  const cancelledState = JSON.parse(fs.readFileSync(path.join(cancelRunDir, 'state.json'), 'utf8'));
+  if (cancelledState.lifecycle !== 'cancelled' || !cancelledState.cancellation?.temporaryArtifactsReclaimed || Object.entries(cancelledState.artifacts).some(([key, value]) => key === 'roleDecisionSummaries' ? Object.keys(value || {}).length : value !== null)) throw new Error('cancellation must clear every temporary artifact reference and record its audited reclamation');
+  if (fs.existsSync(path.join(root, '.apex', 'locks', 'project-mutation.lock')) || !fs.existsSync(otherRunSentinel)) throw new Error('cancellation must release only its own lease while preserving other-session data');
+  const stoppedProcess = spawnSync('/bin/ps', ['-p', String(child.pid), '-o', 'stat='], { encoding: 'utf8' });
+  if (String(stoppedProcess.stdout || '').trim() && !String(stoppedProcess.stdout).includes('Z')) throw new Error('cancellation must stop the run-local Demo process');
+  const repeatedCancel = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', 'repeat']), 'cancellation must be idempotent');
+  if (!repeatedCancel.idempotent || repeatedCancel.cancellation?.type !== 'run-cancellation-reclamation') throw new Error('repeated cancellation must return the retained cancellation receipt without recreating artifacts');
   reject(run(runController, ['init', root, 'direct-run', 'greenfield']), 'cannot be executed', 'direct run-controller state mutation must be denied');
   reject(run(runController, ['init', root, 'spoofed-run', 'greenfield'], { APEX_ROUTER_COMMAND: 'init' }), 'cannot be executed', 'spoofed Router environment must not mutate state');
   reject(spawnSync(process.execPath, ['--input-type=module', '-e', `import { executeRunController } from ${JSON.stringify(runController)}; executeRunController('init', [${JSON.stringify(root)}, 'import-bypass', 'greenfield', 'standard', 'interactive']);`], { encoding: 'utf8' }), 'does not provide an export named', 'internal controller must not be importable');
@@ -396,5 +424,6 @@ try {
   console.error(`APEX router contract test failed: ${error.message}`);
   process.exitCode = 1;
 } finally {
+  if (cancellationRuntimePid) { try { process.kill(cancellationRuntimePid, 'SIGTERM'); } catch {} }
   for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
 }

@@ -27,11 +27,11 @@ function assertCurrentRun(runDir) {
   if (fs.realpathSync(runDir) !== expected) die('runtime may only start the current project-local run');
   return { projectRoot: fs.realpathSync(projectRoot), runId };
 }
-const [command, arg, portArg] = process.argv.slice(2);
+const [command, arg, portArg, serviceFlag, serviceRunId] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command === 'serve') {
   const root = path.resolve(arg || ''); const port = Number(portArg);
-  if (!root || !fs.existsSync(root) || !Number.isInteger(port) || port < 1024 || port > 65535) die('serve requires an existing sandbox root and a valid port');
+  if (!root || !fs.existsSync(root) || !Number.isInteger(port) || port < 1024 || port > 65535 || serviceFlag !== '--apex-run-id' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(serviceRunId || '')) die('serve requires an existing sandbox root, a valid port, and a run identity');
   const realRoot = fs.realpathSync(root);
   const server = http.createServer((request, response) => {
     try {
@@ -56,7 +56,7 @@ if (command === 'serve') {
   if (!filesManifest || !fs.existsSync(filesManifest)) die('a materialized visual-sandbox-files.json is required');
   const manifest = read(filesManifest); const entrypoint = inside(runDir, manifest.entrypoint);
   if (manifest.status !== 'materialized' || !entrypoint || !fs.existsSync(entrypoint)) die('visual sandbox materialization is incomplete');
-  const sandboxRoot = path.dirname(entrypoint);
+  const sandboxRoot = fs.realpathSync(path.dirname(entrypoint));
   const runtimeFile = path.join(runDir, 'visual-sandbox-runtime.json');
   if (fs.existsSync(runtimeFile)) {
     try {
@@ -68,11 +68,13 @@ if (command === 'serve') {
     } catch {}
   }
   const port = await availablePort();
-  const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port)], { detached: true, stdio: 'ignore' }); child.unref();
+  const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port), '--apex-run-id', runId], { detached: true, stdio: 'ignore' }); child.unref();
   const url = `http://127.0.0.1:${port}/`;
   let ready = false; for (let attempt = 0; attempt < 20 && !ready; attempt += 1) { await new Promise(resolve => setTimeout(resolve, 100)); ready = await reachable(url); }
   if (!ready) die('run-local Demo server did not become reachable');
   const output = { schemaVersion: '3.0', runId, runtimeRoot: path.relative(runDir, sandboxRoot), entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), url, pid: child.pid, startedAt: new Date().toISOString(), status: 'running' };
-  write(runtimeFile, output); state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+  write(runtimeFile, output);
+  write(path.join(runDir, 'runtime-services.json'), { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: child.pid, url, runtimeRoot: output.runtimeRoot, startedAt: output.startedAt }] });
+  state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
   console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url, pid: child.pid, reused: false }));
 }

@@ -24,6 +24,11 @@ Phase: Audit | Plan | Visual | Implement | Verify
 
 未指定时由Intake根据事实判断，不机械依赖关键词。
 
+## 用户终止当前 Run
+
+用户明确输入“终止/取消当前 APEX 执行”时，宿主必须调用 Router `cancel`，而不是仅停止聊天回合。
+Router 只处理当前 session 绑定的 Run：先用 Run ID、PID 命令与 Run-local 沙盒根目录确认服务归属，停止并确认临时 Demo 服务退出，再回收该 Run 的临时工件。取消成功后，Run 仅保留 `state.json`、`events.ndjson` 和 `cancellation-receipt.json`；回执列出已回收条目及已停止服务。它绝不遍历其他 session/Run，不停止项目正式服务，也不回滚已通过 Gate 2 的正式代码。普通的宿主回合停止不推断为用户取消。
+
 APEX 在 Gate 1 前还会生成 `intent-brief.json` 和 `delivery-contract.json`。短需求不是阻塞条件：设计导演必须提炼目标、事实、假设、质量标准与待确认项；只有会改变业务语义、权限、外部依赖或不可逆迁移的决策才需要用户明确选择。
 
 ## 受控专业角色链

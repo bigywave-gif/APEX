@@ -75,6 +75,18 @@
       "required": ["checkpoint", "decisionId", "reason", "receipt", "at", "resumePhase"],
       "additionalProperties": false
     },
+    "cancellation": {
+      "type": ["object", "null"],
+      "properties": {
+        "receipt": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "temporaryArtifactsReclaimed": { "const": true }
+      },
+      "required": ["receipt", "at", "reason", "sessionId", "temporaryArtifactsReclaimed"],
+      "additionalProperties": false
+    },
     "phase": {
       "type": "string",
       "minLength": 1
