@@ -2004,6 +2004,38 @@
         "scripts/router-contract-test.mjs"
       ],
       "releasedAt": "2026-09-21T06:10:52.002Z"
+    },
+    {
+      "from": "4.37.2",
+      "to": "4.37.3",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-21T06:56:58.506Z"
+    },
+    {
+      "from": "4.37.3",
+      "to": "4.37.4",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/apex-router.mjs"
+      ],
+      "releasedAt": "2026-09-21T07:03:07.430Z"
+    },
+    {
+      "from": "4.37.4",
+      "to": "4.37.5",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-21T07:10:45.734Z"
     }
   ]
 }

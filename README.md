@@ -1,5 +1,9 @@
 # APEX 交付系统
 
+## 4.37.5：登记事务恢复
+
+Gate 1 方案与运行时 Demo 的登记采用“收据先落盘、状态后提交”的可恢复事务。进程在两者之间中断时，Router 在后续 `status` 或 `resume` 中只会重放与当前 `project + run + session`、工件 SHA-256 及原受控操作回执完全一致的收据；不会跨 Session 复用数据、重跑已完成的生成步骤或重复展示同一确认门。
+
 APEX 以 [Apache License 2.0](LICENSE) 发布。
 
 ## 定义

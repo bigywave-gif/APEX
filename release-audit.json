@@ -1,17 +1,17 @@
 {
   "schemaVersion": "3.0",
-  "auditedAt": "2026-09-21T06:11:57.524Z",
+  "auditedAt": "2026-09-21T07:12:45.707Z",
   "status": "passed",
   "checks": [
     {
       "id": "release-version",
       "status": "passed",
-      "detail": "{\"status\":\"bumped\",\"from\":\"4.37.1\",\"version\":\"4.37.2\",\"level\":\"patch\",\"reason\":\"compatible APEX runtime implementation fix\",\"changed\":[\"scripts/apex-router.mjs\",\"scripts/codex-stop-continuation.mjs\",\"scripts/router-contract-test.mjs\"]}"
+      "detail": "{\"status\":\"bumped\",\"from\":\"4.37.4\",\"version\":\"4.37.5\",\"level\":\"patch\",\"reason\":\"compatible APEX runtime implementation fix\",\"changed\":[\"scripts/router-contract-test.mjs\"]}"
     },
     {
       "id": "global-bridge-published",
       "status": "passed",
-      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"a875b149f49e6d2f47f9a27ccf8f37707c804ba2554f2d458558c07e275a164a\"}"
+      "detail": "{\"status\":\"current\",\"source\":\"/Users/fredyw/.codex/apex/APEX/runtime/host-bridges/codex-skill/SKILL.md\",\"target\":\"/Users/fredyw/.codex/skills/apex/SKILL.md\",\"hash\":\"8b231ad89713a43ccd28fb96977021d3a9338e67a40f55926781189339f16bee\"}"
     },
     {
       "id": "manifest-semver",
@@ -46,7 +46,7 @@
     {
       "id": "public-pdf-version",
       "status": "passed",
-      "detail": "APEX 版本 4.37.2 的独立系统说明；便携渲染版"
+      "detail": "APEX 版本 4.37.5 的独立系统说明；便携渲染版"
     },
     {
       "id": "public-pdf-renderable",

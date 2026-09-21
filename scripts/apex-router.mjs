@@ -585,6 +585,10 @@ function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
   const relative = path.join('registrations', `runtime-demo-${Date.now()}.json`); write(path.join(run.runDir, relative), receipt);
   runControllerCommand('register', [run.runDir, 'runtimeDemo', state.artifacts.runtimeDemo]);
   appendEvent(run.runDir, { type: 'runtime-demo-registration-verified', sessionId, receipt: relative, artifacts: records.map(item => item.artifact) });
+  applyPendingDeliveryRouteAfterRuntimeDemoRegistration(root, run, sessionId);
+  return { receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
+}
+function applyPendingDeliveryRouteAfterRuntimeDemoRegistration(root, run, sessionId) {
   // A route utterance made while the Demo was still being generated is a
   // durable user decision, not a second visual-plan confirmation. Apply it
   // only after this registration proves the same runtime Demo exists.
@@ -595,7 +599,6 @@ function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
     skipStitchStage(root, { ...run, state: registered }, sessionId, 'pending-direct-code-route', `apply registered direct-code route intent: ${intent}`, [intent]);
     appendEvent(run.runDir, { type: 'pending-delivery-route-applied-after-runtime-demo-registration', sessionId, route: 'direct-code', intent });
   }
-  return { receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
 }
 function gate1PresentationRegistrationReady(runDir, state) {
   const reference = state.artifacts?.gate1PresentationRegistration;
@@ -632,6 +635,68 @@ function registerGate1Presentation(root, run, sessionId, authorizationRef) {
   state.artifacts.gate1PresentationRegistration = relative; state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(path.join(run.runDir, 'state.json'), state);
   appendEvent(run.runDir, { type: 'gate1-presentation-registered', sessionId, receipt: relative });
   return { receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
+}
+function registrationReceipts(runDir, type, runId, sessionId) {
+  const directory = path.join(runDir, 'registrations');
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory)
+    .filter(name => name.endsWith('.json'))
+    .map(name => ({ relative: path.join('registrations', name), file: path.join(directory, name) }))
+    .map(item => ({ ...item, receipt: (() => { try { return read(item.file); } catch { return null; } })() }))
+    .filter(item => item.receipt?.schemaVersion === '3.0' && item.receipt?.type === type && item.receipt?.runId === runId && item.receipt?.sessionId === sessionId)
+    .sort((left, right) => String(right.receipt.registeredAt || '').localeCompare(String(left.receipt.registeredAt || '')));
+}
+function runtimeDemoRegistrationReceiptReady(runDir, state, receipt, currentProjectId) {
+  if (!receipt || receipt.projectId !== currentProjectId || !Array.isArray(receipt.artifacts)) return false;
+  const required = ['runtimeDemo', 'designCandidates', 'visualReference', 'gate1VisualOutput'];
+  if (receipt.artifacts.length !== required.length || receipt.artifacts.some(item => !required.includes(item.artifact))) return false;
+  return receipt.artifacts.every(item => {
+    const file = artifactFile(runDir, state.artifacts?.[item.artifact]);
+    const operation = file && actionOutputReceiptFor(runDir, file, 'generate_visual', true);
+    return file && item.path === path.relative(runDir, file) && item.sha256 === sha256File(file)
+      && operation && item.operationReceipt === path.relative(runDir, operation.path);
+  });
+}
+function gate1PresentationRegistrationReceiptReady(runDir, state, receipt, currentProjectId) {
+  const presentation = artifactFile(runDir, state.artifacts?.gate1Presentation);
+  const manifest = artifactFile(runDir, state.artifacts?.gate1PresentationManifest);
+  const presentationOperation = presentation && actionOutputReceiptFor(runDir, presentation, 'analyze_requirement', true);
+  const manifestOperation = manifest && actionOutputReceiptFor(runDir, manifest, 'analyze_requirement', true);
+  return receipt?.projectId === currentProjectId && receipt?.presentation?.path === (presentation && path.relative(runDir, presentation))
+    && receipt.presentation?.sha256 === (presentation && sha256File(presentation))
+    && receipt.presentation?.operationReceipt === (presentationOperation && path.relative(runDir, presentationOperation.path))
+    && receipt?.manifest?.path === (manifest && path.relative(runDir, manifest))
+    && receipt.manifest?.sha256 === (manifest && sha256File(manifest))
+    && receipt.manifest?.operationReceipt === (manifestOperation && path.relative(runDir, manifestOperation.path));
+}
+function recoverRecordedRegistration(root, run, sessionId) {
+  let state = stateOf(run.runDir);
+  if (['cancelled', 'handed-off'].includes(state.lifecycle)) return null;
+  // Receipt write precedes state mutation.  Replaying only a receipt whose
+  // hashes, operation outputs, project/run/session and artifact paths still
+  // match makes this recovery idempotent and rules out stale cross-run data.
+  if (state.gates?.gate1?.status !== 'passed' && !gate1PresentationRegistrationReady(run.runDir, state)) {
+    const candidate = registrationReceipts(run.runDir, 'gate1-presentation-registration', state.runId, sessionId)
+      .find(item => gate1PresentationRegistrationReceiptReady(run.runDir, state, item.receipt, projectId(root)));
+    if (candidate) {
+      state.artifacts.gate1PresentationRegistration = candidate.relative;
+      state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(path.join(run.runDir, 'state.json'), state);
+      appendEvent(run.runDir, { type: 'gate1-presentation-registration-recovered', sessionId, receipt: candidate.relative });
+      return { type: 'gate1-presentation-registration', receipt: candidate.relative };
+    }
+  }
+  state = stateOf(run.runDir);
+  if (state.gates?.gate1?.status === 'passed' && state.locks?.visualPlanApproved && !state.locks?.effectApproved) {
+    const candidate = registrationReceipts(run.runDir, 'runtime-demo-registration', state.runId, sessionId)
+      .find(item => runtimeDemoRegistrationReceiptReady(run.runDir, state, item.receipt, projectId(root)));
+    if (candidate) {
+      runControllerCommand('register', [run.runDir, 'runtimeDemo', state.artifacts.runtimeDemo]);
+      appendEvent(run.runDir, { type: 'runtime-demo-registration-recovered', sessionId, receipt: candidate.relative, artifacts: candidate.receipt.artifacts.map(item => item.artifact) });
+      applyPendingDeliveryRouteAfterRuntimeDemoRegistration(root, run, sessionId);
+      return { type: 'runtime-demo-registration', receipt: candidate.relative };
+    }
+  }
+  return null;
 }
 function ensureProject(root) {
   const file = path.join(root, '.apex', 'project.json');
@@ -2171,8 +2236,9 @@ try {
   } else if (command === 'resume' || command === 'status') {
     const [projectArg, requestedRunId, sessionId] = args; if (!projectArg || !sessionId) fail(`usage: ${command} <project-root> [run-id] <session-id>`);
     const root = projectRoot(projectArg); ensureProject(root); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
+    const registrationRecovery = recoverRecordedRegistration(root, run, sessionId);
     const recovery = recoverRecordedApproval(root, run, sessionId);
-    appendEvent(run.runDir, { type: command === 'resume' ? 'run-resumed' : 'run-inspected', sessionId: sessionId || null, approvalRecovery: recovery || undefined }); json({ status: 'ready', approvalRecovery: recovery || undefined, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
+    appendEvent(run.runDir, { type: command === 'resume' ? 'run-resumed' : 'run-inspected', sessionId: sessionId || null, registrationRecovery: registrationRecovery || undefined, approvalRecovery: recovery || undefined }); json({ status: 'ready', registrationRecovery: registrationRecovery || undefined, approvalRecovery: recovery || undefined, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
   } else if (command === 'lease') {
     const [projectArg, requestedRunId, sessionId, minutes = '15'] = args; if (!projectArg || !requestedRunId || !sessionId) fail('usage: lease <project-root> <run-id> <session-id> [minutes]');
     const durationMs = Number(minutes) * 60 * 1000; if (!Number.isFinite(durationMs) || durationMs < 60 * 1000 || durationMs > 60 * 60 * 1000) fail('lease duration must be between 1 and 60 minutes');
