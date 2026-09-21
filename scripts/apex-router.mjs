@@ -108,6 +108,21 @@ function latestBlockingOperation(runDir, action) {
     retryPolicy: 'do-not-repeat-automatically; require an explicit remediation or a newly authorized retry after the observed cause changes'
   };
 }
+function repeatedRemediableFailures(runDir, action, category) {
+  return operationRecords(runDir).filter(item => item.receipt?.action === action && item.receipt?.status === 'failed' && failureCategory(item.receipt) === category).length;
+}
+function continuationStall(runDir, action, stepId) {
+  try {
+    const record = read(path.join(runDir, 'hook-continuation-stall.json'));
+    if (record.action !== action || record.currentStep !== stepId || Number(record.attempts) < 3) return null;
+    return { kind: 'continuation-stalled', category: 'executor-no-progress', action, script: null, operationReceipt: 'hook-continuation-stall.json', exitCode: null, observedError: `The host ended ${Number(record.attempts)} times without producing a receipt for ${stepId}.`, retryPolicy: 'inspect the current authorization/executor and resume only after the observed no-progress cause is corrected' };
+  } catch { return null; }
+}
+function approvalRecoveryBlock(state) {
+  const recovery = state.approvalRecovery;
+  if (recovery?.status !== 'failed') return null;
+  return { kind: 'approval-transition-recovery-failed', category: 'approval-transition', action: recovery.gate, script: null, operationReceipt: recovery.receipt, exitCode: null, observedError: recovery.error, retryPolicy: 'do not request the same confirmation; repair the failed state transition and let Router recover the recorded approval' };
+}
 function assertCore() { if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) fail(`APEX must run from canonical root: ${canonicalApexRoot}`); }
 function apexVersion() { const manifest = fs.readFileSync(path.join(apexRoot, 'manifest.yaml'), 'utf8'); return manifest.match(/^version:\s*([^\s]+)/m)?.[1] || 'unknown'; }
 function assertBridgeSynchronized() {
@@ -1352,8 +1367,9 @@ function executionDirective(state, runDir = null) {
   // checker; it contains no protected-file evidence and must be retried once
   // with a new authorization. Any current, file-specific failure remains
   // terminal and inspectable.
-  const automaticallyRemediableFailure = (latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference') || latestFailure?.category === 'obsolete-boundary-snapshot';
-  const blockingOperation = automaticallyRemediableFailure ? null : latestFailure;
+  const sourceDriftRetries = latestFailure?.category === 'source-drift' ? repeatedRemediableFailures(runDir, action, 'source-drift') : 0;
+  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || latestFailure?.category === 'obsolete-boundary-snapshot');
+  const blockingOperation = continuationStall(runDir, action, currentStep.id) || (automaticallyRemediableFailure ? null : latestFailure);
   return {
     kind: 'must-complete-before-user-response',
     action,
@@ -1431,6 +1447,8 @@ function executionDirective(state, runDir = null) {
   };
 }
 function terminalResponseContract(state, runDir = null) {
+  const approvalBlock = approvalRecoveryBlock(state);
+  if (approvalBlock) return { allowed: true, allowedKinds: ['blocking-report'], exactLabels: [], recheckRouterBeforeEndingTurn: true, requiredOperationReceipt: approvalBlock.operationReceipt, blockingOperation: approvalBlock, forbiddenLabels: ['确认', '继续'], reason: 'a recorded approval could not be committed; the same confirmation is forbidden until its transition is repaired' };
   const automatic = executionDirective(state, runDir);
   if (automatic?.blockingOperation) return {
     allowed: true,
@@ -1517,6 +1535,8 @@ function nextRequiredDecision(state) {
   return null;
 }
 function userInteractionDirective(state, runDir = null) {
+  const approvalBlock = approvalRecoveryBlock(state);
+  if (approvalBlock) return { mode: 'blocking-report', allowed: ['inspect-operation-receipt', 'remediate-observed-cause'], terminalUserResponseAllowed: true, genericContinueForbidden: true, blockingOperation: approvalBlock, reason: 'a recorded approval transition failed; do not show the same confirmation again' };
   const automatic = executionDirective(state, runDir);
   if (automatic) {
     if (automatic.blockingOperation) return {

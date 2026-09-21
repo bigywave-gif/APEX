@@ -1992,6 +1992,18 @@
         "runtime/host-bridges/codex-skill/SKILL.md"
       ],
       "releasedAt": "2026-09-20T12:19:43.196Z"
+    },
+    {
+      "from": "4.37.1",
+      "to": "4.37.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/apex-router.mjs",
+        "scripts/codex-stop-continuation.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-21T06:10:52.002Z"
     }
   ]
 }

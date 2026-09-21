@@ -88,6 +88,13 @@ try {
   // not convert it into an infinite Stop-hook continuation loop; the Router
   // has already classified it and supplied its immutable operation receipt.
   if (contract.allowed !== false || !contract.mustContinueAction || contract.blockingOperation) { output({}); process.exit(0); }
+  const action = contract.mustContinueAction;
+  const currentStep = status.executionDirective?.currentStep?.id || 'unknown-step';
+  const stallFile = path.join(bound.binding.runDir || path.join(projectRoot, '.apex', 'runs', binding.runId), 'hook-continuation-stall.json');
+  let stall = { schemaVersion: '1.0', action, currentStep, attempts: 0 };
+  try { const previous = JSON.parse(fs.readFileSync(stallFile, 'utf8')); if (previous.action === action && previous.currentStep === currentStep) stall = previous; } catch {}
+  stall.attempts = Number(stall.attempts || 0) + 1; stall.updatedAt = new Date().toISOString();
+  fs.writeFileSync(stallFile, `${JSON.stringify(stall, null, 2)}\n`);
   // A repeated Stop event with an unchanged automatic node means the required
   // action did not produce a Router receipt. The former one-shot de-duplication
   // treated that as permission to end the turn, stranding every automatic
