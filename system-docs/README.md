@@ -8,6 +8,10 @@
 
 ## 当前主文档清单
 
+### 规划中的改造方案
+
+- [APEX 4.45.0 综合改造方案](apex-4.45.0-improvement-proposal.md)：目标版本与实施计划，尚不代表当前运行行为或已发布版本。
+
 ### 独立 PDF 白皮书
 
 - [APEX-Product-Design-and-Technical-Architecture.pdf](../output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf)
