@@ -22,7 +22,10 @@ const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-interactive-contract-
 try {
   const interactiveDemo = seedInteractionFixture(runDir), url = interactiveDemo.url;
   const capture = { status: 'passed', interactiveDemo };
-  verifyDemoInteractions(runDir, capture, url); checks++;
+  const verified = verifyDemoInteractions(runDir, capture, url); checks++;
+  assert.equal(verified.controlCoverage.scope, 'declared-journeys-only'); checks++;
+  assert.equal(verified.controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
+  assert.deepEqual(verified.controlCoverage.testedActions.map(item => item.selector), ['#increment', '#increment', '#reset']); checks++;
   const legacyCapture = structuredClone(capture);
   for (const journey of legacyCapture.interactiveDemo.journeys) { delete journey.finalUrl; delete journey.viewport; }
   verifyDemoInteractions(runDir, legacyCapture, url); checks++;

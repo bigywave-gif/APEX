@@ -85,6 +85,7 @@ try {
   if (baseline.screenCaptures?.length !== 2 || !['desktop', 'mobile'].every(id => baseline.screenCaptures.some(item => item.id === id && item.screenshot.sha256 && item.dom.sha256)) || baseline.journeyCaptures?.length !== demoContract.journeys.length || !demoContract.journeys.every(journey => baseline.journeyCaptures.some(item => item.id === journey.id && item.task === journey.task && /^\d+x\d+$/.test(item.viewport) && item.finalUrl.startsWith(runtime.url) && item.screenshot.sha256 && item.dom.sha256))) throw new Error('real browser baseline must bind both viewports and every executed user journey to its screenshot and DOM');
   const demo = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-demo.json')));
   if (demo.kind !== 'interactive-ui-prototype' || demo.journeyCount !== 2 || demo.presentation.screenshotOnlyAllowed !== false || demo.presentation.preferred !== 'chat-inline' || !demo.presentation.contentReference?.includes('preview.html')) throw new Error('compiled Demo did not retain the interaction contract');
+  if (demo.controlCoverage?.scope !== 'declared-journeys-only' || demo.controlCoverage.otherVisibleControls !== 'not-inventoried' || demo.controlCoverage.testedActions.some(item => item.selector === '#settings-tab')) throw new Error('Demo coverage must distinguish declared actions from other visible controls');
   // Prove that dispatching a real click without the expected UI change fails.
   const cli = fs.readdirSync(npmCacheRoot).map(name => path.join(npmCacheRoot, name, 'node_modules/@playwright/cli/playwright-cli.js')).find(file => fs.existsSync(file));
   if (!cli) throw new Error('browser acceptance needs the installed Playwright CLI');
@@ -103,6 +104,23 @@ try {
     const formalMatch = formalClicked.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
     let formalObserved = formalMatch && JSON.parse(formalMatch[1]); if (typeof formalObserved === 'string') formalObserved = JSON.parse(formalObserved);
     if (formalClicked.status !== 0 || formalObserved?.status !== 'failed' || !formalObserved.error?.includes('observed "0"')) throw new Error('a no-op formal button must fail its observed state transition');
+    const visibility = (selector, equals) => ({ selector, property: 'visible', equals });
+    const value = (selector, equals) => ({ selector, property: 'value', equals });
+    const checked = (selector, equals) => ({ selector, property: 'checked', equals });
+    const openSettings = { action: 'click', selector: '#settings-tab', before: visibility('#settings-panel', false), after: visibility('#settings-panel', true) };
+    const fillName = { action: 'fill', selector: '#project-name', value: '示例项目', before: value('#project-name', ''), after: value('#project-name', '示例项目') };
+    const sampleJourneys = [
+      { id: 'sample-navigation', route: '/', steps: [openSettings, { action: 'click', selector: '#projects-tab', before: visibility('#projects-panel', false), after: visibility('#projects-panel', true) }] },
+      { id: 'sample-notifications', route: '/', steps: [openSettings, { action: 'uncheck', selector: '#notifications', before: checked('#notifications', true), after: checked('#notifications', false) }] },
+      { id: 'sample-input-reset', route: '/', steps: [fillName, { action: 'click', selector: '#reset', before: value('#project-name', '示例项目'), after: value('#project-name', '') }] }
+    ];
+    for (const journey of sampleJourneys) {
+      const result = cliCall(['run-code', journeyCode({ journey, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, `evidence/${journey.id}.png`) })]);
+      const parsed = result.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
+      let trace = parsed && JSON.parse(parsed[1]); if (typeof trace === 'string') trace = JSON.parse(trace);
+      if (result.status !== 0 || trace?.status !== 'passed' || trace.steps.length !== journey.steps.length) throw new Error(`sample interactive control failed: ${journey.id}: ${trace?.error || result.stderr}`);
+      write(`evidence/${journey.id}.json`, trace);
+    }
   } finally { cliCall(['close']); }
   // Formal verification can replace its capture file without invalidating Demo evidence.
   const frozen = JSON.parse(fs.readFileSync(path.join(runDir, demo.interactionEvidence.path)));
@@ -329,7 +347,7 @@ try {
 
 
   }
-  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 30 : 26, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
+  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 34 : 30, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
 } finally {
   if (mockServer) mockServer.kill('SIGTERM');
   if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }

@@ -79,7 +79,8 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     });
     for (const ref of [actual.screenshot, actual.dom]) assert(ref && demoHash(fs.readFileSync(localFile(runDir, ref.path))) === ref.sha256, `missing or changed browser artifact: ${expected.id}`);
   }
-  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length };
+  const testedActions = source.contract.journeys.flatMap(journey => journey.steps.map(step => ({ journeyId: journey.id, selector: step.selector, action: step.action })));
+  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
 }
 
 // This function is serialized into Playwright CLI run-code. It has no closure
