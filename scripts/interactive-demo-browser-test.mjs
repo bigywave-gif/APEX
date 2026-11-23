@@ -160,6 +160,13 @@ try {
     const actualFormalCapture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
     const formalInteractions = actualFormalCapture.formalInteractions.journeys.map(item => ({ id: item.id, result: 'passed', evidence: item.evidence }));
     validateFormalInteractionEvidence(runDir, JSON.parse(fs.readFileSync(stateFile)), formalInteractions);
+    const strategyPath = path.join(runDir, 'fixture-product-strategy.json'), strategyBytes = fs.readFileSync(strategyPath);
+    fs.unlinkSync(strategyPath);
+    try {
+      const missingPlanStatus = run('apex-router.mjs', ['status', project, runId, session]);
+      if (missingPlanStatus.executionDirective?.currentStep?.id === 'capture-formal-runtime-source-provenance') throw new Error('missing product plan must not request another browser capture');
+      if (missingPlanStatus.nextRequiredAction !== 'recover' && missingPlanStatus.executionDirective?.currentStep?.id !== 'restore-product-plan-evidence') throw new Error('missing product plan must request recovery or plan restoration');
+    } finally { fs.writeFileSync(strategyPath, strategyBytes); }
     const absentProductState = JSON.parse(fs.readFileSync(stateFile)); delete absentProductState.artifacts.experienceStrategy;
     try { validateFormalInteractionEvidence(runDir, absentProductState, formalInteractions); throw new Error('missing product plan must fail'); } catch (error) { if (!error.message.includes('current product plan with valid functional tasks is required')) throw error; }
     write('missing-product-task.json', { functionalPlan: [{ task: '未实现的产品任务' }] });

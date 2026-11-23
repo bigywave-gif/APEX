@@ -1748,6 +1748,15 @@ function automaticWorkStep(state, runDir, action) {
     if (!runFile('designCandidates')) return step('record-selected-runtime-design-candidate', '登记已确认方案的运行时候选证据', ['design-candidates.json'], '内部将视觉方案中的已选候选与其真实运行时截图、策略哈希和取舍依据写入 design-candidates.json，再调用 experience-evaluator.mjs candidates；禁止生成虚假的替代效果图或要求用户再次确认视觉。');
   }
   if (action === 'verify') {
+    if (usesCombinedPlan(state)) {
+      try {
+        const strategyFile = artifactFile(runDir, state.artifacts?.experienceStrategy);
+        if (!strategyFile) throw new Error('产品方案文件缺失');
+        requiredFormalTasks({}, read(strategyFile), { requireProductPlan: true });
+      } catch (error) {
+        return step('restore-product-plan-evidence', '恢复已确认产品方案证据', ['experience-strategy.json'], `产品任务清单不可用：${error.message}。先通过受控恢复核查并恢复原始已确认方案；无法恢复时按实际情况重新形成并确认受影响方案。不要重复采集浏览器证据或虚构任务。`);
+      }
+    }
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
     if (provenance.enforce && !provenance.ready) {
       if (!formalCaptureSourceReady(state, runDir)) return step('capture-formal-runtime-source-provenance', '采集正式页面的来源选择证据', ['evidence/runtime-browser-capture.json'], `以 verify 调用 browser-capture.mjs，从冻结 Visual Source Manifest 采集实际 DOM 来源标记，并在 formalJourneys 中执行每项已确认任务、记录前后状态和受控回执。当前原因：${provenance.reason}。`);

@@ -67,6 +67,7 @@ export const workflowNodes = Object.freeze({
   'run-pre-gate2-and-open-implementation': node('open_gate2', ['Gate 2 machine validation'], routerCommand('transition open-gate2')),
   'emit-formal-runtime-source-markers': node('implement', ['evidence/implementation-audit.json'], { kind: 'host-controlled-implementation' }),
   'apply-approved-formal-implementation': node('implement', ['page-delta.json'], { kind: 'host-controlled-implementation' }),
+  'restore-product-plan-evidence': node('verify', ['experience-strategy.json'], { kind: 'host-controlled-implementation' }, { completion: 'restore the original confirmed product plan through authorized recovery or return to the appropriate earlier phase', failurePolicy: 'do not fabricate product tasks or repeat browser capture while the plan is unavailable', retry: 'retry only after the product plan evidence has changed or been restored' }),
   'capture-formal-runtime-source-provenance': node('verify', ['evidence/runtime-browser-capture.json'], actionScript('browser-capture.mjs')),
   'compile-formal-screen-reference': node('verify', ['visual-screen-references.json'], actionScript('visual-reference-compiler.mjs')),
   'verify-formal-direct-screen': node('verify', ['evidence/parity/implementation-result-*.json'], actionScript('strict-replica.mjs')),
