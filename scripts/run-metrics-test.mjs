@@ -32,6 +32,9 @@ try {
   assert.deepEqual(before.tokens.attemptUsage.map(({attempt,outcome,source,total}) => ({attempt,outcome,source,total})), [{attempt:1,outcome:'failed',source:'providerReported',total:23},{attempt:2,outcome:'succeeded',source:'unknown',total:null}]);
   assert.equal(before.agents.retries, 1); assert.equal(before.operations.failed, 1); assert.ok(before.elapsedWallMs >= 0);
   const compared = compareRuns(before, after); assert.equal(compared.status, 'eligible-for-review');
+  const selfComparison = compareRuns(before, before); assert.equal(selfComparison.status, 'not-comparable'); assert.ok(selfComparison.reasons.includes('before and after refer to the same Run')); assert.equal(selfComparison.changes, null);
+  const runAlias=path.join(root,'before-alias');fs.symlinkSync(beforeDir,runAlias,process.platform==='win32'?'junction':'dir');assert.equal(compareRuns(before,readRunMetrics(runAlias)).status,'not-comparable');
+  assert.ok(compareRuns(before, { ...after, runIdentity: null }).reasons.includes('Run identity is missing'));
   assert.equal(compared.changes.failedOperations, null); assert.equal(compared.operationAssessment.partialRecordedFailedDelta, 0);
   assert.equal(compared.tokenAssessment.status, 'not-comparable');
   assert.ok(compared.tokenAssessment.reasons.some(reason => reason.includes('unknown usage')));

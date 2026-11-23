@@ -80,7 +80,7 @@ export function readRunMetrics(runDirectory) {
     const finished = state.gates?.gate3?.status === 'passed' ? state.gates.gate3.at : null;
     const elapsed = start && finished && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(finished)) && Date.parse(finished) >= Date.parse(start) && Date.parse(finished) <= Date.now() ? Date.parse(finished) - Date.parse(start) : null;
     return {
-      runId: state.runId, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
+      runId: state.runId, runIdentity: `sha256:${crypto.createHash('sha256').update(root).digest('hex')}`, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
       contractIntegrity, capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
       elapsedWallMs: elapsed, elapsedBasis: 'first-ledger-snapshot-to-passed-gate3-including-user-wait',
       operations: { receiptDirectory: operationsPresent ? 'present' : 'missing', recorded: operationsPresent ? receipts.length : null, failed: operationsPresent ? receipts.filter(x => x.status === 'failed').length : null, running: operationsPresent ? receipts.filter(x => x.status === 'running').length : null, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: operationsPresent ? receipts.length - durations.length : null, unreadable: operationsPresent ? unreadable.length : null, completeness: 'unverified' },
@@ -92,6 +92,8 @@ export function readRunMetrics(runDirectory) {
 }
 export function compareRuns(before, after) {
   const reasons = [];
+  if (!before.runIdentity || !after.runIdentity) reasons.push('Run identity is missing');
+  else if (before.runIdentity === after.runIdentity) reasons.push('before and after refer to the same Run');
   if (before.gate3 !== 'passed' || after.gate3 !== 'passed') reasons.push('both runs need passed Gate 3');
   if (before.track !== after.track || before.scope !== after.scope) reasons.push('track or scope differs');
   if (!before.capabilities || !after.capabilities || JSON.stringify(before.capabilities) !== JSON.stringify(after.capabilities)) reasons.push('capability sets are missing or differ');
