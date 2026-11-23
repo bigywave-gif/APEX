@@ -32,6 +32,7 @@ try {
   assert.deepEqual(before.tokens.attemptUsage.map(({attempt,outcome,source,total}) => ({attempt,outcome,source,total})), [{attempt:1,outcome:'failed',source:'providerReported',total:23},{attempt:2,outcome:'succeeded',source:'unknown',total:null}]);
   assert.equal(before.agents.retries, 1); assert.equal(before.operations.failed, 1); assert.ok(before.elapsedWallMs >= 0);
   const compared = compareRuns(before, after); assert.equal(compared.status, 'eligible-for-review');
+  assert.equal(compared.changes.failedOperations, null); assert.equal(compared.operationAssessment.partialRecordedFailedDelta, 0);
   assert.equal(compared.tokenAssessment.status, 'not-comparable');
   assert.ok(compared.tokenAssessment.reasons.some(reason => reason.includes('unknown usage')));
   assert.ok(compared.tokenAssessment.reasons.some(reason => reason.includes('whole-host')));
@@ -84,6 +85,8 @@ try {
   recordTokenUsage(unknownDir, { stage: 'visual', inputTokens: 0, metadata: { usageSource: 'unknown' } });
   const unknown = readRunMetrics(unknownDir);
   assert.equal(unknown.tokens.recordedTotal, null);
+  assert.equal(unknown.operations.receiptDirectory, 'missing'); assert.equal(unknown.operations.failed, null);
+  assert.equal(compareRuns(before, unknown).operationAssessment.partialRecordedFailedDelta, null);
   assert.deepEqual(unknown.tokens.byStage.visual, { input: null, output: null, total: null, records: 1, unknownRecords: 1 });
   assert.equal(compareRuns(before, unknown).changes.recordedAgentTokens, null);
   recordTokenUsage(unknownDir, { stage: 'visual', inputTokens: 0, metadata: { usageSource: 'provider-reported' } });
