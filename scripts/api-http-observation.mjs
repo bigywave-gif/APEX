@@ -21,18 +21,23 @@ export function observedRuntimeOrigin(runDir, state) {
   if (urls.some(url => !loopback(url) || url.origin !== urls[0].origin)) throw new Error('API observation requires one loopback runtime origin');
   return urls[0].origin;
 }
-export async function observeHttpCases(origin, cases) {
+export async function observeHttpCases(origin, cases, { journal = null, writeContext = null, cancelled = () => false } = {}) {
   const base = new URL(origin);
   if (!loopback(base) || base.origin !== origin || !Array.isArray(cases) || !cases.length) throw new Error('nonempty cases and a loopback origin are required');
-  const samples = [], prepared = [];
+  const samples = [], prepared = [], writeIds = new Set();
   for (const item of cases) {
-    if (!item || item.method !== 'GET' || typeof item.path !== 'string' || !item.path.startsWith('/') || item.path.startsWith('//') || typeof item.route !== 'string' || !item.route.startsWith('/') || item.route.startsWith('//') || item.route.includes('\\') || !Number.isInteger(item.expectedStatus) || item.expectedStatus < 100 || item.expectedStatus > 599 || !('request' in item)) throw new Error('invalid API observation case');
+    if (!item || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(item.method) || typeof item.path !== 'string' || !item.path.startsWith('/') || item.path.startsWith('//') || typeof item.route !== 'string' || !item.route.startsWith('/') || item.route.startsWith('//') || item.route.includes('\\') || !Number.isInteger(item.expectedStatus) || item.expectedStatus < 100 || item.expectedStatus > 599 || !('request' in item)) throw new Error('invalid API observation case');
     let bearer = null;
     if (item.auth !== undefined) {
       if (!item.auth || Object.keys(item.auth).length !== 1 || !/^[A-Z_][A-Z0-9_]{0,127}$/.test(item.auth.bearerEnv || '')) throw new Error('invalid API authentication configuration');
       bearer = process.env[item.auth.bearerEnv];
       if (typeof bearer !== 'string' || !bearer.trim() || /[\r\n]/.test(bearer)) throw new Error('API authentication environment variable is missing or invalid');
       if (JSON.stringify(item).includes(bearer)) throw new Error('API case must not contain authentication secret');
+    }
+    if (item.method !== 'GET') {
+      if (!journal || !writeContext || bearer || typeof item.executionId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(item.executionId)) throw new Error('write observation requires a journal and stable executionId; authenticated writes are not yet supported');
+      if (writeIds.has(item.executionId)) throw new Error('write executionId must be unique within the capture');
+      writeIds.add(item.executionId);
     }
     const target = new URL(item.route, origin);
     if (target.origin !== origin || target.username || target.password || target.hash) throw new Error('API observation route must remain on the runtime origin');
@@ -43,8 +48,12 @@ export async function observeHttpCases(origin, cases) {
   }
   const secrets = prepared.map(entry => entry.bearer).filter(Boolean);
   if (secrets.some(secret => JSON.stringify(cases).includes(secret))) throw new Error('API cases must not contain authentication secrets');
-  for (const { item, target, bearer } of prepared) {
-    const response = await fetch(target, { method: item.method, redirect: 'manual', signal: AbortSignal.timeout(10000), ...(bearer ? { headers: { authorization: `Bearer ${bearer}` } } : {}) });
+  for (const { item, target, body, bearer } of prepared) {
+    if (cancelled()) throw new Error('run cancelled before API observation');
+    const dispatch = async () => {
+    if (cancelled()) throw new Error('run cancelled before API request; write outcome remains uncertain');
+    const headers = { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...(item.method === 'GET' ? {} : { 'content-type': 'application/json' }) };
+    const response = await fetch(target, { method: item.method, redirect: 'manual', signal: AbortSignal.timeout(10000), headers, ...(item.method === 'GET' ? {} : { body }) });
     if (response.status !== item.expectedStatus) throw new Error(`API response status ${response.status} does not match ${item.expectedStatus}`);
     const responseText = await response.text();
     if (secrets.some(secret => responseText.includes(secret))) throw new Error('API response contains the authentication secret');
@@ -52,7 +61,10 @@ export async function observeHttpCases(origin, cases) {
     let responseBody; try { responseBody = JSON.parse(responseText); } catch { throw new Error('API response is not JSON'); }
     const containsSecret = value => typeof value === 'string' ? secrets.some(secret => value.includes(secret)) : Array.isArray(value) ? value.some(containsSecret) : value && typeof value === 'object' ? Object.entries(value).some(([key, child]) => containsSecret(key) || containsSecret(child)) : false;
     if (containsSecret(responseBody)) throw new Error('API response contains the authentication secret');
-    samples.push({ method: item.method, path: item.path, request: item.request, response: responseBody });
+    return { method: item.method, path: item.path, request: item.request, response: responseBody };
+    };
+    const sample = item.method === 'GET' ? await dispatch() : await journal.execute(item.executionId, { origin, writeContext, method: item.method, path: item.path, route: item.route, request: item.request, expectedStatus: item.expectedStatus }, dispatch);
+    samples.push(sample);
   }
   return samples;
 }
