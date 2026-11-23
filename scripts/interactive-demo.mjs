@@ -80,14 +80,44 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     for (const ref of [actual.screenshot, actual.dom]) assert(ref && demoHash(fs.readFileSync(localFile(runDir, ref.path))) === ref.sha256, `missing or changed browser artifact: ${expected.id}`);
   }
   const testedActions = source.contract.journeys.flatMap(journey => journey.steps.map(step => ({ journeyId: journey.id, selector: step.selector, action: step.action })));
-  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
+  const inventoryAvailable = evidence.journeys.every(journey => Array.isArray(journey.observedControls) && Array.isArray(journey.exercisedControls) && typeof journey.controlInventoryTruncated === 'boolean');
+  const observed = new Map(), exercised = new Set();
+  if (inventoryAvailable) for (const journey of evidence.journeys) {
+    for (const control of journey.observedControls) { assert(nonempty(control?.key), 'invalid observed control identity'); observed.set(control.key, control); }
+    for (const key of journey.exercisedControls) { assert(nonempty(key), 'invalid exercised control identity'); exercised.add(key); }
+  }
+  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
 }
 
 // This function is serialized into Playwright CLI run-code. It has no closure
 // dependencies; UI actions and assertions execute in the real browser.
 export async function runDemoJourney(page, input) {
   const { journey, url, notice, screenshotPath } = input;
-  const blockedRequests = [], steps = [];
+  const blockedRequests = [], steps = [], controls = new Map(), exercisedControls = new Set();
+  let controlInventoryTruncated = false;
+  const controlSelector = 'button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="link"], [role="menuitem"]';
+  const describeControls = elements => {
+    const found = new Map();
+    for (const original of elements) {
+      const element = original.closest('button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="link"], [role="menuitem"]') || original;
+      if (!(element instanceof HTMLElement) || !element.getClientRects().length || getComputedStyle(element).visibility === 'hidden' || element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true' || element.closest('[inert]') || element.matches('input[readonly],textarea[readonly]')) continue;
+      if (typeof element.checkVisibility === 'function' && !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+      let key;
+      if (element.id && document.querySelectorAll(`#${CSS.escape(element.id)}`).length === 1) key = `id:${element.id}`;
+      else {
+        const parts = []; let node = element;
+        while (node && node.nodeType === 1) { const siblings = node.parentElement ? [...node.parentElement.children].filter(item => item.tagName === node.tagName) : [node]; parts.unshift(`${node.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(node) + 1})`); node = node.parentElement; }
+        key = `path:${parts.join('>')}`;
+      }
+      found.set(key, { key, tag: element.tagName.toLowerCase(), role: element.getAttribute('role') || null, type: element.getAttribute('type') || null });
+    }
+    return [...found.values()];
+  };
+  const collectControls = async () => {
+    const items = await page.locator(controlSelector).evaluateAll(describeControls);
+    if (items.length > 500) controlInventoryTruncated = true;
+    for (const item of items.slice(0, 500)) { if (controls.size >= 500 && !controls.has(item.key)) { controlInventoryTruncated = true; continue; } controls.set(item.key, item); }
+  };
   const origin = new URL(url).origin;
   const guard = async route => {
     const target = new URL(route.request().url());
@@ -119,13 +149,17 @@ export async function runDemoJourney(page, input) {
     const label = page.locator(notice.selector);
     noticeVisible = await label.isVisible() && (await label.innerText()).includes(notice.text);
     if (!noticeVisible) throw new Error('Sample-data notice is missing');
+    await collectControls();
     for (const step of journey.steps) {
       const before = await untilExpected(step.before), target = page.locator(step.selector);
+      const targets = await target.evaluateAll(describeControls);
       if (['fill', 'selectOption', 'press'].includes(step.action)) await target[step.action](step.value, { timeout: 3000 });
       else await target[step.action]({ timeout: 3000 });
       const after = await untilExpected(step.after);
       if (new URL(page.url()).origin !== origin) throw new Error('Interaction left the Demo origin');
       steps.push({ action: step.action, selector: step.selector, before, after, passed: true });
+      for (const item of targets) exercisedControls.add(item.key);
+      await collectControls();
     }
     if (blockedRequests.length) throw new Error('Demo attempted requests outside its isolated origin');
   } catch (cause) { error = cause.message; }
@@ -134,7 +168,7 @@ export async function runDemoJourney(page, input) {
   catch (cause) { error ||= cause.message; }
   finally { await page.unroute('**/*', guard); }
   const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, error, html };
+  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, observedControls: [...controls.values()], exercisedControls: [...exercisedControls], controlInventoryTruncated, error, html };
 }
 
 export function journeyCode(input) {

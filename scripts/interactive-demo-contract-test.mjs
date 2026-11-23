@@ -26,6 +26,13 @@ try {
   assert.equal(verified.controlCoverage.scope, 'declared-journeys-only'); checks++;
   assert.equal(verified.controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
   assert.deepEqual(verified.controlCoverage.testedActions.map(item => item.selector), ['#increment', '#increment', '#reset']); checks++;
+  const inventoried = structuredClone(capture);
+  for (const journey of inventoried.interactiveDemo.journeys) { journey.observedControls = [{ key: 'id:increment', tag: 'button' }, { key: 'id:settings', tag: 'button' }]; journey.exercisedControls = ['id:increment']; journey.controlInventoryTruncated = false; }
+  const coverage = verifyDemoInteractions(runDir, inventoried, url).controlCoverage;
+  assert.equal(coverage.scope, 'observed-journey-states-only'); checks++;
+  assert.deepEqual(coverage.untestedControls.map(item => item.key), ['id:settings']); checks++;
+  inventoried.interactiveDemo.journeys[0].controlInventoryTruncated = true;
+  assert.equal(verifyDemoInteractions(runDir, inventoried, url).controlCoverage.truncated, true); checks++;
   const legacyCapture = structuredClone(capture);
   for (const journey of legacyCapture.interactiveDemo.journeys) { delete journey.finalUrl; delete journey.viewport; }
   verifyDemoInteractions(runDir, legacyCapture, url); checks++;
