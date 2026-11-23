@@ -518,6 +518,11 @@ export function supersedeQueuedAgentJobs(runDir, stage, jobIds) {
     return queued.map(job => job.job_id);
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
+function stageUsageIncomplete(database, stage) {
+  return database.prepare('SELECT metadata_json FROM token_usage WHERE stage = ?').all(stage).some(row => {
+    try { return !['provider-reported', 'estimated'].includes(JSON.parse(row.metadata_json)?.usageSource); } catch { return true; }
+  });
+}
 export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
   requireNonEmpty(jobId, 'jobId');
   if (claimKey !== null && (typeof claimKey !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(claimKey))) throw new Error('claim key must be a durable random identifier of 16 to 128 safe characters');
@@ -554,8 +559,9 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = ?").get(job.stage).total);
       const available = Math.max(0, payload.stageTokenBudget - used - reserved);
       if (available < payload.tokenBudget) {
+        const incompleteUsage = stageUsageIncomplete(database, job.stage);
         database.exec('COMMIT');
-        return { jobId, status: reserved ? 'waiting' : 'budget-exhausted', reason: reserved ? 'stage-budget-reserved' : 'stage-budget-insufficient', used, reserved, available, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only' };
+        return { jobId, status: reserved ? 'waiting' : 'budget-exhausted', reason: reserved ? 'stage-budget-reserved' : 'stage-budget-insufficient', used, reserved, available: incompleteUsage ? null : available, reportedAvailable: available, incompleteUsage, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only' };
       }
       reservedTokens = payload.tokenBudget;
     }
@@ -703,9 +709,7 @@ export function recordObservedTokenUsage(runDir, { stage, observationKey, inputT
     }
     const used = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(stage).total);
     const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = ?").get(stage).total);
-    const incomplete = database.prepare('SELECT metadata_json FROM token_usage WHERE stage = ?').all(stage).some(row => {
-      try { return !['provider-reported', 'estimated'].includes(JSON.parse(row.metadata_json)?.usageSource); } catch { return true; }
-    });
+    const incomplete = stageUsageIncomplete(database, stage);
     database.exec('COMMIT');
     return { stage, used, reserved, limit, available: limit === null || incomplete ? null : Math.max(0, limit - used - reserved), overcommitted: limit === null ? null : used + reserved > limit ? true : incomplete ? null : false, incompleteUsage: incomplete, idempotent: Boolean(existing), budgetScope: 'reported-usage-only' };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }

@@ -50,6 +50,11 @@ try {
   assert.throws(() => recordObservedTokenUsage(root, { ...observation, observationKey: 'unknown_usage_00001', usageSource: 'unknown' }), /invalid observed token usage/);
   const unknown = recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'unknown_usage_00001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown', limit: 100 });
   assert.equal(unknown.available, null); assert.equal(unknown.overcommitted, null); assert.equal(unknown.incompleteUsage, true);
+  registerAgent(root, { agentId: 'unknown-budget', vocation: 'review', stage: 'baseline' });
+  const unknownJob = enqueueAgentJob(root, { agentId: 'unknown-budget', stage: 'baseline', inputHash: 'unknown', payload: { tokenBudget: 101, stageTokenBudget: 100 } });
+  const unknownClaim = claimAgentJob(root, unknownJob.jobId);
+  assert.equal(unknownClaim.status, 'budget-exhausted'); assert.equal(unknownClaim.available, null);
+  assert.equal(unknownClaim.reportedAvailable, 100); assert.equal(unknownClaim.incompleteUsage, true);
 
   console.log(JSON.stringify({ status: 'passed', checks: 26, scope: 'concurrent-claims-and-failed-attempts' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
