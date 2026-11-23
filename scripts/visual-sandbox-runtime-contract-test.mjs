@@ -20,6 +20,8 @@ try {
   fs.mkdirSync(path.join(project, 'server'), { recursive: true }); fs.writeFileSync(path.join(project, 'server', 'api.js'), 'export const api = true;\n');
   expect(run(router, ['intake', project, 'run-runtime', 'greenfield', 'standard', 'interactive', 'session-runtime', '确认调用 APEX']), 'intake');
   const runDir = path.join(project, '.apex', 'runs', 'run-runtime'); const stateFile = path.join(runDir, 'state.json'); const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  fs.writeFileSync(path.join(runDir, 'fixture-product-strategy.json'), JSON.stringify({ functionalPlan: demoContract.journeys.filter(item => item.kind === 'task').map(item => ({ task: item.task })) }));
+  state.artifacts.experienceStrategy = 'fixture-product-strategy.json';
   state.gates.gate1 = { status: 'passed', at: new Date().toISOString(), evidence: ['test'] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.demoSourceManifest = 'demo-source-manifest.json'; state.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json';
   fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ selectionAnalysis: seedDesignContract(runDir), sourceSelections: [
     { id: 'native-layout', kind: 'layout', visualNodes: ['demo-root'] }, { id: 'component', kind: 'component', visualNodes: ['demo-root'] },
