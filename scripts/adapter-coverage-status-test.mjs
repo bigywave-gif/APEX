@@ -27,6 +27,13 @@ try {
   const input = path.join(temporary, 'evidence.json');
   const verify = () => { write(input, { projects }); return spawnSync(process.execPath, [path.join(root, 'scripts/adapter-coverage.mjs'), 'verify', input], { encoding: 'utf8' }); };
   assert.equal(verify().status, 0, 'legacy and new verification bundles must both be accepted after the actual Gate 3 passed');
+  const savedRoot = projects[1].projectRoot, alias = path.join(temporary, 'project-alias');
+  fs.symlinkSync(projects[0].projectRoot, alias, process.platform === 'win32' ? 'junction' : 'dir'); projects[1].projectRoot = alias;
+  const duplicateRoot = verify(); assert.notEqual(duplicateRoot.status, 0); assert.match(duplicateRoot.stderr, /distinct project IDs, project roots and Runs/); projects[1].projectRoot = savedRoot;
+  const savedId = projects[1].id; projects[1].id = projects[0].id;
+  assert.match(verify().stderr, /distinct project IDs, project roots and Runs/); projects[1].id = savedId;
+  const savedRun = projects[1].runDir; projects[1].runDir = projects[0].runDir;
+  assert.match(verify().stderr, /distinct project IDs, project roots and Runs/); projects[1].runDir = savedRun;
   const first = projects[0], stateFile = path.join(first.runDir, 'state.json');
   write(stateFile, { runId: first.id, gates: { gate3: { status: 'pending' } } });
   assert.notEqual(verify().status, 0, 'a pending actual Gate 3 must never be accepted');
@@ -34,5 +41,5 @@ try {
   const bundle = path.join(first.runDir, first.artifacts.gate3);
   write(bundle, { gate3: 'passed', verificationStatus: 'failed' }); first.artifactHashes.gate3 = hash(bundle);
   assert.notEqual(verify().status, 0, 'a failed current verification must not fall back to a passed legacy field');
-  console.log(JSON.stringify({ status: 'passed', scope: 'legacy and current bundle status, actual Gate 3 and failure precedence' }));
+  console.log(JSON.stringify({ status: 'passed', scope: 'distinct project identities, legacy and current bundle status, actual Gate 3 and failure precedence' }));
 } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
