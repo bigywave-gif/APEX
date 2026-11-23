@@ -95,12 +95,12 @@ export async function runDemoJourney(page, input) {
   const { journey, url, notice, screenshotPath } = input;
   const blockedRequests = [], steps = [], controls = new Map(), exercisedControls = new Set();
   let controlInventoryTruncated = false;
-  const controlSelector = 'button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="link"], [role="menuitem"]';
+  const controlSelector = 'button, a[href], input:not([type="hidden"]), select, textarea, summary, [contenteditable="true"], [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="radio"], [role="combobox"], [role="slider"], [role="spinbutton"], [role="textbox"], [role="option"]';
   const describeControls = elements => {
     const found = new Map();
     for (const original of elements) {
-      const element = original.closest('button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="link"], [role="menuitem"]') || original;
-      if (!(element instanceof HTMLElement) || !element.getClientRects().length || getComputedStyle(element).visibility === 'hidden' || element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true' || element.closest('[inert]') || element.matches('input[readonly],textarea[readonly]')) continue;
+      const element = original.closest('button, a[href], input:not([type="hidden"]), select, textarea, summary, [contenteditable="true"], [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="radio"], [role="combobox"], [role="slider"], [role="spinbutton"], [role="textbox"], [role="option"]') || original;
+      if (!(element instanceof HTMLElement) || !element.getClientRects().length || getComputedStyle(element).visibility === 'hidden' || element.matches(':disabled') || element.closest('[aria-disabled="true"], [aria-hidden="true"], [inert]') || element.matches('input[readonly],textarea[readonly]')) continue;
       if (typeof element.checkVisibility === 'function' && !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
       let key;
       if (element.id && document.querySelectorAll(`#${CSS.escape(element.id)}`).length === 1) key = `id:${element.id}`;
@@ -109,6 +109,7 @@ export async function runDemoJourney(page, input) {
         while (node && node.nodeType === 1) { const siblings = node.parentElement ? [...node.parentElement.children].filter(item => item.tagName === node.tagName) : [node]; parts.unshift(`${node.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(node) + 1})`); node = node.parentElement; }
         key = `path:${parts.join('>')}`;
       }
+      key = `route:${location.pathname}${location.search}${location.hash}|${key}`;
       found.set(key, { key, tag: element.tagName.toLowerCase(), role: element.getAttribute('role') || null, type: element.getAttribute('type') || null });
     }
     return [...found.values()];

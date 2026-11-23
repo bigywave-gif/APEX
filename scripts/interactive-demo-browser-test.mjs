@@ -85,7 +85,7 @@ try {
   if (baseline.screenCaptures?.length !== 2 || !['desktop', 'mobile'].every(id => baseline.screenCaptures.some(item => item.id === id && item.screenshot.sha256 && item.dom.sha256)) || baseline.journeyCaptures?.length !== demoContract.journeys.length || !demoContract.journeys.every(journey => baseline.journeyCaptures.some(item => item.id === journey.id && item.task === journey.task && /^\d+x\d+$/.test(item.viewport) && item.finalUrl.startsWith(runtime.url) && item.screenshot.sha256 && item.dom.sha256))) throw new Error('real browser baseline must bind both viewports and every executed user journey to its screenshot and DOM');
   const demo = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-demo.json')));
   if (demo.kind !== 'interactive-ui-prototype' || demo.journeyCount !== 2 || demo.presentation.screenshotOnlyAllowed !== false || demo.presentation.preferred !== 'chat-inline' || !demo.presentation.contentReference?.includes('preview.html')) throw new Error('compiled Demo did not retain the interaction contract');
-  if (demo.controlCoverage?.scope !== 'observed-journey-states-only' || demo.controlCoverage.truncated || !['id:settings-tab', 'id:projects-tab', 'id:project-name'].every(key => demo.controlCoverage.untestedControls.some(item => item.key === key)) || demo.controlCoverage.untestedControls.some(item => ['id:increment', 'id:reset'].includes(item.key))) throw new Error('Demo coverage must expose observed but untested controls without mislabeling executed actions');
+  if (demo.controlCoverage?.scope !== 'observed-journey-states-only' || demo.controlCoverage.truncated || !['route:/|id:settings-tab', 'route:/|id:projects-tab', 'route:/|id:project-name'].every(key => demo.controlCoverage.untestedControls.some(item => item.key === key)) || demo.controlCoverage.untestedControls.some(item => ['route:/|id:increment', 'route:/|id:reset'].includes(item.key))) throw new Error('Demo coverage must expose observed but untested controls without mislabeling executed actions');
   // Prove that dispatching a real click without the expected UI change fails.
   const cli = fs.readdirSync(npmCacheRoot).map(name => path.join(npmCacheRoot, name, 'node_modules/@playwright/cli/playwright-cli.js')).find(file => fs.existsSync(file));
   if (!cli) throw new Error('browser acceptance needs the installed Playwright CLI');
@@ -121,6 +121,21 @@ try {
       if (result.status !== 0 || trace?.status !== 'passed' || trace.steps.length !== journey.steps.length) throw new Error(`sample interactive control failed: ${journey.id}: ${trace?.error || result.stderr}`);
       write(`evidence/${journey.id}.json`, trace);
     }
+    const customControlFile = path.join(runDir, 'visual-sandbox/control-audit-fixture.html');
+    try {
+      fs.writeFileSync(customControlFile, '<!doctype html><meta charset="utf-8"><p id="notice">交互预览 · 示例数据</p><div id="custom-radio" role="radio" tabindex="0" aria-checked="false" onclick="this.setAttribute(\'aria-checked\',\'true\')">选择</div><div id="custom-slider" role="slider" tabindex="0">滑块</div><div aria-disabled="true"><button id="disabled-control">不可用</button></div>');
+      const customJourney = { id: 'sample-custom-control', route: '/control-audit-fixture.html', steps: [{ action: 'click', selector: '#custom-radio', before: { selector: '#custom-radio', property: 'attribute', attribute: 'aria-checked', equals: 'false' }, after: { selector: '#custom-radio', property: 'attribute', attribute: 'aria-checked', equals: 'true' } }] };
+      const result = cliCall(['run-code', journeyCode({ journey: customJourney, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/sample-custom-control.png') })]);
+      const match = result.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
+      let trace = match && JSON.parse(match[1]); if (typeof trace === 'string') trace = JSON.parse(trace);
+      const keys = (trace?.observedControls || []).map(item => item.key);
+      if (result.status !== 0 || trace?.status !== 'passed' || !keys.includes('route:/control-audit-fixture.html|id:custom-radio') || !keys.includes('route:/control-audit-fixture.html|id:custom-slider') || keys.includes('route:/control-audit-fixture.html|id:disabled-control') || !trace.exercisedControls.includes('route:/control-audit-fixture.html|id:custom-radio')) throw new Error('custom controls or disabled ancestors were misclassified');
+    } finally { fs.rmSync(customControlFile, { force: true }); }
+    const routeJourney = { ...demoContract.journeys[0], route: '/?variant=other' };
+    const routeResult = cliCall(['run-code', journeyCode({ journey: routeJourney, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/sample-other-route.png') })]);
+    const routeMatch = routeResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
+    let routeTrace = routeMatch && JSON.parse(routeMatch[1]); if (typeof routeTrace === 'string') routeTrace = JSON.parse(routeTrace);
+    if (routeResult.status !== 0 || routeTrace?.status !== 'passed' || !routeTrace.observedControls.some(item => item.key === 'route:/?variant=other|id:increment') || routeTrace.observedControls.some(item => item.key === 'route:/|id:increment')) throw new Error('control inventory must distinguish identical IDs on different routes');
   } finally { cliCall(['close']); }
   // Formal verification can replace its capture file without invalidating Demo evidence.
   const frozen = JSON.parse(fs.readFileSync(path.join(runDir, demo.interactionEvidence.path)));
