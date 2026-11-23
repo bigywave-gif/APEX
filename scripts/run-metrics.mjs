@@ -77,7 +77,7 @@ export function readRunMetrics(runDirectory) {
       } catch { contractIntegrity = 'unreadable'; }
     }
     const finished = state.gates?.gate3?.status === 'passed' ? state.gates.gate3.at : null;
-    const elapsed = start && finished && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(finished)) && Date.parse(finished) >= Date.parse(start) ? Date.parse(finished) - Date.parse(start) : null;
+    const elapsed = start && finished && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(finished)) && Date.parse(finished) >= Date.parse(start) && Date.parse(finished) <= Date.now() ? Date.parse(finished) - Date.parse(start) : null;
     return {
       runId: state.runId, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
       contractIntegrity, capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
@@ -98,7 +98,27 @@ export function compareRuns(before, after) {
   if (before.operations.unreadable || after.operations.unreadable) reasons.push('operation receipts are unreadable');
   if (before.stateProjection !== 'consistent' || after.stateProjection !== 'consistent') reasons.push('state projection is missing, unreadable or diverged from the durable ledger');
   const eligible = reasons.length === 0;
-  return { status: eligible ? 'eligible-for-review' : 'not-comparable', reasons, note: 'Matching metadata does not prove task, content, quality or host conditions are equivalent; review before drawing conclusions.', changes: eligible ? { elapsedWallMs: before.elapsedWallMs === null || after.elapsedWallMs === null ? null : after.elapsedWallMs - before.elapsedWallMs, recordedTotalTokens: before.tokens.recordedTotal == null || after.tokens.recordedTotal == null ? null : after.tokens.recordedTotal - before.tokens.recordedTotal, recordedAgentTokens: before.tokens.attribution?.agent?.recordedTotal == null || after.tokens.attribution?.agent?.recordedTotal == null ? null : after.tokens.attribution.agent.recordedTotal - before.tokens.attribution.agent.recordedTotal, recordedIndependentHostTokens: before.tokens.attribution?.independentHost?.recordedTotal == null || after.tokens.attribution?.independentHost?.recordedTotal == null ? null : after.tokens.attribution.independentHost.recordedTotal - before.tokens.attribution.independentHost.recordedTotal, providerReportedTokens: before.tokens.sourceTotals?.providerReported == null || after.tokens.sourceTotals?.providerReported == null ? null : after.tokens.sourceTotals.providerReported - before.tokens.sourceTotals.providerReported, estimatedTokens: before.tokens.sourceTotals?.estimated == null || after.tokens.sourceTotals?.estimated == null ? null : after.tokens.sourceTotals.estimated - before.tokens.sourceTotals.estimated, agentRetries: after.agents.retries - before.agents.retries, failedOperations: after.operations.failed - before.operations.failed } : null, tokenComparisonScope: 'recorded Agent, independent host, and unattributed usage only; deltas may mix sources and are not total host tokens; coverage can differ' };
+  const coverageKeys = ['providerReported', 'estimated', 'unknown', 'unverified'];
+  const coverageAvailable = [before, after].every(run => coverageKeys.every(key => Number.isInteger(run.tokens?.coverage?.[key]) && run.tokens.coverage[key] >= 0));
+  const matchingCoverage = coverageAvailable && coverageKeys.every(key => before.tokens.coverage[key] === after.tokens.coverage[key]);
+  const tokenReasons = [];
+  if (!coverageAvailable) tokenReasons.push('token coverage is missing or invalid');
+  else {
+    if (!matchingCoverage) tokenReasons.push('token measurement coverage differs');
+    if (before.tokens.coverage.unknown || after.tokens.coverage.unknown) tokenReasons.push('some recorded calls have unknown usage');
+    if (before.tokens.coverage.unverified || after.tokens.coverage.unverified) tokenReasons.push('some recorded usage has an unverified source');
+  }
+  if (!before.tokens?.completeHostUsage || !after.tokens?.completeHostUsage) tokenReasons.push('whole-host usage is not completely measured');
+  const delta = (a, b) => a == null || b == null ? null : b - a;
+  const partial = eligible ? {
+    recordedTotalTokens: delta(before.tokens.recordedTotal, after.tokens.recordedTotal),
+    recordedAgentTokens: delta(before.tokens.attribution?.agent?.recordedTotal, after.tokens.attribution?.agent?.recordedTotal),
+    recordedIndependentHostTokens: delta(before.tokens.attribution?.independentHost?.recordedTotal, after.tokens.attribution?.independentHost?.recordedTotal),
+    providerReportedTokens: delta(before.tokens.sourceTotals?.providerReported, after.tokens.sourceTotals?.providerReported),
+    estimatedTokens: delta(before.tokens.sourceTotals?.estimated, after.tokens.sourceTotals?.estimated)
+  } : null;
+  const comparableTokens = eligible && tokenReasons.length === 0;
+  return { status: eligible ? 'eligible-for-review' : 'not-comparable', reasons, note: 'Matching metadata does not prove task, content, quality or host conditions are equivalent; review before drawing conclusions.', changes: eligible ? { elapsedWallMs: delta(before.elapsedWallMs, after.elapsedWallMs), recordedTotalTokens: comparableTokens ? partial.recordedTotalTokens : null, recordedAgentTokens: comparableTokens ? partial.recordedAgentTokens : null, recordedIndependentHostTokens: comparableTokens ? partial.recordedIndependentHostTokens : null, providerReportedTokens: comparableTokens ? partial.providerReportedTokens : null, estimatedTokens: comparableTokens ? partial.estimatedTokens : null, agentRetries: after.agents.retries - before.agents.retries, failedOperations: after.operations.failed - before.operations.failed } : null, tokenAssessment: { status: comparableTokens ? 'eligible-for-review' : 'not-comparable', reasons: eligible ? tokenReasons : [...reasons, ...tokenReasons], partialRecordedDeltas: partial, note: 'Partial recorded deltas are descriptive only and cannot establish a change in total host cost.' }, tokenComparisonScope: 'partial recorded Agent, independent host, and unattributed usage; not total host tokens' };
 }
 const invoked = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invoked) {

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { initializeLedger, recordArtifact, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recordTokenUsage, recordObservedTokenUsage } from './run-ledger.mjs';
+import { commitRunState, initializeLedger, recordArtifact, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recordTokenUsage, recordObservedTokenUsage } from './run-ledger.mjs';
 import { readRunMetrics, compareRuns } from './run-metrics.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-run-metrics-'));
 try {
@@ -11,6 +11,7 @@ try {
     const dir = path.join(root, name); fs.mkdirSync(dir);
     const state = { runId: name, revision: 0, track: 'greenfield', scope: 'standard', lifecycle: 'active', artifacts: { deliveryContract: 'delivery.json' }, gates: { gate3: { status: gate, at: '2099-01-01T00:00:00.000Z' } } };
     fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(state)); fs.writeFileSync(path.join(dir, 'delivery.json'), JSON.stringify({ capabilities: ['frontend'] })); initializeLedger(dir, state, 'fixture');
+    state.gates.gate3.at = new Date().toISOString(); commitRunState(dir, state, { reason: 'fixture-finish' });
     recordArtifact(dir, { artifactId: 'delivery', reference: 'delivery.json', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, 'delivery.json'))).digest('hex')}` });
     registerAgent(dir, { agentId: 'designer', vocation: 'design', stage: 'visual' });
     const job = enqueueAgentJob(dir, { agentId: 'designer', stage: 'visual', inputHash: 'fixture' });
@@ -29,17 +30,31 @@ try {
   assert.equal(before.tokens.attemptUsage.length, 2);
   assert.deepEqual(before.tokens.attemptAttribution, { attributedRecords: 2, unattributedRecords: 1 });
   assert.deepEqual(before.tokens.attemptUsage.map(({attempt,outcome,source,total}) => ({attempt,outcome,source,total})), [{attempt:1,outcome:'failed',source:'providerReported',total:23},{attempt:2,outcome:'succeeded',source:'unknown',total:null}]);
-  assert.equal(before.agents.retries, 1); assert.equal(before.operations.failed, 1); assert.ok(before.elapsedWallMs > 0);
-  const compared = compareRuns(before, after); assert.equal(compared.status, 'eligible-for-review'); assert.equal(compared.changes.recordedAgentTokens, -10); assert.equal(compared.changes.providerReportedTokens, -10); assert.equal(compared.changes.estimatedTokens, 0); assert.equal(compareRuns(before, { ...after, tokens: { ...after.tokens, sourceTotals: { ...after.tokens.sourceTotals, providerReported: null } } }).changes.providerReportedTokens, null); assert.match(compared.tokenComparisonScope, /not total host tokens/);
+  assert.equal(before.agents.retries, 1); assert.equal(before.operations.failed, 1); assert.ok(before.elapsedWallMs >= 0);
+  const compared = compareRuns(before, after); assert.equal(compared.status, 'eligible-for-review');
+  assert.equal(compared.tokenAssessment.status, 'not-comparable');
+  assert.ok(compared.tokenAssessment.reasons.some(reason => reason.includes('unknown usage')));
+  assert.ok(compared.tokenAssessment.reasons.some(reason => reason.includes('whole-host')));
+  assert.equal(compared.changes.recordedAgentTokens, null); assert.equal(compared.changes.providerReportedTokens, null);
+  assert.equal(compared.tokenAssessment.partialRecordedDeltas.recordedAgentTokens, -10); assert.equal(compared.tokenAssessment.partialRecordedDeltas.providerReportedTokens, -10); assert.equal(compared.tokenAssessment.partialRecordedDeltas.estimatedTokens, 0);
+  assert.equal(compareRuns(before, { ...after, tokens: { ...after.tokens, sourceTotals: { ...after.tokens.sourceTotals, providerReported: null } } }).tokenAssessment.partialRecordedDeltas.providerReportedTokens, null); assert.match(compared.tokenComparisonScope, /not total host tokens/);
+  const measured = value => ({ ...value, tokens: { ...value.tokens, completeHostUsage: true, coverage: { ...value.tokens.coverage, unknown: 0 } } });
+  const measuredComparison = compareRuns(measured(before), measured(after));
+  assert.equal(measuredComparison.tokenAssessment.status, 'eligible-for-review');
+  assert.equal(measuredComparison.changes.recordedTotalTokens, -10);
   recordObservedTokenUsage(beforeDir, { stage: 'visual', observationKey: 'host_before_00000001', inputTokens: 7, outputTokens: 0, usageSource: 'provider-reported' });
   recordObservedTokenUsage(afterDir, { stage: 'visual', observationKey: 'host_after_000000001', inputTokens: 2, outputTokens: 0, usageSource: 'provider-reported' });
   const withHostsBefore = readRunMetrics(beforeDir), withHostsAfter = readRunMetrics(afterDir), hostComparison = compareRuns(withHostsBefore, withHostsAfter);
   assert.equal(withHostsBefore.tokens.attribution.agent.recordedTotal, 23);
   assert.equal(withHostsBefore.tokens.attribution.independentHost.recordedTotal, 7);
   assert.equal(withHostsBefore.tokens.attribution.unattributed.recordedTotal, 5);
-  assert.equal(hostComparison.changes.recordedTotalTokens, -15);
-  assert.equal(hostComparison.changes.recordedAgentTokens, -10);
-  assert.equal(hostComparison.changes.recordedIndependentHostTokens, -5);
+  assert.equal(hostComparison.changes.recordedTotalTokens, null);
+  assert.equal(hostComparison.tokenAssessment.partialRecordedDeltas.recordedTotalTokens, -15);
+  assert.equal(hostComparison.tokenAssessment.partialRecordedDeltas.recordedAgentTokens, -10);
+  assert.equal(hostComparison.tokenAssessment.partialRecordedDeltas.recordedIndependentHostTokens, -5);
+  const unequalCoverage = compareRuns(withHostsBefore, after);
+  assert.ok(unequalCoverage.tokenAssessment.reasons.includes('token measurement coverage differs'));
+  assert.equal(unequalCoverage.changes.recordedTotalTokens, null);
   assert.equal(compareRuns(before, { ...after, gate3: 'pending' }).status, 'not-comparable');
   assert.equal(compareRuns(before, { ...after, capabilities: ['backend'] }).changes, null);
   const deliveryFile = path.join(afterDir, 'delivery.json'), deliveryBytes = fs.readFileSync(deliveryFile);
@@ -62,6 +77,7 @@ try {
   const unknownState = { runId: 'unknown', revision: 0, track: 'greenfield', scope: 'standard', lifecycle: 'active', artifacts: { deliveryContract: 'delivery.json' }, gates: { gate3: { status: 'passed', at: '2099-01-01T00:00:00.000Z' } } };
   fs.writeFileSync(path.join(unknownDir, 'state.json'), JSON.stringify(unknownState)); fs.writeFileSync(path.join(unknownDir, 'delivery.json'), JSON.stringify({ capabilities: ['frontend'] })); initializeLedger(unknownDir, unknownState, 'fixture');
   assert.equal(readRunMetrics(unknownDir).contractIntegrity, 'unregistered');
+  assert.equal(readRunMetrics(unknownDir).elapsedWallMs, null, 'a future Gate 3 timestamp is not an observed duration');
   assert.equal(compareRuns(before, readRunMetrics(unknownDir)).status, 'not-comparable');
   recordArtifact(unknownDir, { artifactId: 'delivery', reference: 'delivery.json', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(unknownDir, 'delivery.json'))).digest('hex')}` });
   assert.equal(readRunMetrics(unknownDir).tokens.recordedTotal, null);
@@ -84,5 +100,5 @@ try {
   assert.equal(compareRuns(before, damaged).status, 'not-comparable');
   fs.rmSync(path.join(afterDir, 'operations/a.json'));
   assert.equal(readRunMetrics(afterDir).operations.totalDurationMs, null);
-  console.log(JSON.stringify({ status: 'passed', checks: 47, scope: 'read-only-run-metrics-fixtures' }));
+  console.log(JSON.stringify({ status: 'passed', checks: 57, scope: 'read-only-run-metrics-fixtures' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
