@@ -1605,7 +1605,7 @@ function formalCaptureSourceReady(state, runDir) {
     if (usesCombinedPlan(state)) {
       const sandbox = read(artifactFile(runDir, state.artifacts?.visualSandboxFiles));
       const strategyFile = artifactFile(runDir, state.artifacts?.experienceStrategy);
-      const tasks = requiredFormalTasks(sandbox, strategyFile ? read(strategyFile) : {});
+      const tasks = requiredFormalTasks(sandbox, strategyFile ? read(strategyFile) : {}, { requireProductPlan: true });
       if (!tasks.size || capture.formalInteractions?.status !== 'passed' || [...tasks].some(task => !(capture.formalInteractions.journeys || []).some(item => item.task === task && item.status === 'passed' && item.evidence))) return false;
     }
     if (![...expected].every(id => capture.sourceSelectionIds?.includes(id)) || (capture.sourceSelectionIds || []).some(id => !expected.has(id))) return false;

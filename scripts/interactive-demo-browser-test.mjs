@@ -132,6 +132,8 @@ try {
     run('apex-router.mjs', ['select-route', project, runId, session, 'direct-code', 'actual-direct-route', 'user-selected-direct-code']);
     // This isolates verification; Gate 2 and the production delta are seeded.
     const directState = JSON.parse(fs.readFileSync(stateFile));
+    write('fixture-product-strategy.json', { functionalPlan: demoContract.journeys.filter(item => item.kind === 'task').map(item => ({ task: item.task })) });
+    directState.artifacts.experienceStrategy = 'fixture-product-strategy.json';
     directState.gates.gate2 = { status: 'passed', evidence: ['test-fixture'] }; directState.locks.implementationAllowed = true; directState.locks.implementationApproved = true; directState.artifacts.pageDelta = 'page-delta.json'; directState.phase = 'G-09 PROOF_IMPLEMENT';
     seedImplementationSeal(directState);
     write('page-delta.json', { status: 'fixture' }); seedImplementationRegistration(directState); fs.writeFileSync(stateFile, JSON.stringify(directState));
@@ -158,6 +160,8 @@ try {
     const actualFormalCapture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
     const formalInteractions = actualFormalCapture.formalInteractions.journeys.map(item => ({ id: item.id, result: 'passed', evidence: item.evidence }));
     validateFormalInteractionEvidence(runDir, JSON.parse(fs.readFileSync(stateFile)), formalInteractions);
+    const absentProductState = JSON.parse(fs.readFileSync(stateFile)); delete absentProductState.artifacts.experienceStrategy;
+    try { validateFormalInteractionEvidence(runDir, absentProductState, formalInteractions); throw new Error('missing product plan must fail'); } catch (error) { if (!error.message.includes('current product plan with valid functional tasks is required')) throw error; }
     write('missing-product-task.json', { functionalPlan: [{ task: '未实现的产品任务' }] });
     const missingProductState = JSON.parse(fs.readFileSync(stateFile)); missingProductState.artifacts.experienceStrategy = 'missing-product-task.json';
     try { validateFormalInteractionEvidence(runDir, missingProductState, formalInteractions); throw new Error('missing product task must fail'); } catch (error) { if (!error.message.includes('formal interaction evidence misses confirmed tasks: 未实现的产品任务')) throw error; }
