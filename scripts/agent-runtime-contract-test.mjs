@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, recordTokenUsage, recoverAgentJobs, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, recordTokenUsage, recoverAgentJobs, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan, supersedeQueuedAgentJobs } from './run-ledger.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-agent-runtime-'));
 try {
@@ -104,5 +104,21 @@ try {
   assert.equal(attempts.filter(item => item.code === 0).length, 2, JSON.stringify(attempts));
   assert.equal(attempts.filter(item => item.code === 2).length, 6, JSON.stringify(attempts));
   assert.equal(agentRuntimeStatus(root).tokenUsage.concurrent, 40);
-  console.log(JSON.stringify({ status: 'passed', checks: 53 }));
+  const repairRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-role-repair-ledger-'));
+  try {
+    registerAgent(repairRoot, { agentId: 'reviewer-a', vocation: 'reviewer', stage: 'verify' });
+    registerAgent(repairRoot, { agentId: 'reviewer-b', vocation: 'reviewer', stage: 'verify' });
+    const running = enqueueAgentJob(repairRoot, { agentId: 'reviewer-a', stage: 'verify', inputHash: 'old' });
+    const queued = enqueueAgentJob(repairRoot, { agentId: 'reviewer-b', stage: 'verify', inputHash: 'old' });
+    const lease = claimAgentJob(repairRoot, running.jobId);
+    assert.throws(() => supersedeQueuedAgentJobs(repairRoot, 'verify', [running.jobId, queued.jobId]), /wait for running jobs/);
+    assert.equal(agentRuntimeStatus(repairRoot, queued.jobId).jobs[0].status, 'queued');
+    settleAgentJob(repairRoot, running.jobId, { status: 'succeeded', leaseToken: lease.leaseToken });
+    assert.throws(() => supersedeQueuedAgentJobs(repairRoot, 'gate1', [queued.jobId]), /another stage/);
+    assert.deepEqual(supersedeQueuedAgentJobs(repairRoot, 'verify', [running.jobId, queued.jobId]), [queued.jobId]);
+    assert.equal(agentRuntimeStatus(repairRoot, running.jobId).jobs[0].status, 'succeeded');
+    assert.throws(() => claimAgentJob(repairRoot, queued.jobId), /not queued/);
+    assert.deepEqual(supersedeQueuedAgentJobs(repairRoot, 'verify', [running.jobId, queued.jobId]), []);
+  } finally { fs.rmSync(repairRoot, { recursive: true, force: true }); }
+  console.log(JSON.stringify({ status: 'passed', checks: 60 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

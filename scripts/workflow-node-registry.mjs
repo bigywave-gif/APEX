@@ -96,9 +96,10 @@ export function workflowNode(id) {
   if (workflowNodes[id]) return workflowNodes[id];
   // Role work is selected/recorded/summarized dynamically for every stage,
   // but it is still a concrete guarded node rather than host prose.
-  const role = String(id).match(/^(baseline|gate1|visual|implementation|verify)-role-(select|record|summarize|repair|rebudget)$/);
+  const role = String(id).match(/^(baseline|gate1|visual|implementation|verify)-role-(select|record|summarize|repair|rebudget|wait)$/);
   if (role) {
     const action = role[1] === 'baseline' ? 'collect_existing_baseline' : role[1] === 'gate1' ? 'analyze_requirement' : role[1] === 'visual' ? 'plan_visual' : role[1] === 'implementation' ? 'compile_visual_bundle' : 'verify';
+    if (role[2] === 'wait') return node(action, [], actionScript('agent-runtime.mjs'), { completion: 'observe the existing job until it ends or its lease is eligible for controlled recovery', stateCommit: 'status is read-only; a finished job or controlled recovery advances the ledger', retry: 'poll the same live job without starting or cancelling another execution', failurePolicy: 'preserve uncertain execution and lease evidence' });
     return node(action, [`advisories/${role[1]}/role-decision-summary.md`], actionScript('role-advisory.mjs'));
   }
   return null;

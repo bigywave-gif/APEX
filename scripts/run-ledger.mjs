@@ -492,6 +492,23 @@ export function enqueueAgentJob(runDir, { jobId = crypto.randomUUID(), agentId, 
     return { jobId, status: 'queued', availableAt: timestamp };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
+export function supersedeQueuedAgentJobs(runDir, stage, jobIds) {
+  requireNonEmpty(stage, 'stage');
+  if (!Array.isArray(jobIds) || !jobIds.length || new Set(jobIds).size !== jobIds.length || jobIds.some(id => typeof id !== 'string' || !id)) throw new Error('role repair needs unique durable job IDs');
+  const database = open(runDir), timestamp = now();
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    const jobs = jobIds.map(id => database.prepare('SELECT job_id, stage, status FROM agent_jobs WHERE job_id = ?').get(id));
+    if (jobs.some(job => !job || job.stage !== stage)) throw new Error('role repair job binding is missing or belongs to another stage');
+    const running = jobs.filter(job => job.status === 'running');
+    if (running.length) throw new Error(`role repair must wait for running jobs or recover expired leases: ${running.map(job => job.job_id).join(', ')}`);
+    const queued = jobs.filter(job => job.status === 'queued');
+    for (const job of queued) database.prepare("UPDATE agent_jobs SET status = 'cancelled', finished_at = ?, last_error = ?, reserved_tokens = 0 WHERE job_id = ? AND status = 'queued'").run(timestamp, 'superseded by role input repair', job.job_id);
+    if (queued.length) database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('role-jobs-superseded', timestamp, JSON.stringify({ stage, jobIds: queued.map(job => job.job_id) }));
+    database.exec('COMMIT');
+    return queued.map(job => job.job_id);
+  } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
+}
 export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
   requireNonEmpty(jobId, 'jobId');
   if (claimKey !== null && (typeof claimKey !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(claimKey))) throw new Error('claim key must be a durable random identifier of 16 to 128 safe characters');

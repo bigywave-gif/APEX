@@ -218,9 +218,25 @@ try {
  const spec={schemaVersion:'3.0',layout:{grid:'single'},components:[component],content:{hierarchy:['task']},data:{},icons:[],tables:[],charts:[],diagrams:[],motion:[],interaction:[],responsive,acceptance:['The approved Demo is reproduced.']};
  invoke('compile_visual_bundle','bundle-compiler.mjs',['compile',dir,put('visual-spec-input.json',spec)]);
 
+ const oldJobId=Object.values(oldSelection.agentJobs)[0];
+ const oldClaim=invoke('compile_visual_bundle','agent-runtime.mjs',['claim',dir,oldJobId,'implementation']);
+ const waitingRoles=route(['status',project,id,session]);
+ assert.equal(waitingRoles.executionDirective.currentStep.id,'implementation-role-wait');
+ assert.match(waitingRoles.executionDirective.currentStep.details,/agent-runtime\.mjs status/);
+ assert.equal(waitingRoles.executionDirective.currentStep.execution.executor.script,'agent-runtime.mjs');
+ assert.deepEqual(waitingRoles.executionDirective.currentStep.execution.requiredOutputs,[]);
+ const statusAuth=route(['authorize',project,id,session,'compile_visual_bundle']);
+ const statusArgs=['run',project,id,session,statusAuth.authorizationRef,'compile_visual_bundle','agent-runtime.mjs','status',dir];
+ assert.equal(ok(run(action,statusArgs),'live status').jobs.find(job=>job.jobId===oldJobId).status,'running');
+ const replay=run(action,statusArgs);
+ assert.notEqual(replay.status,0); assert.match(replay.stderr,/fresh Router authorization/);
+ invoke('compile_visual_bundle','agent-runtime.mjs',['fail',dir,oldJobId,'implementation','fixture task finished after inputs changed',oldClaim.leaseToken]);
+ assert.equal(invoke('compile_visual_bundle','agent-runtime.mjs',['status',dir]).jobs.find(job=>job.jobId===oldJobId).status,'queued');
  const staleRoles=route(['status',project,id,session]);
  assert.equal(staleRoles.executionDirective.currentStep.id,'implementation-role-repair');
- invoke('compile_visual_bundle','role-advisory.mjs',['repair',dir,'implementation']);
+ const repaired=invoke('compile_visual_bundle','role-advisory.mjs',['repair',dir,'implementation']);
+ assert.deepEqual(new Set(repaired.supersededJobs),new Set(Object.values(oldSelection.agentJobs)));
+ for(const jobId of Object.values(oldSelection.agentJobs)) assert.equal(agentRuntimeStatus(dir,jobId).jobs[0].status,'cancelled');
  const beforeRoles=route(['status',project,id,session]);
  assert.equal(beforeRoles.executionDirective.currentStep.id,'implementation-role-select');
  invoke('compile_visual_bundle','role-advisory.mjs',['select',dir,'implementation']);

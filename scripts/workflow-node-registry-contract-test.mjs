@@ -17,7 +17,9 @@ for (const id of staticStepIds) {
   if (!definition.inputPolicy || !definition.completion || !definition.failurePolicy || !definition.stateCommit || !definition.retry) throw new Error(`workflow contract lacks lifecycle policy for ${id}`);
 }
 
-for (const dynamicId of ['baseline-role-select', 'baseline-role-rebudget', 'gate1-role-record', 'visual-role-summarize', 'implementation-role-repair', 'verify-role-select']) {
+for (const dynamicId of ['baseline-role-select', 'baseline-role-rebudget', 'gate1-role-record', 'visual-role-summarize', 'implementation-role-repair', 'implementation-role-wait', 'verify-role-select']) {
   if (!workflowNode(dynamicId)) throw new Error(`dynamic role step missing workflow contract: ${dynamicId}`);
 }
-console.log(JSON.stringify({ status: 'passed', checkedStaticSteps: staticStepIds.length, checkedDynamicRolePatterns: 6 }));
+const waiting = workflowNode('implementation-role-wait');
+if (waiting.executor.script !== 'agent-runtime.mjs' || waiting.outputs.length || !waiting.completion.includes('existing job')) throw new Error('waiting must inspect the existing job rather than demand a new summary');
+console.log(JSON.stringify({ status: 'passed', checkedStaticSteps: staticStepIds.length, checkedDynamicRolePatterns: 7 }));

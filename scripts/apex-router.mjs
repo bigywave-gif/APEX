@@ -1504,15 +1504,22 @@ function deliveryRequiresApiContracts(state, runDir) {
 function roleStageState(state, runDir, stage) {
   if (!state.roleChain?.enabled) return 'not-required';
   const manifestFile = artifactFile(runDir, state.artifacts?.roleAdvisoryManifest);
+  const repairState = () => {
+    try {
+      const selection = read(path.join(runDir, 'advisories', stage, 'selection.json'));
+      const ids = new Set(Object.values(selection.agentJobs || {}));
+      return agentRuntimeStatus(runDir).jobs.some(job => ids.has(job.jobId) && job.stage === stage && job.status === 'running') ? 'wait' : 'repair';
+    } catch { return 'repair'; }
+  };
   const selectedStageState = () => {
     const selectionFile = path.join(runDir, 'advisories', stage, 'selection.json');
     if (!fs.existsSync(selectionFile)) return 'select';
     try {
       const selection = read(selectionFile);
       if (!Array.isArray(selection.selectedRoles) || !selection.selectedRoles.length) return 'select';
-      if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return 'repair';
-      if (usesCombinedPlan(state) && stage === 'verify' && formalReviewArtifacts.some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return 'repair';
-      if (usesCombinedPlan(state) && stage === 'verify' && !selection.selectedRoles.includes('product-manager')) return 'repair';
+      if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return repairState();
+      if (usesCombinedPlan(state) && stage === 'verify' && formalReviewArtifacts.some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return repairState();
+      if (usesCombinedPlan(state) && stage === 'verify' && !selection.selectedRoles.includes('product-manager')) return repairState();
       // Legacy selections used a fixed split that could be smaller than the
       // deterministic context they froze. Route that state to a guarded
       // migration before allowing a record attempt that must fail.
@@ -1540,7 +1547,7 @@ function roleStageState(state, runDir, stage) {
     if (!entry?.selectedRoles?.length) return selectedStageState();
     if (!entry.advisories || entry.advisories.length !== entry.selectedRoles.length) return 'record';
     if (!entry.summary || !artifactFile(runDir, entry.summary)) return 'summarize';
-    return roleStageReady(state, runDir, stage) ? 'ready' : 'repair';
+    return roleStageReady(state, runDir, stage) ? 'ready' : repairState();
   } catch { return 'select'; }
 }
 function visualSandboxSourceReady(state, runDir) {
@@ -1659,6 +1666,7 @@ function gate3IndustryEvidenceReady(state, runDir) {
 }
 function automaticWorkStep(state, runDir, action) {
   const runFile = name => artifactFile(runDir, state.artifacts?.[name]);
+  const roleWait = '当前旧角色任务仍在运行。每次以新的当前授权调用 agent-runtime.mjs status 查看租约；等待实际执行结束，不得重复启动或归档。租约确已过期时使用 recover 动作调用 apex-recover.mjs，再重新读取 Router；时间无效或远端状态不明时保留证据并调查。';
   const step = (id, title, produces, details, followUpAction = action) => {
     const contract = assertWorkflowNode(id, followUpAction, produces);
     return {
@@ -1697,7 +1705,7 @@ function automaticWorkStep(state, runDir, action) {
     if (!scope.ready) return step('freeze-change-scope', '刷新本次受影响闭包与未改动保护补集', ['change-scope-input.json', 'change-scope.json'], `内部从最新完整代码引用生成局部变更闭包，再以 record_context 调用 contract-recorder.mjs scope。当前原因：${scope.reason}。`, 'record_context');
     if (!functionalFreezeStatus(runDir, state).ready) return step('compile-functional-freeze', '从冻结页面骨架、代码快照和变更闭包生成可验证功能冻结', ['functional-freeze.json'], `内部通过 collect_existing_baseline 调用 functional-freeze-compiler.mjs compile；当前原因：${functionalFreezeStatus(runDir, state).reason}。不得使用初始化模板、空数组或人工改写状态。`);
     const roles = roleStageState(state, runDir, 'baseline');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`baseline-role-${roles}`, '完成 Existing 基线专业角色汇总', ['advisories/baseline/selection.json', 'advisories/baseline/*.json', 'advisories/baseline/role-decision-summary.md'], `通过 collect_existing_baseline 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record' : roles === 'repair' ? 'repair' : roles === 'rebudget' ? 'rebudget' : 'summarize'}；已选角色必须形成可验证结论，失败保留受控回执并停止当前 Gate。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`baseline-role-${roles}`, '完成 Existing 基线专业角色汇总', ['advisories/baseline/selection.json', 'advisories/baseline/*.json', 'advisories/baseline/role-decision-summary.md'], roles === 'wait' ? roleWait : `通过 collect_existing_baseline 调用 role-advisory.mjs ${roles}；已选角色必须形成可验证结论，失败保留受控回执并停止当前 Gate。`);
     return step('continue-gate1-analysis', '转入 Gate 1 需求与交付方案编译', [], 'Existing 基线已有效；重新读取 Router 后必须授权 analyze_requirement 并继续完整 Gate 1 链。', 'analyze_requirement');
   }
   if (action === 'analyze_requirement') {
@@ -1711,7 +1719,7 @@ function automaticWorkStep(state, runDir, action) {
     if (deliveryRequiresApiContracts(state, runDir) && !runFile('apiContract')) return step('record-api-contract', '登记 API 契约', ['api-contract-input.json', 'api-contract.json'], '基于当前代码/API 证据生成 API 契约输入，再以 record_context 调用 contract-recorder.mjs api。', 'record_context');
     if (!runFile('experienceStrategy') || !runFile('experienceQualityEvidence')) return step('evaluate-experience-strategy', '评估体验策略与质量证据', ['experience-strategy.json', 'experience-quality-evidence.json'], '通过 analyze_requirement 调用 experience-evaluator.mjs；质量结论必须绑定当前需求与基线。');
     const roles = roleStageState(state, runDir, 'gate1');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`gate1-role-${roles}`, '完成 Gate 1 专业角色汇总', ['advisories/gate1/selection.json', 'advisories/gate1/*.json', 'advisories/gate1/role-decision-summary.md'], `通过 analyze_requirement 调用 role-advisory.mjs ${roles}；角色结论必须可验证并写入八节方案的内部专业协作摘要。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`gate1-role-${roles}`, '完成 Gate 1 专业角色汇总', ['advisories/gate1/selection.json', 'advisories/gate1/*.json', 'advisories/gate1/role-decision-summary.md'], roles === 'wait' ? roleWait : `通过 analyze_requirement 调用 role-advisory.mjs ${roles}；角色结论必须可验证并写入八节方案的内部专业协作摘要。`);
     // Presence is not readiness. A stale body, manifest, source hash, or
     // affected-scope proof must be rebuilt here rather than falling through
     // with analyze_requirement but no runnable currentStep.
@@ -1728,7 +1736,7 @@ function automaticWorkStep(state, runDir, action) {
     // no concrete instruction.  The visual-plan compiler owns the complete
     // plan, role summary and ten-section presentation as one controlled chain.
     const roles = roleStageState(state, runDir, 'visual');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`visual-role-${roles}`, '完成视觉阶段专业角色汇总', ['advisories/visual/selection.json', 'advisories/visual/*.json', 'advisories/visual/role-decision-summary.md'], `以 plan_visual 调用 role-advisory.mjs ${roles}；UX、UI、图表/动效与视觉审查结论必须完成并绑定当前来源，才能编译十节视觉方案。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`visual-role-${roles}`, '完成视觉阶段专业角色汇总', ['advisories/visual/selection.json', 'advisories/visual/*.json', 'advisories/visual/role-decision-summary.md'], roles === 'wait' ? roleWait : `以 plan_visual 调用 role-advisory.mjs ${roles}；UX、UI、图表/动效与视觉审查结论必须完成并绑定当前来源，才能编译十节视觉方案。`);
     return step('compile-complete-visual-plan', '编译完整视觉方案及十节确认内容', ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json'], '基于已确认需求、冻结基线、DESIGN 规范和专业角色结论，以 plan_visual 生成视觉执行方案及完整十节展示内容；完成后重新读取 Router，并且只呈现“确认视觉方案”。不得以一句摘要、文件卡片或“继续”替代该确认。');
   }
   if (action === 'generate_visual') {
@@ -1813,7 +1821,7 @@ function automaticWorkStep(state, runDir, action) {
       return step('compile-evidence-bound-industry-review', '生成并执行证据绑定的行业基准复核', ['industry-benchmark-review.json', 'industry-benchmark-evidence.json'], `基于本次正式页浏览器证据、冻结来源选择与视觉方案，为每项行业准则生成独立观察、评分和证据 ID，再以 verify 调用 industry-benchmark.mjs verify。不得复制视觉方案的计划分数，也不得把该内部复核变成用户确认。${repair}`);
     }
     const roles = roleStageState(state, runDir, 'verify');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`verify-role-${roles}`, '完成验证阶段专业角色汇总', ['advisories/verify/selection.json', 'advisories/verify/*.json', 'advisories/verify/role-decision-summary.md'], `通过 verify 调用 role-advisory.mjs ${roles}；产品角色对照绑定的产品方案、已确认 Demo 与正式交互证据，逐项填写 productReview：task、interactionId、evidence、expectedOutcome、observedOutcome、rationale、verdict；证据不足或结果不符时不得标为通过，须修复并重新验证。不新增用户交互。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`verify-role-${roles}`, '完成验证阶段专业角色汇总', ['advisories/verify/selection.json', 'advisories/verify/*.json', 'advisories/verify/role-decision-summary.md'], roles === 'wait' ? roleWait : `通过 verify 调用 role-advisory.mjs ${roles}；产品角色对照绑定的产品方案、已确认 Demo 与正式交互证据，逐项填写 productReview：task、interactionId、evidence、expectedOutcome、observedOutcome、rationale、verdict；证据不足或结果不符时不得标为通过，须修复并重新验证。不新增用户交互。`);
   }
   if (action === 'register_runtime_demo') return step('register-runtime-demo', '登记已验证的运行时 Demo', ['registrations/runtime-demo-*.json'], usesCombinedPlan(state) ? '核验当前 Run 的 Demo、来源锁、运行时基线、视觉引用与候选证据均来自成功受控动作，再调用 Router register-runtime-demo；随后展示 Demo 并等待用户明确确认，确认后才提供路线选择。' : '核验当前 Run 的 Demo、来源锁、运行时基线、视觉引用与候选证据均来自成功受控动作，再登记、展示并按旧模型提供路线选择。');
   if (action === 'present_runtime_demo') return step('present-run-local-runtime-demo', '展示当前 Run 的运行时 Demo 并登记展示回执', ['presentations/runtime-demo-*.json'], '默认聊天内展示：读取 runtime-demo.json.chatPreview，与同 Run 的 visual-sandbox-files.json 核对哈希；以 chat-inline 登记 present-runtime-demo，在本轮 final 原样输出返回的 presentation.contentReference，随后按当前确认模型展示 Router 返回的 Demo 确认或路线选择。片段由同源 HTTP Demo 验收，不能用 URL iframe 或另画原型代替。此回执证明已准备输出，不伪称宿主已渲染或用户已点击。缺少片段或宿主不支持时，实际打开当前 Run 的 HTTP URL，以 browser-panel 及具体 fallback-reason 登记并说明原因。只有截图、源码或链接不算展示；禁止正式服务和其他 Run。');
@@ -1840,7 +1848,7 @@ function automaticWorkStep(state, runDir, action) {
     if (usesCombinedPlan(state) && !runFile('dependencyLock')) return step('resolve-visual-dependencies', '解析已确认视觉来源的依赖锁', ['dependency-lock.json'], '依据已确认视觉方案和来源生成依赖选择并调用 asset-resolver.mjs resolve；没有外部依赖时生成真实空锁，不得安装项目依赖。');
     if (usesCombinedPlan(state) && (!runFile('visualBundle') || !runFile('implementationMap'))) return step('compile-visual-bundle-and-implementation-map', '编译待实施角色审核的视觉包与代码映射', ['visual-bundle.json', 'implementation-map.json'], '根据已确认 Demo、冻结来源和依赖锁，调用 bundle-compiler.mjs 编译待审核实施映射；随后由前端工程师和代码审查角色检查实际映射，未通过机器 Gate 2 前不得修改正式项目。');
     const roles = roleStageState(state, runDir, 'implementation');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`implementation-role-${roles}`, '完成实施阶段专业角色汇总', ['advisories/implementation/selection.json', 'advisories/implementation/*.json', 'advisories/implementation/role-decision-summary.md'], `以 compile_visual_bundle 调用 role-advisory.mjs ${roles}，将前端、设计、可访问性和验证约束汇总进实施冻结；不得新增用户交互。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`implementation-role-${roles}`, '完成实施阶段专业角色汇总', ['advisories/implementation/selection.json', 'advisories/implementation/*.json', 'advisories/implementation/role-decision-summary.md'], roles === 'wait' ? roleWait : `以 compile_visual_bundle 调用 role-advisory.mjs ${roles}，将前端、设计、可访问性和验证约束汇总进实施冻结；不得新增用户交互。`);
     if (!runFile('visualBundle') || !runFile('implementationMap')) return step('compile-visual-bundle-and-implementation-map', '编译视觉实施包与受影响代码映射', ['visual-bundle.json', 'implementation-map.json'], '以 compile_visual_bundle 物化已选依赖并编译实施包及 Implementation Map；只能包含已确认的页面、组件、来源和运行时目标。直接落地时 screenId 对应已确认 Demo 截图标识，须覆盖每个不同路由；同一路由的不同视口可共用一个页面映射。Stitch 路线须覆盖全部冻结页面标识。完成后按当前确认模型继续后续步骤。');
     if (!durableConfirmationPresentationReady(state, runDir, 'implementation', implementationPresentationSections, ['visualBundle', 'implementationMap'], 'compile_visual_bundle')) return step('compile-implementation-confirmation-presentation', '编译来源绑定的实施冻结确认正文', ['implementation-presentation.md', 'implementation-presentation-manifest.json'], '以 compile_visual_bundle 调用 confirmation-presentation.mjs compile <run-dir> implementation。正文必须绑定当前 Visual Bundle、Implementation Map、正式代码目标与验收边界；不得以文件清单、短摘要或临时聊天拼接替代。');
     return step('publish-complete-implementation-freeze', '整理完整实施冻结内容', ['visual-bundle.json', 'implementation-map.json'], usesCombinedPlan(state) ? '实施包与代码映射已齐备；重新读取 Router，继续 Gate 2 机器校验，无需额外用户确认。' : '实施包与代码映射已齐备；重新读取 Router 以打开唯一的实施冻结确认点。不得以文件清单或“继续”代替完整确认内容。');

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { archiveArtifacts, commitRunState, readRunState, visualSkillLoads } from './run-ledger.mjs';
-import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, rebudgetAgentJobs, registerAgent, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, rebudgetAgentJobs, registerAgent, settleAgentJob, startTraceSpan, supersedeQueuedAgentJobs } from './run-ledger.mjs';
 import { resolveTasteSkill, loadTasteSkill, requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
 import { formalReviewBindings, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 
@@ -283,6 +283,15 @@ function repair(runDir, stage) {
   // emitted to satisfy a Gate.
   const source = stageDirectory(runDir, stage);
   if (!fs.existsSync(source)) { console.log(JSON.stringify({ stage, status: 'already-clear' })); return; }
+  const selectionFile = path.join(source, 'selection.json');
+  let supersededJobs = [];
+  if (fs.existsSync(selectionFile)) {
+    const selection = read(selectionFile);
+    if (selection.agentJobs) {
+      if (!Array.isArray(selection.selectedRoles) || selection.selectedRoles.some(role => typeof selection.agentJobs[role] !== 'string') || Object.keys(selection.agentJobs).length !== selection.selectedRoles.length) die('role repair has incomplete durable job bindings');
+      supersededJobs = supersedeQueuedAgentJobs(runDir, stage, selection.selectedRoles.map(role => selection.agentJobs[role]));
+    }
+  }
   const archive = path.join(runDir, 'invalidated', `${Date.now()}-role-input-repair`, 'advisories', stage);
   fs.mkdirSync(path.dirname(archive), { recursive: true });
   fs.renameSync(source, archive);
@@ -297,7 +306,7 @@ function repair(runDir, stage) {
   const state = stateFor(runDir);
   if (state.artifacts?.roleDecisionSummaries) delete state.artifacts.roleDecisionSummaries[stage];
   saveState(runDir, state);
-  console.log(JSON.stringify({ stage, status: 'repaired', archive: relative(runDir, archive) }));
+  console.log(JSON.stringify({ stage, status: 'repaired', archive: relative(runDir, archive), supersededJobs }));
 }
 function summarize(runDir, stage) {
   const selection = loadSelection(runDir, stage); const entries = selection.selectedRoles.map(roleId => {
