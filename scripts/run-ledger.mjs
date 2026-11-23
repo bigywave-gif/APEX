@@ -446,11 +446,11 @@ export function registerAgent(runDir, { agentId, vocation, stage, capabilityVers
   try {
     database.exec('BEGIN IMMEDIATE');
     if (JSON.parse(latestSnapshot(database)?.state_json || '{}').lifecycle === 'cancelled') throw new Error('cannot register an Agent for a cancelled run');
-    const active = database.prepare("SELECT 1 FROM agent_jobs WHERE agent_id = ? AND status = 'running'").get(agentId);
+    const active = database.prepare("SELECT 1 FROM agent_jobs WHERE agent_id = ? AND status IN ('queued', 'running')").get(agentId);
     if (active) {
       const existing = database.prepare('SELECT vocation, stage, capability_version, metadata_json FROM agents WHERE agent_id = ?').get(agentId);
       const session = database.prepare('SELECT session_id, context_hash FROM agent_sessions WHERE agent_id = ?').get(agentId);
-      if (!existing || !session || existing.vocation !== vocation || existing.stage !== stage || existing.capability_version !== capabilityVersion || existing.metadata_json !== JSON.stringify(metadata)) throw new Error(`cannot change an Agent registration while its job is running: ${agentId}`);
+      if (!existing || !session || existing.vocation !== vocation || existing.stage !== stage || existing.capability_version !== capabilityVersion || existing.metadata_json !== JSON.stringify(metadata)) throw new Error(`cannot change an Agent registration while its job is queued or running: ${agentId}`);
       database.exec('COMMIT');
       return { agentId, sessionId: session.session_id, contextHash: session.context_hash };
     }
