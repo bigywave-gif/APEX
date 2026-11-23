@@ -128,9 +128,14 @@ try {
   fs.writeFileSync(path.join(recoveryDir, 'visual-sandbox-runtime.json'), JSON.stringify({ pid: 1, runtimeRoot: 'missing' }));
   reject(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'runtime process cannot be proven run-local', 'unsafe runtime cleanup must fail closed');
   if (readRunState(recoveryDir).lifecycle !== 'cancelled' || agentRuntimeStatus(recoveryDir).jobs.find(job => job.jobId === recoveryJob.jobId)?.status !== 'cancelled') throw new Error('cleanup failure must retain the cancellation fence');
-  fs.rmSync(path.join(recoveryDir, 'visual-sandbox-runtime.json'));
+  fs.writeFileSync(path.join(recoveryDir, 'visual-sandbox-runtime.json'), JSON.stringify({ pid: process.pid, runtimeRoot: 'visual-sandbox' }));
+  reject(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'runtime-root-unavailable-for-live-process', 'missing sandbox must not allow a live unverified process to be killed or ignored');
+  const exited = spawnSync(process.execPath, ['-e', '']);
+  if (!exited.pid || exited.status !== 0) throw new Error('failed to create an exited process for cancellation recovery');
+  fs.writeFileSync(path.join(recoveryDir, 'visual-sandbox-runtime.json'), JSON.stringify({ pid: exited.pid, runtimeRoot: 'visual-sandbox' }));
   const recoveredCancel = expect(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'retry interrupted cancellation cleanup');
   if (!recoveredCancel.recoveredCancellation || agentRuntimeStatus(recoveryDir).jobs.find(job => job.jobId === recoveryJob.jobId)?.status !== 'cancelled') throw new Error('cancellation cleanup retry must preserve the fenced job ledger');
+  if (!recoveredCancel.cancellation?.services?.alreadyStopped?.some(item => item.pid === exited.pid)) throw new Error('retry must record an exited runtime even after its sandbox was reclaimed');
   reject(run(runController, ['init', root, 'direct-run', 'greenfield']), 'cannot be executed', 'direct run-controller state mutation must be denied');
   reject(run(runController, ['init', root, 'spoofed-run', 'greenfield'], { APEX_ROUTER_COMMAND: 'init' }), 'cannot be executed', 'spoofed Router environment must not mutate state');
   reject(spawnSync(process.execPath, ['--input-type=module', '-e', `import { executeRunController } from ${JSON.stringify(runController)}; executeRunController('init', [${JSON.stringify(root)}, 'import-bypass', 'greenfield', 'standard', 'interactive']);`], { encoding: 'utf8' }), 'does not provide an export named', 'internal controller must not be importable');

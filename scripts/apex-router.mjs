@@ -381,9 +381,13 @@ function assertExplicitApexConsent(userInstruction) {
   if (!consent) fail('intake requires the user\'s explicit APEX consent (for example: “确认调用 APEX”); a UI request, plan, or host statement is not consent');
   return text;
 }
+function processInfo(pid, field) {
+  const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', `${field}=`], { encoding: 'utf8', timeout: 1000 });
+  if (result.error || (result.status !== 0 && !(result.status === 1 && !String(result.stderr || '').trim()))) throw new Error(`process inspection unavailable: ${result.error?.code || result.status}`);
+  return String(result.stdout || '').trim();
+}
 function processIsLive(pid) {
-  const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', timeout: 1000 });
-  const status = String(result.stdout || '').trim();
+  const status = processInfo(pid, 'stat');
   return Boolean(status) && !status.includes('Z');
 }
 function runtimeRecordCandidates(runDir) {
@@ -408,15 +412,17 @@ function stopRunLocalServices(runDir, runId) {
     const pid = Number(record?.pid);
     const runtimeRoot = typeof record?.runtimeRoot === 'string' ? path.resolve(runDir, record.runtimeRoot) : null;
     const expectedRoot = path.resolve(runDir, 'visual-sandbox');
-    const canonicalRuntimeRoot = runtimeRoot && fs.existsSync(runtimeRoot) ? fs.realpathSync(runtimeRoot) : null;
-    const canonicalExpectedRoot = fs.existsSync(expectedRoot) ? fs.realpathSync(expectedRoot) : null;
-    if (!Number.isInteger(pid) || pid <= 1 || !canonicalRuntimeRoot || canonicalRuntimeRoot !== canonicalExpectedRoot || !isCurrentRunChild(runDir, runtimeRoot)) {
+    if (!Number.isInteger(pid) || pid <= 1 || runtimeRoot !== expectedRoot || !isCurrentRunChild(runDir, runtimeRoot)) {
       refused.push({ record: path.basename(recordFile), reason: 'runtime-record-not-owned-by-current-run' });
       continue;
     }
-    const processInfo = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
-    const command = String(processInfo.stdout || '').trim();
+    let command;
+    try { command = processInfo(pid, 'command'); }
+    catch (error) { refused.push({ record: path.basename(recordFile), pid, reason: `process-inspection-failed:${error.message}` }); continue; }
     if (!command) { alreadyStopped.push({ record: path.basename(recordFile), pid }); continue; }
+    const canonicalRuntimeRoot = fs.existsSync(runtimeRoot) ? fs.realpathSync(runtimeRoot) : null;
+    const canonicalExpectedRoot = fs.existsSync(expectedRoot) ? fs.realpathSync(expectedRoot) : null;
+    if (!canonicalRuntimeRoot || canonicalRuntimeRoot !== canonicalExpectedRoot) { refused.push({ record: path.basename(recordFile), pid, reason: 'runtime-root-unavailable-for-live-process' }); continue; }
     if (!command.includes('visual-sandbox-runtime.mjs serve') || !command.includes(`--apex-run-id ${runId}`) || (!command.includes(runtimeRoot) && !command.includes(canonicalExpectedRoot))) {
       refused.push({ record: path.basename(recordFile), pid, reason: 'pid-command-does-not-match-current-run-runtime' });
       continue;
