@@ -48,6 +48,7 @@ try{
  const missingResult=run('apex-action.mjs',['run',project,id,session,badAuth.authorizationRef,'plan_visual','visual-execution-plan.mjs','compile',dir,put('sitewide-missing-page.json',missing)]);
  assert.notEqual(missingResult.status,0);assert.match(missingResult.stderr+missingResult.stdout,/affected pages: 设置/);
  assert.ok(!fs.existsSync(path.join(dir,'visual-execution-plan.json')),'incomplete sitewide plan must not be published');
+  { const designer = JSON.parse(fs.readFileSync(path.join(dir, 'advisories/visual/ui-designer.json'))); const rules = [{ skill: 'taste-skill', rules: designer.execution.tasteSkillUsage.appliedRules }, ...(designer.execution.optionalSkillUsage || []).filter(item => item.decision === 'applied').map(item => ({ skill: item.name, rules: item.appliedRules }))]; plan.selectionAnalysis.skillRuleDecisions = rules.flatMap(item => item.rules.map(rule => ({ skill: item.skill, rule, decision: 'Use task-oriented hierarchy in the selected layout.', rationale: 'The product task must remain clear and usable.', sourceSelectionIds: ['layout'] }))); }
  invoke('plan_visual','visual-execution-plan.mjs',['compile',dir,put('sitewide-plan-input.json',plan)]);
  const resultPlan=JSON.parse(fs.readFileSync(path.join(dir,'visual-execution-plan.json')));assert.deepEqual(resultPlan.deliveryNarrative.changes[0].pages,['工作台','设置']);
  const resultPresentation=fs.readFileSync(path.join(dir,'visual-plan-presentation.md'),'utf8');assert.match(resultPresentation,/工作台/);assert.match(resultPresentation,/设置/);

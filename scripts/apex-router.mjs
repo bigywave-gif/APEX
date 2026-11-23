@@ -1753,7 +1753,7 @@ function automaticWorkStep(state, runDir, action) {
     // plan, role summary and ten-section presentation as one controlled chain.
     const roles = roleStageState(state, runDir, 'visual');
     if (roles !== 'ready' && roles !== 'not-required') return step(`visual-role-${roles}`, '完成视觉阶段专业角色汇总', ['advisories/visual/selection.json', 'advisories/visual/*.json', 'advisories/visual/role-decision-summary.md'], roles === 'wait' ? roleWait : `以 plan_visual 调用 role-advisory.mjs ${roles}；UX、UI、图表/动效与视觉审查结论必须完成并绑定当前来源，才能编译十节视觉方案。`);
-    return step('compile-complete-visual-plan', '编译完整视觉方案及十节确认内容', ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json'], '基于已确认需求、冻结基线、DESIGN 规范和专业角色结论，以 plan_visual 生成视觉执行方案及完整十节展示内容；完成后重新读取 Router，并且只呈现“确认视觉方案”。不得以一句摘要、文件卡片或“继续”替代该确认。');
+    return step('compile-complete-visual-plan', '编译完整视觉方案及十节确认内容', ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json'], '基于已确认需求、冻结基线、DESIGN 规范和专业角色结论，以 plan_visual 生成视觉执行方案及完整十节展示内容；在 selectionAnalysis.skillRuleDecisions 中逐条关联设计师采用的 Skill 规则、具体设计决策、理由和已选来源；完成后重新读取 Router，并且只呈现“确认视觉方案”。不得以一句摘要、文件卡片或“继续”替代该确认。');
   }
   if (action === 'generate_visual') {
     if (usesCombinedPlan(state)) {

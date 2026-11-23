@@ -26,3 +26,19 @@ export function assertVisualCapabilityEvidence(runDir, capabilities) {
   if (missing.length || unproven.length) throw new Error(`visual plan capability claims differ from the designer advisory: missing=${missing.join(',')} unproven=${unproven.join(',')}`);
   return { tasteHash: taste.sha256, applied: [...applied].sort(), designerAdvisoryHash: digest };
 }
+
+/** Structural traceability only; a designer still judges whether the mapping is appropriate. */
+export function assertVisualSkillDecisions(runDir, plan) {
+  const advisory = JSON.parse(fs.readFileSync(path.join(runDir, 'advisories/visual/ui-designer.json'), 'utf8'));
+  const required = [{ skill: 'taste-skill', rules: advisory.execution?.tasteSkillUsage?.appliedRules || [] }, ...(advisory.execution?.optionalSkillUsage || []).filter(item => item.decision === 'applied').map(item => ({ skill: item.name, rules: item.appliedRules || [] }))];
+  const mappings = plan.selectionAnalysis?.skillRuleDecisions, selections = new Set((plan.sourceSelections || []).map(item => item.id));
+  if (!Array.isArray(mappings) || !mappings.length) throw new Error('visual plan must map applied designer Skill rules to concrete design decisions');
+  const expected = new Set(required.flatMap(item => item.rules.map(rule => JSON.stringify([item.skill, rule])))), seen = new Set();
+  for (const item of mappings) {
+    const key = JSON.stringify([item?.skill, item?.rule]);
+    if (!expected.has(key) || seen.has(key) || typeof item.decision !== 'string' || !item.decision.trim() || typeof item.rationale !== 'string' || !item.rationale.trim() || !Array.isArray(item.sourceSelectionIds) || !item.sourceSelectionIds.length || item.sourceSelectionIds.some(id => !selections.has(id))) throw new Error('visual Skill decision must bind one applied rule to a concrete decision and selected sources');
+    seen.add(key);
+  }
+  if ([...expected].some(key => !seen.has(key))) throw new Error('visual plan is missing a decision for an applied designer Skill rule');
+  return { status: 'mapped', rules: seen.size };
+}
