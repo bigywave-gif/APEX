@@ -16,5 +16,21 @@ for (const project of projects) {
   if (!project.id || projectIds.has(project.id) || projectRoots.has(projectRoot) || runRoots.has(runRoot)) die('cross-project evidence must use distinct project IDs, project roots and Runs');
   projectIds.add(project.id); projectRoots.add(projectRoot); runRoots.add(runRoot);
 }
-for (const project of projects) { if (!project.id || !profiles.has(project.adapterId) || !project.runDir || !project.artifacts?.projectInventory || !project.artifacts?.existingBaseline || !project.artifacts?.gate3 || !project.artifacts?.evidenceProvenance || !project.artifactHashes) die(`project lacks a registered adapter or required run artifacts: ${project.id || '<unknown>'}`); const runDir = path.resolve(project.runDir), profile = profiles.get(project.adapterId); for (const [name, artifact] of Object.entries(project.artifacts)) { const target = path.resolve(runDir, artifact); if (!target.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(target) || project.artifactHashes[name] !== hash(target)) die(`project evidence artifact is missing, changed, or unhashed: ${project.id}/${name}`); } const state = read(path.join(runDir, 'state.json')), inventory = read(path.resolve(runDir, project.artifacts.projectInventory)), verification = read(path.resolve(runDir, project.artifacts.gate3)), provenance = read(path.resolve(runDir, project.artifacts.evidenceProvenance)); if (path.basename(runDir) !== state.runId || inventory.projectRoot !== project.projectRoot || inventory.adapterRecommendation?.id !== project.adapterId) die(`project identity, run identity, or adapter identity does not bind to supplied evidence: ${project.id}`); if (state.gates?.gate3?.status !== 'passed' || (verification.verificationStatus ?? verification.gate3) !== 'passed' || provenance.status !== 'passed') die(`project Gate 3 or provenance is not truly passed: ${project.id}`); for (const check of profile.requiredChecks) if (!(project.checks || []).includes(check)) die(`adapter required check is absent: ${project.id}/${check}`); }
+for (const project of projects) {
+  if (!project.id || !profiles.has(project.adapterId) || !project.runDir || !project.artifacts?.projectInventory || !project.artifacts?.existingBaseline || !project.artifacts?.gate3 || !project.artifacts?.evidenceProvenance || !project.artifactHashes) die(`project lacks a registered adapter or required run artifacts: ${project.id || '<unknown>'}`);
+  const runDir = fs.realpathSync(project.runDir), projectRoot = fs.realpathSync(project.projectRoot), profile = profiles.get(project.adapterId);
+  const statePath = path.join(runDir, 'state.json');
+  if (!fs.existsSync(statePath) || !fs.realpathSync(statePath).startsWith(`${runDir}${path.sep}`)) die(`Run state must belong to the current Run: ${project.id}`);
+  const state = read(statePath);
+  const expectedRun = path.join(projectRoot, '.apex', 'runs', String(state.runId || ''));
+  if (!state.runId || !runDir.startsWith(`${projectRoot}${path.sep}`) || !fs.existsSync(expectedRun) || fs.realpathSync(expectedRun) !== runDir) die(`Run does not belong to its project: ${project.id}`);
+  for (const [name, artifact] of Object.entries(project.artifacts)) {
+    const target = path.resolve(runDir, artifact);
+    if (!target.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(target) || !fs.realpathSync(target).startsWith(`${runDir}${path.sep}`) || project.artifactHashes[name] !== hash(target)) die(`project evidence artifact is missing, changed, outside the Run, or unhashed: ${project.id}/${name}`);
+  }
+  const inventory = read(path.resolve(runDir, project.artifacts.projectInventory)), verification = read(path.resolve(runDir, project.artifacts.gate3)), provenance = read(path.resolve(runDir, project.artifacts.evidenceProvenance));
+  if (path.basename(runDir) !== state.runId || inventory.projectRoot !== project.projectRoot || inventory.adapterRecommendation?.id !== project.adapterId) die(`project identity, run identity, or adapter identity does not bind to supplied evidence: ${project.id}`);
+  if (state.gates?.gate3?.status !== 'passed' || (verification.verificationStatus ?? verification.gate3) !== 'passed' || provenance.status !== 'passed') die(`project Gate 3 or provenance is not truly passed: ${project.id}`);
+  for (const check of profile.requiredChecks) if (!(project.checks || []).includes(check)) die(`adapter required check is absent: ${project.id}/${check}`);
+}
 console.log(JSON.stringify({ status: 'passed', projects: projects.length, adapters: adapters.size }));
