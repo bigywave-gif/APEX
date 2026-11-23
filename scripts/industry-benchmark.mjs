@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { requireRouterAction } from './apex-runtime-guard.mjs';
+import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process'; import { fileURLToPath } from 'node:url'; import { requireRouterAction } from './apex-runtime-guard.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Industry benchmark failed: ${message}`); process.exit(1); }
 function read(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -11,6 +11,8 @@ const state = read(path.join(runDir, 'state.json'));
 const planFile = inside(runDir, state.artifacts.visualExecutionPlan, 'visual execution plan');
 const provenanceFile = inside(runDir, state.artifacts.evidenceProvenance, 'evidence provenance');
 const reviewFile = inside(runDir, reviewArg, 'industry review');
+const reviewValidation = spawnSync(process.execPath, [path.join(root, 'scripts', 'apex-validate.mjs'), 'validate', 'industry-benchmark-review.schema.json', reviewFile], { encoding: 'utf8' });
+if (reviewValidation.status !== 0) die(`industry review schema validation failed: ${(reviewValidation.stderr || reviewValidation.stdout || reviewValidation.error?.message || 'validator failed').trim()}`);
 const receiptFile = inside(runDir, path.join('operations', `${path.basename(process.env.APEX_ROUTER_AUTHORIZATION_REF || '', '.json')}.json`), 'current controlled-operation receipt');
 const receipt = read(receiptFile); const reviewRelative = path.relative(runDir, reviewFile);
 if (receipt.status !== 'succeeded' && receipt.status !== 'running' || receipt.action !== 'verify' || receipt.script !== 'industry-benchmark.mjs' || receipt.inputFileHashes?.[reviewRelative] !== hash(reviewFile)) die('industry review was changed or was not bound to this controlled verification operation');

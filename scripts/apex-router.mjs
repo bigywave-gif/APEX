@@ -1837,7 +1837,7 @@ function automaticWorkStep(state, runDir, action) {
     if (pendingQuality?.stage === 'measurement') return step(`capture-${pendingQuality.kind}-measurement`, '采集项目声明的质量测量', [`evidence/${pendingQuality.kind}-measurement.json`], `以 verify 调用 quality-measurement.mjs measure <run-dir> ${pendingQuality.kind} <project-check-id>；仅使用当前清单中真实声明的项目检查脚本，脚本输出约定的自动化 JSON 报告。缺少可执行检查或运行失败时保留未验证或失败，不得编造结果。`);
     if (pendingQuality?.stage === 'evidence') return step(`compile-${pendingQuality.kind}-evidence`, '核验质量测量并登记结果', [`evidence/${pendingQuality.kind}-verification.json`], `以 verify 调用 quality-evidence.mjs verify <run-dir> ${pendingQuality.kind} <input.json> <project-root>，输入 measurementPath 指向本 Run 的受控测量；存在违规、未完成项或超过目标时保留真实失败。`);
     if (pendingQuality) return step('repair-quality-context', '修复质量验证上下文', [], '当前质量验证合同或测量上下文不可读取；修复具体缺失项并重新执行对应受控动作，不得跳过检查。');
-    if (!gate3VerificationBundleReady(state, runDir)) return step('run-controlled-verification', '执行受控验证并生成证据包', ['verification-bundle.json', 'evidence/proof-*.json'], '以 verify 调用 verification-orchestrator.mjs，汇总运行时状态、构建/测试、结构、视觉、无障碍与实现映射证据；失败必须形成可观察 operation receipt。');
+    if (!gate3VerificationBundleReady(state, runDir)) return step('run-controlled-verification', '执行受控验证并生成证据包', ['verification-bundle.json'], '以 verify 调用 verification-orchestrator.mjs，汇总运行时状态、构建/测试、结构、视觉、无障碍与实现映射证据；失败必须形成可观察 operation receipt。');
     if (!gate3ProvenanceReady(state, runDir)) return step('seal-verification-evidence', '封存当前验证证据来源', ['evidence-provenance.json'], '从当前 Run 的成功受控操作回执中选择实际生成且哈希未变的正式页面、测试或构建证据，以 record_context 调用 evidence-provenance.mjs seal；不得把未执行或失败的检查标为通过。', 'record_context');
     if (!gate3IndustryEvidenceReady(state, runDir)) {
       const failures = industryReviewFailures(state, runDir);
@@ -1884,7 +1884,7 @@ function automaticWorkStep(state, runDir, action) {
     return step('apply-approved-formal-implementation', '按已批准实施映射落地正式代码', ['page-delta.json', '正式页运行时证据'], '获取当前 Run 的项目级 mutation lease 后，仅物化已锁定依赖，并在 Implementation Map 允许的正式项目文件中完成实现、重启和运行时验证。不得把“已授权”或沙盒 Demo 当作代码已落地。', 'implement');
   }
   if (action === 'open_gate3') return step('validate-gate3-delivery-evidence', '核验 Gate 3 交付证据并登记最终交付', ['industry-benchmark-evidence.json', 'Gate 3 delivery evidence'], '以 open_gate3 重新运行 Gate 3 机器校验；只有通过才登记最终交付。失败仅报告受控验证实际缺口，不得返回泛化的继续提示。');
-  if (action === 'pass_proof') return step('pass-controlled-proof-gate', '登记受控验证生成的 Proof Gate 证据', ['evidence/proof-*.json', 'Proof Gate passed evidence'], '仅使用本次 verify 受控操作回执绑定的证明文件执行 pass-proof 转换；通过后重新读取 Router，若仍缺行业基准复核则自动回到 verify，不得向用户追加确认。');
+  if (action === 'pass_proof') return step('pass-controlled-proof-gate', '登记受控验证生成的 Proof Gate 证据', ['Proof Gate passed evidence'], '使用当前 Run 中由成功 verify 操作生成且哈希未变、包含非空 evidence 的 passed 证据执行 pass-proof；例如前端实施审计生成的 evidence/implementation-audit.json。通过后重新读取 Router，若仍缺行业基准复核则自动回到 verify，不得向用户追加确认。');
   if (action === 'repair_visual_source_identity') return step('restore-approved-visual-plan-after-package-identity-repair', '恢复已批准视觉方案并继续运行时 Demo 链路', ['repairs/visual-source-identity-*.json'], '仅当已批准方案与重建方案逐字段一致，且差异严格限于受控的运行时包名标准化（Apache ECharts -> echarts）时，才恢复原确认。不得重展示视觉方案、不得要求用户重新确认。');
   if (action === 'revoke_visual') return step('reopen-incomplete-existing-visual-plan', '撤销来源或页面骨架不完整的视觉方案并重建', ['visual-execution-plan.json', 'visual-plan-presentation.md'], '当前视觉方案缺少每个可视节点必需的已确认来源绑定，或 Existing 页面骨架映射不完整；通过受控 revoke-stitch 转换撤销无效方案，随后自动重编译完整十节方案并仅呈现“确认视觉方案”。这是内部契约修复，不是用户确认或 Demo 失败。');
   return null;

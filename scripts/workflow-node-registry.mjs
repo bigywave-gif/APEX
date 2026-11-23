@@ -89,7 +89,7 @@ export const workflowNodes = Object.freeze({
   'run-controlled-verification': node('verify', ['verification-bundle.json'], actionScript('verification-orchestrator.mjs')),
   'seal-verification-evidence': node('record_context', ['evidence-provenance.json'], actionScript('evidence-provenance.mjs')),
   'compile-evidence-bound-industry-review': node('verify', ['industry-benchmark-evidence.json'], actionScript('industry-benchmark.mjs')),
-  'pass-controlled-proof-gate': node('pass_proof', ['evidence/proof-*.json', 'Proof Gate passed evidence'], routerCommand('transition pass-proof')),
+  'pass-controlled-proof-gate': node('pass_proof', ['Proof Gate passed evidence'], routerCommand('transition pass-proof')),
   'validate-gate3-delivery-evidence': node('open_gate3', ['Gate 3 delivery evidence'], routerCommand('transition open-gate3'))
 });
 

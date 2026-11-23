@@ -152,6 +152,7 @@ Gate 3 前，浏览器规格可在 screen 中声明 `motionSamples: [{ id, times
     node scripts/apex-router.mjs authorize <project-root> <run-id> <session-id> pass_proof
     node scripts/apex-router.mjs transition <project-root> <run-id> <session-id> <authorization-ref> pass-proof <evidence-path>
     `pass-proof` 只接受本 run 内、由成功 `verify` 受控操作输出且其 `outputFileHashes` 与当前文件哈希相同的 `passed` 证据；手填 JSON、旧回执或后写同路径文件均不能通过。
+    前端实施审计的 `evidence/implementation-audit.json` 在满足上述条件且 `evidence` 非空时可作为 Proof 输入；验证汇总不会自动生成 `proof-*.json`。
 
     node scripts/apex-router.mjs authorize <project-root> <run-id> <session-id> open_gate3
     node scripts/apex-router.mjs transition <project-root> <run-id> <session-id> <authorization-ref> open-gate3
