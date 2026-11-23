@@ -27,19 +27,31 @@ export async function observeHttpCases(origin, cases) {
   const samples = [], prepared = [];
   for (const item of cases) {
     if (!item || item.method !== 'GET' || typeof item.path !== 'string' || !item.path.startsWith('/') || item.path.startsWith('//') || typeof item.route !== 'string' || !item.route.startsWith('/') || item.route.startsWith('//') || item.route.includes('\\') || !Number.isInteger(item.expectedStatus) || item.expectedStatus < 100 || item.expectedStatus > 599 || !('request' in item)) throw new Error('invalid API observation case');
+    let bearer = null;
+    if (item.auth !== undefined) {
+      if (!item.auth || Object.keys(item.auth).length !== 1 || !/^[A-Z_][A-Z0-9_]{0,127}$/.test(item.auth.bearerEnv || '')) throw new Error('invalid API authentication configuration');
+      bearer = process.env[item.auth.bearerEnv];
+      if (typeof bearer !== 'string' || !bearer.trim() || /[\r\n]/.test(bearer)) throw new Error('API authentication environment variable is missing or invalid');
+      if (JSON.stringify(item).includes(bearer)) throw new Error('API case must not contain authentication secret');
+    }
     const target = new URL(item.route, origin);
     if (target.origin !== origin || target.username || target.password || target.hash) throw new Error('API observation route must remain on the runtime origin');
     const body = JSON.stringify(item.request);
     if (body === undefined || Buffer.byteLength(body) > 1024 * 1024) throw new Error('request JSON is invalid or too large');
     if (item.method === 'GET' && body !== '{}') throw new Error('GET request must use an empty JSON object');
-    prepared.push({ item, target, body });
+    prepared.push({ item, target, body, bearer });
   }
-  for (const { item, target, body } of prepared) {
-    const response = await fetch(target, { method: item.method, redirect: 'manual', signal: AbortSignal.timeout(10000), ...(item.method === 'GET' ? {} : { headers: { 'content-type': 'application/json' }, body }) });
+  const secrets = prepared.map(entry => entry.bearer).filter(Boolean);
+  if (secrets.some(secret => JSON.stringify(cases).includes(secret))) throw new Error('API cases must not contain authentication secrets');
+  for (const { item, target, bearer } of prepared) {
+    const response = await fetch(target, { method: item.method, redirect: 'manual', signal: AbortSignal.timeout(10000), ...(bearer ? { headers: { authorization: `Bearer ${bearer}` } } : {}) });
     if (response.status !== item.expectedStatus) throw new Error(`API response status ${response.status} does not match ${item.expectedStatus}`);
     const responseText = await response.text();
+    if (secrets.some(secret => responseText.includes(secret))) throw new Error('API response contains the authentication secret');
     if (Buffer.byteLength(responseText) > 1024 * 1024) throw new Error('response JSON is too large');
     let responseBody; try { responseBody = JSON.parse(responseText); } catch { throw new Error('API response is not JSON'); }
+    const containsSecret = value => typeof value === 'string' ? secrets.some(secret => value.includes(secret)) : Array.isArray(value) ? value.some(containsSecret) : value && typeof value === 'object' ? Object.entries(value).some(([key, child]) => containsSecret(key) || containsSecret(child)) : false;
+    if (containsSecret(responseBody)) throw new Error('API response contains the authentication secret');
     samples.push({ method: item.method, path: item.path, request: item.request, response: responseBody });
   }
   return samples;

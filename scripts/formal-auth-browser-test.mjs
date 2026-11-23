@@ -9,8 +9,8 @@ import { apiObservationCurrent } from './api-http-observation.mjs';
 const apex = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-formal-auth-'));
 const runId = 'auth', session = 'auth-session', runDir = path.join(project, '.apex/runs', runId);
-const user = 'apex-fixture-user-9281', password = 'apex-fixture-password-7634';
-const env = { ...process.env, APEX_AUTH_FIXTURE_USER: user, APEX_AUTH_FIXTURE_PASSWORD: password, APEX_AUTH_WRONG_PASSWORD: 'apex-incorrect-password-5247' };
+const user = 'apex-fixture-user-9281', password = 'apex-fixture-password-7634', apiToken = 'apex-api-token-5827';
+const env = { ...process.env, APEX_AUTH_FIXTURE_USER: user, APEX_AUTH_FIXTURE_PASSWORD: password, APEX_API_FIXTURE_TOKEN: apiToken, APEX_AUTH_WRONG_PASSWORD: 'apex-incorrect-password-5247' };
 const run = (script, args) => { const result = spawnSync(process.execPath, [path.join(apex, 'scripts', script), ...args], { encoding: 'utf8', env, timeout: 180000, maxBuffer: 4 * 1024 * 1024 }); if (result.status !== 0) throw new Error(`${script}: ${result.stderr || result.stdout}`); return JSON.parse(result.stdout); };
 const serverCode = `
 const http=require('http'),fs=require('fs');let logins=0;
@@ -20,7 +20,7 @@ if(document.cookie.includes('session=ok')){login.hidden=true;ready.hidden=false}
 login.addEventListener('submit',async e=>{e.preventDefault();const r=await fetch('/login',{method:'POST',body:JSON.stringify({username:document.querySelector('#user').value,password:document.querySelector('#pass').value})});document.querySelector('#user').value='';document.querySelector('#pass').value='';if(r.ok){login.hidden=true;ready.hidden=false}});
 document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=String(Number(document.querySelector('#count').textContent)+1);
 </script></body></html>\`;
-const handler=(req,res)=>{if(req.url==='/api/fixture'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return}if(req.url==='/count'){res.end(String(logins));return}if(req.url==='/redirect'){res.writeHead(302,{location:'http://127.0.0.1:'+other.address().port+'/'});res.end();return}if(req.url==='/login'){let b='';req.on('data',c=>b+=c);req.on('end',()=>{const d=JSON.parse(b);if(d.username===process.env.APEX_AUTH_FIXTURE_USER&&d.password===process.env.APEX_AUTH_FIXTURE_PASSWORD){logins++;res.writeHead(200,{'Set-Cookie':'session=ok; Path=/; SameSite=Lax'});res.end('ok')}else{res.writeHead(401);res.end('bad')}});return}res.writeHead(200,{'content-type':'text/html'});res.end(html)};const server=http.createServer(handler),other=http.createServer(handler);other.listen(0,'127.0.0.1',()=>server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port))));`;
+const handler=(req,res)=>{if(req.url==='/api/fixture'){if(req.headers.authorization!=='Bearer '+process.env.APEX_API_FIXTURE_TOKEN){res.writeHead(401);res.end();return}res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return}if(req.url==='/count'){res.end(String(logins));return}if(req.url==='/redirect'){res.writeHead(302,{location:'http://127.0.0.1:'+other.address().port+'/'});res.end();return}if(req.url==='/login'){let b='';req.on('data',c=>b+=c);req.on('end',()=>{const d=JSON.parse(b);if(d.username===process.env.APEX_AUTH_FIXTURE_USER&&d.password===process.env.APEX_AUTH_FIXTURE_PASSWORD){logins++;res.writeHead(200,{'Set-Cookie':'session=ok; Path=/; SameSite=Lax'});res.end('ok')}else{res.writeHead(401);res.end('bad')}});return}res.writeHead(200,{'content-type':'text/html'});res.end(html)};const server=http.createServer(handler),other=http.createServer(handler);other.listen(0,'127.0.0.1',()=>server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port))));`;
 let server;
 try {
   const portFile = path.join(project, 'port'); server = spawn(process.execPath, ['-e', serverCode, portFile], { env, stdio: 'ignore' });
@@ -39,7 +39,7 @@ try {
   run('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'verify', 'browser-capture.mjs', 'capture', runDir, url, specFile]);
   const capture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
   assert.equal(capture.status, 'passed'); assert.equal(capture.evidence[0].sessionClosed, true); assert.equal(capture.formalInteractions?.journeys?.[0]?.steps?.[0]?.after, '1');
-  const casesFile = path.join(runDir, 'api-cases.json'); fs.writeFileSync(casesFile, JSON.stringify({cases:[{method:'GET',path:'/api/fixture',route:'/api/fixture',request:{},expectedStatus:200}]}));
+  const casesFile = path.join(runDir, 'api-cases.json'); fs.writeFileSync(casesFile, JSON.stringify({cases:[{method:'GET',path:'/api/fixture',route:'/api/fixture',request:{},expectedStatus:200,auth:{bearerEnv:'APEX_API_FIXTURE_TOKEN'}}]}));
   const apiAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
   run('apex-action.mjs', ['run', project, runId, session, apiAuth.authorizationRef, 'verify', 'api-contract-capture.mjs', 'capture', runDir, casesFile]);
   const observedState = JSON.parse(fs.readFileSync(stateFile));
@@ -47,9 +47,9 @@ try {
   const contractAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
   run('apex-action.mjs', ['run', project, runId, session, contractAuth.authorizationRef, 'verify', 'contract-verifier.mjs', 'verify', runDir, path.join(runDir, 'evidence/api-observed-samples.json')]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/contract-verification.json'))).status, 'passed');
-  fs.appendFileSync(casesFile, ' '); assert.equal(apiObservationCurrent(runDir, observedState, project, 'evidence/api-observed-samples.json'), false, 'changed cases must invalidate the observation'); fs.writeFileSync(casesFile, JSON.stringify({cases:[{method:'GET',path:'/api/fixture',route:'/api/fixture',request:{},expectedStatus:200}]}));
+  fs.appendFileSync(casesFile, ' '); assert.equal(apiObservationCurrent(runDir, observedState, project, 'evidence/api-observed-samples.json'), false, 'changed cases must invalidate the observation'); fs.writeFileSync(casesFile, JSON.stringify({cases:[{method:'GET',path:'/api/fixture',route:'/api/fixture',request:{},expectedStatus:200,auth:{bearerEnv:'APEX_API_FIXTURE_TOKEN'}}]}));
   assert.ok(Number(await (await fetch(new URL('/count', url), { headers: { connection: 'close' } })).text()) >= 2, 'screen and formal journey must authenticate independently');
-  const visit = dir => { if (!fs.existsSync(dir)) return; for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) visit(file); else if (/\.(?:json|html|ndjson)$/.test(file)) { const content = fs.readFileSync(file, 'utf8'); assert.ok(!content.includes(user) && !content.includes(password) && !content.includes(env.APEX_AUTH_WRONG_PASSWORD), `fixture credential leaked into ${path.relative(runDir, file)}`); } } };
+  const visit = dir => { if (!fs.existsSync(dir)) return; for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) visit(file); else if (/\.(?:json|html|ndjson)$/.test(file)) { const content = fs.readFileSync(file, 'utf8'); assert.ok(!content.includes(user) && !content.includes(password) && !content.includes(apiToken) && !content.includes(env.APEX_AUTH_WRONG_PASSWORD), `fixture credential leaked into ${path.relative(runDir, file)}`); } } };
   visit(path.join(runDir, 'evidence')); visit(path.join(runDir, 'operations'));
   spec.authentication.passwordEnv = 'APEX_AUTH_WRONG_PASSWORD';
   const failedSpecFile = path.join(runDir, 'auth-failure-spec.json'); fs.writeFileSync(failedSpecFile, JSON.stringify(spec));
