@@ -123,13 +123,18 @@ try {
     }
     const customControlFile = path.join(runDir, 'visual-sandbox/control-audit-fixture.html');
     try {
-      fs.writeFileSync(customControlFile, '<!doctype html><meta charset="utf-8"><p id="notice">交互预览 · 示例数据</p><div id="custom-radio" role="radio" tabindex="0" aria-checked="false" onclick="this.setAttribute(\'aria-checked\',\'true\')">选择</div><div id="custom-slider" role="slider" tabindex="0">滑块</div><div aria-disabled="true"><button id="disabled-control">不可用</button></div>');
+      fs.writeFileSync(customControlFile, '<!doctype html><meta charset="utf-8"><p id="notice">交互预览 · 示例数据</p><div id="custom-radio" role="radio" tabindex="0" aria-checked="false" onclick="this.setAttribute(\'aria-checked\',\'true\')">选择</div><div id="custom-slider" role="slider" tabindex="0">滑块</div><div aria-disabled="true"><button id="disabled-control">不可用</button></div><p id="swap-result">before</p><button id="swap" onclick="document.querySelector(\'#swap-result\').textContent=\'after\';this.outerHTML=\'<input id=&quot;swap&quot;>\'">替换</button>');
       const customJourney = { id: 'sample-custom-control', route: '/control-audit-fixture.html', steps: [{ action: 'click', selector: '#custom-radio', before: { selector: '#custom-radio', property: 'attribute', attribute: 'aria-checked', equals: 'false' }, after: { selector: '#custom-radio', property: 'attribute', attribute: 'aria-checked', equals: 'true' } }] };
       const result = cliCall(['run-code', journeyCode({ journey: customJourney, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/sample-custom-control.png') })]);
       const match = result.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
       let trace = match && JSON.parse(match[1]); if (typeof trace === 'string') trace = JSON.parse(trace);
       const keys = (trace?.observedControls || []).map(item => item.key);
       if (result.status !== 0 || trace?.status !== 'passed' || !keys.includes('route:%2Fcontrol-audit-fixture.html|id:custom-radio') || !keys.includes('route:%2Fcontrol-audit-fixture.html|id:custom-slider') || keys.includes('route:%2Fcontrol-audit-fixture.html|id:disabled-control') || !trace.exercisedControls.includes('route:%2Fcontrol-audit-fixture.html|id:custom-radio')) throw new Error('custom controls or disabled ancestors were misclassified');
+      const swapJourney = { id: 'sample-identity-conflict', route: '/control-audit-fixture.html', steps: [{ action: 'click', selector: '#swap', before: { selector: '#swap-result', property: 'text', equals: 'before' }, after: { selector: '#swap-result', property: 'text', equals: 'after' } }] };
+      const swap = cliCall(['run-code', journeyCode({ journey: swapJourney, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/sample-identity-conflict.png') })]);
+      const swapMatch = swap.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
+      let swapTrace = swapMatch && JSON.parse(swapMatch[1]); if (typeof swapTrace === 'string') swapTrace = JSON.parse(swapTrace);
+      if (swap.status !== 0 || swapTrace?.status !== 'passed' || !swapTrace.controlIdentityConflicts.includes('route:%2Fcontrol-audit-fixture.html|id:swap')) throw new Error('browser must report a changed control type under the same identity');
     } finally { fs.rmSync(customControlFile, { force: true }); }
     const routeJourney = { ...demoContract.journeys[0], route: '/?variant=other' };
     const routeResult = cliCall(['run-code', journeyCode({ journey: routeJourney, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/sample-other-route.png') })]);

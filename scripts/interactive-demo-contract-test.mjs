@@ -27,7 +27,7 @@ try {
   assert.equal(verified.controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
   assert.deepEqual(verified.controlCoverage.testedActions.map(item => item.selector), ['#increment', '#increment', '#reset']); checks++;
   const inventoried = structuredClone(capture);
-  for (const journey of inventoried.interactiveDemo.journeys) { journey.controlInventoryVersion = '1.1'; journey.observedControls = [{ key: 'id:increment', tag: 'button' }, { key: 'id:settings', tag: 'button' }]; journey.exercisedControls = ['id:increment']; journey.controlInventoryTruncated = false; }
+  for (const journey of inventoried.interactiveDemo.journeys) { journey.controlInventoryVersion = '1.2'; journey.observedControls = [{ key: 'id:increment', tag: 'button' }, { key: 'id:settings', tag: 'button' }]; journey.exercisedControls = ['id:increment']; journey.controlIdentityConflicts = []; journey.controlInventoryTruncated = false; }
   const coverage = verifyDemoInteractions(runDir, inventoried, url).controlCoverage;
   assert.equal(coverage.scope, 'observed-journey-states-only'); checks++;
   assert.deepEqual(coverage.untestedControls.map(item => item.key), ['id:settings']); checks++;
@@ -37,11 +37,20 @@ try {
   assert.equal(observedControlCoverageStatus(verified.controlCoverage).ready, false); checks++;
   assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }, { requireScreens: true }).ready, false); checks++;
   const screenCapture = structuredClone(inventoried);
-  screenCapture.evidence = [{ url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', controlInventory: { version: '1.1', status: 'captured', url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', observedControls: [{ key: 'route:%2Fsettings|id:save', tag: 'button' }], truncated: false } }];
+  screenCapture.evidence = [{ url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', controlInventory: { version: '1.2', status: 'captured', url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', observedControls: [{ key: 'route:%2Fsettings|id:save', tag: 'button' }], identityConflicts: [], truncated: false } }];
   const screenCoverage = verifyDemoInteractions(runDir, screenCapture, url).controlCoverage;
   assert.equal(screenCoverage.scope, 'observed-screens-and-journeys'); checks++;
   assert.ok(screenCoverage.untestedControls.some(item => item.key === 'route:%2Fsettings|id:save')); checks++;
   assert.equal(observedControlCoverageStatus(screenCoverage, { requireScreens: true }).ready, false); checks++;
+  const conflicting = structuredClone(screenCapture);
+  conflicting.evidence[0].controlInventory.observedControls.push({ key: 'id:increment', tag: 'input' });
+  const conflictCoverage = verifyDemoInteractions(runDir, conflicting, url).controlCoverage;
+  assert.deepEqual(conflictCoverage.identityConflicts, ['id:increment']); checks++;
+  assert.equal(observedControlCoverageStatus({ ...conflictCoverage, untestedControls: [] }).reason, 'browser control identity is ambiguous'); checks++;
+  const withinJourney = structuredClone(screenCapture); withinJourney.interactiveDemo.journeys[0].controlIdentityConflicts = ['id:increment'];
+  assert.equal(observedControlCoverageStatus(verifyDemoInteractions(runDir, withinJourney, url).controlCoverage).reason, 'browser control identity is ambiguous'); checks++;
+  const priorInventory = structuredClone(screenCapture); priorInventory.interactiveDemo.journeys[0].controlInventoryVersion = '1.1';
+  assert.equal(observedControlCoverageStatus(verifyDemoInteractions(runDir, priorInventory, url).controlCoverage, { requireScreens: true }).ready, false); checks++;
   const oldInventory = structuredClone(inventoried); delete oldInventory.interactiveDemo.journeys[0].controlInventoryVersion;
   assert.equal(verifyDemoInteractions(runDir, oldInventory, url).controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
   const shared = { scope: 'observed-journey-states-only', truncated: false, observedControls: [{ key: 'route:/|id:home', tag: 'button', role: null, type: 'button' }, { key: 'route:/settings|id:home', tag: 'button', role: null, type: 'button' }], exercisedControls: ['route:/|id:home'], untestedControls: [{ key: 'route:/settings|id:home' }], sharedControlReviews: [{ key: 'route:/settings|id:home', equivalentTo: 'route:/|id:home', rationale: '同一导航组件在两个路由保持相同行为' }] };

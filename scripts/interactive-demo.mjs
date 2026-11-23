@@ -11,6 +11,7 @@ const assert = (value, message) => { if (!value) throw new Error(`Interactive De
 export function observedControlCoverageStatus(coverage, { requireScreens = false } = {}) {
   if (!['observed-journey-states-only', 'observed-screens-and-journeys'].includes(coverage?.scope) || (requireScreens && coverage.scope !== 'observed-screens-and-journeys') || !Array.isArray(coverage.untestedControls) || typeof coverage.truncated !== 'boolean') return { ready: false, reason: 'browser control inventory is missing', controls: [] };
   if (coverage.truncated) return { ready: false, reason: 'browser control inventory was truncated', controls: [] };
+  if (coverage.identityConflicts?.length) return { ready: false, reason: 'browser control identity is ambiguous', controls: coverage.identityConflicts };
   const exemptions = coverage.sharedControlReviews || [];
   if (!Array.isArray(exemptions)) return { ready: false, reason: 'shared control review is invalid', controls: [] };
   const observed = new Map((coverage.observedControls || []).map(item => [item.key, item]));
@@ -106,23 +107,25 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     for (const ref of [actual.screenshot, actual.dom]) assert(ref && demoHash(fs.readFileSync(localFile(runDir, ref.path))) === ref.sha256, `missing or changed browser artifact: ${expected.id}`);
   }
   const testedActions = source.contract.journeys.flatMap(journey => journey.steps.map(step => ({ journeyId: journey.id, selector: step.selector, action: step.action })));
-  const inventoryAvailable = evidence.journeys.every(journey => journey.controlInventoryVersion === '1.1' && Array.isArray(journey.observedControls) && Array.isArray(journey.exercisedControls) && typeof journey.controlInventoryTruncated === 'boolean');
-  const observed = new Map(), exercised = new Set();
+  const inventoryAvailable = evidence.journeys.every(journey => journey.controlInventoryVersion === '1.2' && Array.isArray(journey.observedControls) && Array.isArray(journey.exercisedControls) && Array.isArray(journey.controlIdentityConflicts) && typeof journey.controlInventoryTruncated === 'boolean');
+  const observed = new Map(), exercised = new Set(), identityConflicts = new Set();
+  const addObserved = control => { assert(nonempty(control?.key), 'invalid observed control identity'); const old = observed.get(control.key); if (old && ['tag', 'role', 'type'].some(field => (old[field] ?? null) !== (control[field] ?? null))) identityConflicts.add(control.key); observed.set(control.key, control); };
   if (inventoryAvailable) for (const journey of evidence.journeys) {
-    for (const control of journey.observedControls) { assert(nonempty(control?.key), 'invalid observed control identity'); observed.set(control.key, control); }
+    for (const control of journey.observedControls) addObserved(control);
+    for (const key of journey.controlIdentityConflicts) { assert(nonempty(key), 'invalid control identity conflict'); identityConflicts.add(key); }
     for (const key of journey.exercisedControls) { assert(nonempty(key), 'invalid exercised control identity'); exercised.add(key); }
   }
   const screens = Array.isArray(capture.evidence) ? capture.evidence : [];
-  const screenInventoryAvailable = screens.length > 0 && screens.every(screen => screen.controlInventory?.version === '1.1' && screen.controlInventory.status === 'captured' && Array.isArray(screen.controlInventory.observedControls) && typeof screen.controlInventory.truncated === 'boolean' && screen.controlInventory.url === screen.url && screen.controlInventory.viewport === screen.viewport);
-  if (inventoryAvailable && screenInventoryAvailable) for (const screen of screens) for (const control of screen.controlInventory.observedControls) { assert(nonempty(control?.key), 'invalid screen control identity'); observed.set(control.key, control); }
-  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: screenInventoryAvailable ? 'observed-screens-and-journeys' : 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), sharedControlReviews: source.contract.sharedControlReviews || [], truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated) || (screenInventoryAvailable && screens.some(screen => screen.controlInventory.truncated)), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
+  const screenInventoryAvailable = screens.length > 0 && screens.every(screen => screen.controlInventory?.version === '1.2' && screen.controlInventory.status === 'captured' && Array.isArray(screen.controlInventory.observedControls) && Array.isArray(screen.controlInventory.identityConflicts) && typeof screen.controlInventory.truncated === 'boolean' && screen.controlInventory.url === screen.url && screen.controlInventory.viewport === screen.viewport);
+  if (inventoryAvailable && screenInventoryAvailable) for (const screen of screens) { for (const control of screen.controlInventory.observedControls) addObserved(control); for (const key of screen.controlInventory.identityConflicts) { assert(nonempty(key), 'invalid control identity conflict'); identityConflicts.add(key); } }
+  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: screenInventoryAvailable ? 'observed-screens-and-journeys' : 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), identityConflicts: [...identityConflicts], sharedControlReviews: source.contract.sharedControlReviews || [], truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated) || (screenInventoryAvailable && screens.some(screen => screen.controlInventory.truncated)), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
 }
 
 // This function is serialized into Playwright CLI run-code. It has no closure
 // dependencies; UI actions and assertions execute in the real browser.
 export async function runDemoJourney(page, input) {
   const { journey, url, notice, screenshotPath } = input;
-  const blockedRequests = [], steps = [], controls = new Map(), exercisedControls = new Set();
+  const blockedRequests = [], steps = [], controls = new Map(), exercisedControls = new Set(), identityConflicts = new Set();
   let controlInventoryTruncated = false;
   const controlInventoryLimit = input.controlInventoryLimit ?? 500;
   if (!Number.isInteger(controlInventoryLimit) || controlInventoryLimit < 1 || controlInventoryLimit > 5000) throw new Error('control inventory limit must be an integer between 1 and 5000');
@@ -148,11 +151,11 @@ export async function runDemoJourney(page, input) {
   const collectControls = async () => {
     const items = await page.locator(controlSelector).evaluateAll(describeControls);
     if (items.length > controlInventoryLimit) controlInventoryTruncated = true;
-    for (const item of items.slice(0, controlInventoryLimit)) { if (controls.size >= controlInventoryLimit && !controls.has(item.key)) { controlInventoryTruncated = true; continue; } controls.set(item.key, item); }
+    for (const item of items.slice(0, controlInventoryLimit)) { if (controls.size >= controlInventoryLimit && !controls.has(item.key)) { controlInventoryTruncated = true; continue; } const old = controls.get(item.key); if (old && ['tag', 'role', 'type'].some(field => old[field] !== item[field])) identityConflicts.add(item.key); controls.set(item.key, item); }
   };
   if (input.inventoryOnly) {
-    try { await collectControls(); const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })); return { version: '1.1', status: 'captured', url: page.url(), viewport: `${viewport.width}x${viewport.height}`, observedControls: [...controls.values()], limit: controlInventoryLimit, truncated: controlInventoryTruncated }; }
-    catch (cause) { return { version: '1.1', status: 'failed', error: cause.message }; }
+    try { await collectControls(); const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })); return { version: '1.2', status: 'captured', url: page.url(), viewport: `${viewport.width}x${viewport.height}`, observedControls: [...controls.values()], identityConflicts: [...identityConflicts], limit: controlInventoryLimit, truncated: controlInventoryTruncated }; }
+    catch (cause) { return { version: '1.2', status: 'failed', error: cause.message }; }
   }
   const origin = new URL(url).origin;
   const guard = async route => {
@@ -204,7 +207,7 @@ export async function runDemoJourney(page, input) {
   catch (cause) { error ||= cause.message; }
   finally { await page.unroute('**/*', guard); }
   const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, controlInventoryVersion: '1.1', observedControls: [...controls.values()], exercisedControls: [...exercisedControls], controlInventoryTruncated, error, html };
+  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, controlInventoryVersion: '1.2', observedControls: [...controls.values()], exercisedControls: [...exercisedControls], controlIdentityConflicts: [...identityConflicts], controlInventoryTruncated, error, html };
 }
 
 export function journeyCode(input) {
