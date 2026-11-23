@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { appendLedgerEvent, archiveArtifacts, commitRunState, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
 import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
+import { inspectRunningOperations, markInterruptedOperations } from './operation-recovery.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -47,46 +48,15 @@ function archivedReferenceExists(runDir, reference) {
   return visit(root);
 }
 
-function recoverInterruptedOperations(runDir) {
-  const directory = path.join(runDir, 'operations');
-  if (!fs.existsSync(directory)) return [];
-  // Recovery itself is run through apex-action. Its durable receipt is
-  // intentionally `running` while this function executes and must never be
-  // reclassified as an interrupted predecessor.
-  const activeReceiptRef = process.env.APEX_ROUTER_OPERATION_RECEIPT || '';
-  const activeReceipt = activeReceiptRef
-    ? path.resolve(runDir, activeReceiptRef)
-    : null;
-  const interrupted = [];
-  for (const entry of fs.readdirSync(directory)) {
-    if (!entry.endsWith('.json')) continue;
-    const file = path.join(directory, entry);
-    if (activeReceipt && path.resolve(file) === activeReceipt) continue;
-    let receipt;
-    try { receipt = read(file); } catch { continue; }
-    if (receipt.status !== 'running') continue;
-    receipt.status = 'interrupted';
-    receipt.finishedAt = new Date().toISOString();
-    receipt.recovery = { kind: 'interrupted-operation', recoveredAt: receipt.finishedAt, retryRequires: 'new-router-authorization-and-observed-cause-change' };
-    receipt.stderr = `${receipt.stderr || ''}operation was interrupted before completion; it was not treated as successful\n`;
-    fs.writeFileSync(file, `${JSON.stringify(receipt, null, 2)}\n`);
-    interrupted.push(path.relative(runDir, file));
-  }
-  if (interrupted.length) {
-    const indexFile = path.join(runDir, 'operations-index.json');
-    if (fs.existsSync(indexFile)) {
-      const index = read(indexFile);
-      for (const relative of interrupted) if (index.receipts?.[relative]) index.receipts[relative].status = 'interrupted';
-      fs.writeFileSync(indexFile, `${JSON.stringify(index, null, 2)}\n`);
-    }
-  }
-  return interrupted;
-}
-
 const runDir = path.resolve(process.argv[2] || '.');
 try { requireRouterAction(runDir, 'recover'); } catch (error) { die(error.message); }
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 const state = readRunState(runDir);
+const operationInspection = inspectRunningOperations(runDir, process.env.APEX_ROUTER_OPERATION_RECEIPT || '');
+if (operationInspection.deferred.length) {
+  console.log(JSON.stringify({ status: 'waiting', deferredOperations: operationInspection.deferred, note: 'Existing operations may still be running or cannot be verified; no interrupted status or remote outcome was inferred.' }));
+  process.exit(0);
+}
 let implementationSealRecovery = null;
 if (state.roleChain?.confirmationModel === 'two-confirmations' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed) {
   const evidence = (state.gates.gate2.evidence || []).find(ref => typeof ref === 'string' && /^machine-seals\/implementation-[a-f0-9]{64}\.json$/.test(ref));
@@ -103,7 +73,7 @@ if (state.roleChain?.confirmationModel === 'two-confirmations' && state.gates?.g
     if (implementationSealRecovery.status !== 'recovered') die(`implementation seal recovery refused: ${implementationSealRecovery.reason}`);
   }
 }
-const interruptedOperations = recoverInterruptedOperations(runDir);
+const interruptedOperations = markInterruptedOperations(runDir, operationInspection.interrupted);
 const recoveredAgentJobs = recoverAgentJobs(runDir);
 // A guarded compiler may reject a newly corrected input before it can emit a
 // replacement receipt.  The old input registration then has an intentionally

@@ -4,6 +4,7 @@ import { canonicalApexRoot, isCanonicalApexRoot } from './apex-paths.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readRunState, recordArtifact, agentRuntimeStatus, visualSkillLoads } from './run-ledger.mjs';
@@ -234,7 +235,7 @@ const operationKey = digest({ runId, action, script, fingerprint, stateHash, inp
 const priorFailure = failedOperationWithSameKey(operationKey);
 if (priorFailure) fail(`an identical controlled operation already failed (${priorFailure}); change the observed cause, state, or input before requesting another retry`);
 const startedAt = new Date().toISOString();
-fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, status: 'running', startedAt }, null, 2)}\n`, { flag: 'wx' });
+fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
 const execution = await runControlledSubprocess(process.execPath, [target, ...scriptArgs], {
   timeoutMs: executionTimeoutMs, runDir: runDirectory,
   env: { ...process.env, APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: authorizationRef, APEX_ROUTER_ACTION: action, APEX_ROUTER_OPERATION_RECEIPT: path.relative(runDirectory, receiptFile) }

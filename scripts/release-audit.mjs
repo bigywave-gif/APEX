@@ -119,6 +119,7 @@ for (const [name, script] of [
   ['run-ledger-init-race', 'run-ledger-init-race-test.mjs'],
   ['cancelled-operation-finalizer', 'cancelled-operation-finalizer-test.mjs'],
   ['controlled-subprocess', 'controlled-subprocess-test.mjs'],
+  ['operation-recovery', 'operation-recovery-test.mjs'],
   ...(process.platform === 'win32' ? [] : [['cancelled-action-race', 'cancelled-action-race-test.mjs']]),
   ['agent-attempt-usage-contract', 'agent-attempt-usage-test.mjs'],
   ['release-version-cache-contract', 'release-version-cache-test.mjs'],

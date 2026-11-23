@@ -18,7 +18,18 @@ try {
   let out='',err='';processChild.stdout.on('data',x=>out+=x);processChild.stderr.on('data',x=>err+=x);
   const ended=new Promise(resolve=>processChild.on('close',code=>resolve(code)));
   const writer=await Promise.race([new Promise((resolve,reject)=>fs.open(pipe,'w',(error,fd)=>error?reject(error):resolve(fd))),new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('project intake did not open the fixture pipe')),15000)),ended.then(code=>{throw new Error(`action ended before pipe opened: ${code} ${err}`)})]);clearTimeout(timer);
-  if(process.env.APEX_TEST_MONITOR_LOSS==='1') {
+  if(process.env.APEX_TEST_RECOVERY_LIVE==='1') {
+    const recoverAuth=route(['authorize',project,run,session,'recover']);
+    const recovery=spawnSync(process.execPath,[action,'run',project,run,session,recoverAuth.authorizationRef,'recover','apex-recover.mjs',dir],{encoding:'utf8',timeout:30000});
+    assert.equal(recovery.status,0,recovery.stderr||recovery.stdout);
+    const result=JSON.parse(recovery.stdout);assert.equal(result.status,'waiting');assert.ok(result.deferredOperations.some(item=>item.reason==='gateway-live'));
+    const receipts=fs.readdirSync(path.join(dir,'operations')).filter(name=>name.endsWith('.json')).map(name=>JSON.parse(fs.readFileSync(path.join(dir,'operations',name),'utf8')));
+    assert.ok(receipts.some(item=>item.action==='collect_existing_baseline'&&item.status==='running'));
+    fs.writeSync(writer,'{}');fs.closeSync(writer);
+    const code=await Promise.race([ended,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('live operation did not finish')),10000))]);clearTimeout(timer);
+    assert.equal(code,0,err||out);
+    console.log(JSON.stringify({status:'passed',scope:'recovery waits for a real live gateway'}));
+  } else if(process.env.APEX_TEST_MONITOR_LOSS==='1') {
     const ledger=path.join(dir,'run-ledger.sqlite'), backup=path.join(dir,'ledger-original.sqlite');
     fs.renameSync(ledger,backup);
     const code=await Promise.race([ended,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('unmonitored local tool did not stop')),12000))]);clearTimeout(timer);fs.closeSync(writer);
@@ -40,6 +51,8 @@ try {
   assert.equal(fs.existsSync(path.join(dir,'project-inventory.json')),false,'cancelled child must not resume and create a late artifact');
   const monitorTest=spawnSync(process.execPath,[fileURLToPath(import.meta.url)],{encoding:'utf8',timeout:25000,env:{...process.env,APEX_TEST_MONITOR_LOSS:'1'}});
   assert.equal(monitorTest.status,0,monitorTest.stderr||monitorTest.stdout);
+  const liveRecoveryTest=spawnSync(process.execPath,[fileURLToPath(import.meta.url)],{encoding:'utf8',timeout:30000,env:{...process.env,APEX_TEST_RECOVERY_LIVE:'1'}});
+  assert.equal(liveRecoveryTest.status,0,liveRecoveryTest.stderr||liveRecoveryTest.stdout);
   console.log(JSON.stringify({status:'passed',scope:'real concurrent controlled operation and cancellation; no external calls',lateFiles:fs.readdirSync(dir).filter(x=>!['state.json','events.ndjson','run-ledger.sqlite','run-ledger.sqlite-wal','run-ledger.sqlite-shm','cancellation-receipt.json'].includes(x))}));
   }
 } finally {clearTimeout(timer);if(processChild&&!processChild.killed)processChild.kill('SIGTERM');fs.rmSync(project,{recursive:true,force:true});}
