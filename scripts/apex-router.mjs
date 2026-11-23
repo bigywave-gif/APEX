@@ -1068,7 +1068,9 @@ function artifactFile(runDir, reference) {
   if (!reference || typeof reference !== 'string') return null;
   const root = path.resolve(runDir);
   const file = path.resolve(root, reference);
-  return file.startsWith(`${root}${path.sep}`) && fs.existsSync(file) && fs.statSync(file).isFile() ? file : null;
+  try {
+    return file.startsWith(`${root}${path.sep}`) && fs.realpathSync(file).startsWith(`${fs.realpathSync(root)}${path.sep}`) && fs.statSync(file).isFile() ? file : null;
+  } catch { return null; }
 }
 function changeScopeStatus(runDir, state, reference = null) {
   if (state.track !== 'existing' || !state.artifacts?.changeScope) return { ready: true, reason: null };

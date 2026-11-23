@@ -41,7 +41,14 @@ try {
     const missingAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize missing plan check');
     const missingResult = run(action, ['run', project, 'run-demo-source', 'session-demo-source', missingAuth.authorizationRef, 'generate_visual', 'demo-source-compiler.mjs', 'compile', runDir, missingInput]);
     if (missingResult.status === 0 || !String(missingResult.stderr).includes('current product plan with valid functional tasks is required')) throw new Error('compiler accepted Demo without a product plan');
-  } finally { fs.writeFileSync(strategyPath, strategyBytes); }
+    const outside = path.join(project, 'outside-product-strategy.json'); fs.writeFileSync(outside, strategyBytes); fs.symlinkSync(outside, strategyPath);
+    const escapedStatus = expect(run(router, ['status', project, 'run-demo-source', 'session-demo-source']), 'inspect escaped product plan');
+    if (escapedStatus.executionDirective?.currentStep?.id !== 'restore-product-plan-before-demo' && escapedStatus.nextRequiredAction !== 'recover') throw new Error('Router accepted a product plan outside the Run');
+    const escapeInput = path.join(runDir, 'escape-product-demo-input.json'); fs.copyFileSync(input, escapeInput);
+    const escapeAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize escaped plan check');
+    const escapeResult = run(action, ['run', project, 'run-demo-source', 'session-demo-source', escapeAuth.authorizationRef, 'generate_visual', 'demo-source-compiler.mjs', 'compile', runDir, escapeInput]);
+    if (escapeResult.status === 0) throw new Error('compiler accepted a product plan outside the Run');
+  } finally { if (fs.existsSync(strategyPath)) fs.unlinkSync(strategyPath); fs.writeFileSync(strategyPath, strategyBytes); }
   const compileAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize source compiler');
   expect(run(action, ['run', project, 'run-demo-source', 'session-demo-source', compileAuth.authorizationRef, 'generate_visual', 'demo-source-compiler.mjs', 'compile', runDir, input]), 'compile source manifest');
   const manifest = JSON.parse(fs.readFileSync(path.join(runDir, 'demo-source-manifest.json'), 'utf8'));
@@ -56,5 +63,5 @@ try {
   expect(run(action, ['run', project, 'run-demo-source', 'session-demo-source', chatWrite.authorizationRef, 'generate_visual', 'visual-sandbox-writer.mjs', 'materialize', runDir, path.join(runDir, 'demo-source-manifest.json')]), 'materialize chat Demo');
   const chatManifest = JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-files.json')));
   if (chatManifest.chatPreview?.fragment !== 'preview.html' || !fs.readFileSync(path.join(runDir, 'visual-sandbox/index.html'), 'utf8').includes(demoFragment)) throw new Error('chat and HTTP must use the same source');
-  console.log(JSON.stringify({ status: 'passed', checks: 10 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 12 }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

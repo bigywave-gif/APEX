@@ -52,7 +52,12 @@ for (const [sourceSelectionId, binding] of bindings.entries()) {
   if (requiresDomMarker && !declaredInRenderedSource) die(`Demo source must render the selected source marker for ${sourceSelectionId}; sourceBindings alone are not runtime evidence`);
 }
 const strategyFile = state.artifacts?.experienceStrategy && path.join(runDir, state.artifacts.experienceStrategy);
-const strategy = strategyFile && fs.existsSync(strategyFile) ? read(strategyFile) : {};
+let strategy = {};
+if (strategyFile && fs.existsSync(strategyFile)) {
+  const root = fs.realpathSync(runDir), resolved = fs.realpathSync(strategyFile);
+  if (!resolved.startsWith(`${root}${path.sep}`)) die('product plan must stay inside the current Run');
+  strategy = read(strategyFile);
+}
 let tasks;
 try { tasks = [...requiredFormalTasks({}, strategy, { requireProductPlan: state.roleChain?.confirmationModel === 'two-confirmations' })]; } catch (error) { die(error.message); }
 try { validateInteractionContract(input.interactionContract, tasks); } catch (error) { die(error.message); }
