@@ -20,3 +20,8 @@ export function apiContractEvidenceCurrent(runDir, state, evidence) {
     return [...references].every(ref => { const binding = evidence.inputBindings.find(item => item.reference === ref); return binding && apiInput(runDir, ref).sha256 === binding.sha256; });
   } catch { return false; }
 }
+
+export function apiContractEvidenceAssessment(runDir, state, evidence) {
+  if (!apiContractEvidenceCurrent(runDir, state, evidence)) return { status: 'unverified', reason: 'API contract, schemas or samples are missing or stale' };
+  return { status: 'unverified', reason: 'supplied samples do not establish actual API execution or response provenance' };
+}

@@ -9,7 +9,7 @@ import { validateFormalInteractionEvidence } from './formal-interaction-evidence
 import { controlledOutput, declaredVerificationCommand } from './verification-policy.mjs';
 import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 import { visualQualityEvidence } from './visual-quality-evidence.mjs';
-import { apiContractEvidenceCurrent } from './api-contract-evidence.mjs';
+import { apiContractEvidenceAssessment } from './api-contract-evidence.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -40,7 +40,7 @@ async function execute(check, projectRoot, runDir, policy) {
       if (!fs.existsSync(file)) return { id: check.id, status: 'unverified', path: check.path, reason: 'evidence-missing' };
       if (policy && !controlledOutput(runDir, check.path, ['quality-evidence.mjs', 'contract-verifier.mjs'])) return { id: check.id, status: 'unverified', path: check.path, reason: 'evidence is not an unchanged controlled verification output' };
       const evidence = read(file);
-      if (policy && check.path === 'evidence/contract-verification.json' && !apiContractEvidenceCurrent(runDir, policy.state, evidence)) return { id: check.id, status: 'unverified', path: check.path, reason: 'API contract, schemas or samples are missing or stale' };
+      if (policy && check.path === 'evidence/contract-verification.json') { const assessment = apiContractEvidenceAssessment(runDir, policy.state, evidence); if (assessment.status !== 'passed') return { id: check.id, path: check.path, ...assessment }; }
       if (policy && check.path === 'evidence/visual-verification.json' && (evidence.scope !== 'design-fidelity-only' || visualQualityEvidence(runDir, policy.state).status !== 'passed')) return { id: check.id, status: 'unverified', path: check.path, reason: 'current confirmed design parity is missing or stale' };
       if (policy && ['evidence/accessibility-verification.json', 'evidence/performance-verification.json'].includes(check.path)) {
         const measurementRef = evidence.measurementPath;

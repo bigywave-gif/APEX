@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { apiInput, apiContractEvidenceCurrent } from './api-contract-evidence.mjs';
+import { apiInput, apiContractEvidenceCurrent, apiContractEvidenceAssessment } from './api-contract-evidence.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-api-evidence-'));
 const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-api-outside-'));
 fs.writeFileSync(path.join(outside, 'schema.json'), '{}');
@@ -13,9 +13,11 @@ try {
   const state = { artifacts: { apiContract: 'contract.json' } }, refs = ['contract.json', 'request.json', 'response.json', 'samples.json'];
   const evidence = { scope: 'supplied-samples-only', contractRef: 'contract.json', samplesRef: 'samples.json', inputBindings: refs.map(ref => apiInput(root, ref)) };
   assert.equal(apiContractEvidenceCurrent(root, state, evidence), true);
+  assert.match(apiContractEvidenceAssessment(root, state, evidence).reason, /do not establish actual API execution/);
+  assert.equal(apiContractEvidenceAssessment(root, state, evidence).status, 'unverified');
   for (const ref of refs) {
     const file = path.join(root, ref), previous = fs.readFileSync(file);
-    fs.appendFileSync(file, ' '); assert.equal(apiContractEvidenceCurrent(root, state, evidence), false, `changed ${ref} must invalidate evidence`); fs.writeFileSync(file, previous);
+    fs.appendFileSync(file, ' '); assert.equal(apiContractEvidenceCurrent(root, state, evidence), false, `changed ${ref} must invalidate evidence`); assert.match(apiContractEvidenceAssessment(root, state, evidence).reason, /missing or stale/); fs.writeFileSync(file, previous);
   }
   assert.equal(apiContractEvidenceCurrent(root, state, { ...evidence, inputBindings: evidence.inputBindings.slice(1) }), false);
   assert.equal(apiContractEvidenceCurrent(root, { artifacts: { apiContract: 'other.json' } }, evidence), false);
