@@ -22,6 +22,26 @@ export function requiredFormalTasks(manifest, strategy = {}, { requireProductPla
   const productTasks = new Set((strategy.functionalPlan || []).map(item => item.task).filter(Boolean));
   return new Set([...productTasks, ...(manifest.interactionContract?.journeys || []).filter(item => item.kind !== 'reset' || productTasks.has(item.task)).map(item => item.task).filter(Boolean)]);
 }
+export function validateProductTaskReview(runDir, state, review) {
+  const bindings = formalReviewBindings(runDir, state);
+  const inputs = Object.fromEntries(bindings.map(binding => [binding.artifact, JSON.parse(fs.readFileSync(path.resolve(runDir, binding.path), 'utf8'))]));
+  const tasks = requiredFormalTasks(inputs.visualSandboxFiles, inputs.experienceStrategy, { requireProductPlan: true });
+  validateFormalInteractionEvidence(runDir, state, inputs.runtimeStateMatrix.interactions);
+  if (!Array.isArray(review) || review.length !== tasks.size) throw new Error('product review must cover every confirmed task exactly once');
+  const seen = new Set();
+  for (const item of review) {
+    if (!tasks.has(item?.task) || seen.has(item.task)) throw new Error('product review has a duplicate or unknown task');
+    seen.add(item.task);
+    if (item.verdict !== 'passed' || !['expectedOutcome', 'observedOutcome', 'rationale'].every(key => typeof item[key] === 'string' && item[key].trim())) throw new Error(`product review needs a passed verdict and concrete reasoning: ${item.task}`);
+    const matches = (inputs.runtimeStateMatrix.interactions || []).filter(entry => entry.id === item.interactionId && entry.result === 'passed' && entry.evidence === item.evidence);
+    if (matches.length !== 1) throw new Error(`product review lacks matching formal evidence: ${item.task}`);
+    const root = fs.realpathSync(runDir), file = path.resolve(runDir, item.evidence || '');
+    if (!fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`)) throw new Error(`product review evidence is missing or outside the run: ${item.task}`);
+    const trace = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (trace.id !== item.interactionId || trace.task !== item.task || trace.status !== 'passed') throw new Error(`product review evidence does not match the task: ${item.task}`);
+  }
+  return { status: 'passed', tasks: [...seen] };
+}
 export function validateFormalInteractionEvidence(runDir, state, interactions) {
   const root = fs.realpathSync(runDir), local = reference => { const file = path.resolve(runDir, reference || ''); if (!fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`)) throw new Error(`formal interaction evidence is missing or outside the run: ${reference || ''}`); return file; };
   const manifest = JSON.parse(fs.readFileSync(local(state.artifacts.visualSandboxFiles), 'utf8'));

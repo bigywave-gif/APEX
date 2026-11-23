@@ -258,6 +258,24 @@
       },
       "additionalProperties": false
     },
+    "productReview": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["task", "interactionId", "evidence", "expectedOutcome", "observedOutcome", "rationale", "verdict"],
+        "properties": {
+          "task": { "type": "string", "minLength": 1 },
+          "interactionId": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 },
+          "expectedOutcome": { "type": "string", "minLength": 1 },
+          "observedOutcome": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 },
+          "verdict": { "const": "passed" }
+        },
+        "additionalProperties": false
+      }
+    },
     "status": {
       "const": "ready"
     }

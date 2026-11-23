@@ -15,6 +15,7 @@ import { validateFormalInteractionEvidence } from './formal-interaction-evidence
 import { formalJourneyCode } from './formal-interaction.mjs';
 import { npmCacheRoot } from './apex-paths.mjs';
 import { buildStitchPrompt } from './stitch-adaptation.mjs';
+import { commitRunState, agentRuntimeStatus } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-interactive-browser-'));
@@ -203,6 +204,32 @@ try {
     fs.appendFileSync(evidenceFile, ' ');
     if (formalDirectProgress(runDir, actualState, receipts).status !== 'pending') throw new Error('tampered direct comparison must fail aggregation');
     fs.writeFileSync(evidenceFile, bytes);
+    // Isolate the role handoff with a seeded matrix; the interactions and
+    // their receipts above came from the real browser capture.
+    const roleState = JSON.parse(fs.readFileSync(stateFile));
+    roleState.artifacts.runtimeStateMatrix = 'fixture-formal-matrix.json';
+    write('fixture-formal-matrix.json', { interactions: repeated.formalInteractions.journeys.map(item => ({ id: item.id, result: 'passed', evidence: item.evidence })) });
+    commitRunState(runDir, roleState, { reason: 'test-formal-product-review' });
+    const roleAuth = () => run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
+    run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'select', runDir, 'verify']);
+    const selection = JSON.parse(fs.readFileSync(path.join(runDir, 'advisories/verify/selection.json')));
+    if (!selection.selectedRoles.includes('product-manager')) throw new Error('verify must schedule the product role');
+    const job = agentRuntimeStatus(runDir).jobs.find(item => item.jobId === selection.agentJobs['product-manager']);
+    const claim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, job.jobId, 'verify']);
+    if (claim.status !== 'running') throw new Error('product reviewer must claim a running job');
+    const interaction = repeated.formalInteractions.journeys.find(item => item.task === '添加示例项目');
+    const advisory = { schemaVersion: '1.0', roleId: 'product-manager', stage: 'verify', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'product-observation', classification: 'fact', statement: '正式浏览器执行添加项目并观察到数量变化。', evidence: [roleState.artifacts.runtimeStateMatrix] }], recommendations: [{ id: 'product-result', choice: '确认添加任务的可观察结果。', rationale: '真实交互结果与演示任务一致。', acceptance: ['添加后数量增加。'] }], execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'browser-fixture', sessionId: job.payload.agentSessionId, skillBindings: job.payload.skillBindings, leaseToken: claim.leaseToken }, status: 'ready', productReview: [{ task: interaction.task, interactionId: interaction.id, evidence: interaction.evidence, expectedOutcome: '添加后数量增加', observedOutcome: '数量从 0 增加到 1', rationale: '添加操作与对应数量变化符合任务', verdict: 'passed' }] };
+    const reviewInput = write('fixture-product-review.json', advisory);
+    run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'record', runDir, 'verify', reviewInput]);
+    if (agentRuntimeStatus(runDir, job.jobId).jobs[0].status !== 'succeeded') throw new Error('product review must settle its own durable job');
+    for (const roleId of selection.selectedRoles.filter(id => id !== 'product-manager')) {
+      const otherJob = agentRuntimeStatus(runDir).jobs.find(item => item.jobId === selection.agentJobs[roleId]);
+      const otherClaim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, otherJob.jobId, 'verify']);
+      const otherInput = write(`fixture-${roleId}-review.json`, { ...advisory, roleId, productReview: undefined, execution: { ...advisory.execution, sessionId: otherJob.payload.agentSessionId, skillBindings: otherJob.payload.skillBindings, leaseToken: otherClaim.leaseToken } });
+      run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'record', runDir, 'verify', otherInput]);
+    }
+    const summary = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'summarize', runDir, 'verify']);
+    if (!fs.readFileSync(summary.summary, 'utf8').includes('产品任务复核')) throw new Error('verify role summary must retain product task review');
   } else {
   run('apex-router.mjs', ['select-route', project, runId, session, 'stitch', 'actual-stitch-route', 'user-selected-stitch']);
   // A local mock Stitch service serves exports copied from actual browser
@@ -302,7 +329,7 @@ try {
 
 
   }
-  console.log(JSON.stringify({ status: 'passed', checks: 26, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
+  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 30 : 26, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
 } finally {
   if (mockServer) mockServer.kill('SIGTERM');
   if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }

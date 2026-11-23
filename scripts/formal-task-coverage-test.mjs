@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { formalReviewBindings, requiredFormalTasks, validateFormalInteractionEvidence } from './formal-interaction-evidence.mjs';
+import { formalReviewBindings, requiredFormalTasks, validateFormalInteractionEvidence, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { runFormalJourney, runFormalAuthentication } from './formal-interaction.mjs';
 const manifest = { interactionContract: { journeys: [{ kind: 'task', task: '添加项目' }, { kind: 'reset', task: '重置演示' }] } };
 assert.deepEqual([...requiredFormalTasks(manifest, { functionalPlan: [{ task: '添加项目' }] })], ['添加项目']);
@@ -51,6 +51,14 @@ try {
   assert.throws(() => formalReviewBindings(dir, state), /outside the run/);
   state.artifacts.runtimeStateMatrix = 'matrix.json';
   capture(); assert.equal(validateFormalInteractionEvidence(dir, state, interactions).status, 'passed');
+  const review = [{ task: '添加项目', interactionId: 'add', evidence: 'trace.json', expectedOutcome: '项目数量增加', observedOutcome: '数量从 0 变为 1', rationale: '操作对应添加项目，结果与预期一致', verdict: 'passed' }];
+  assert.equal(validateProductTaskReview(dir, state, review).status, 'passed');
+  assert.throws(() => validateProductTaskReview(dir, state, []), /cover every confirmed task/);
+  assert.throws(() => validateProductTaskReview(dir, state, [{ ...review[0], task: '删除项目' }]), /duplicate or unknown task/);
+  assert.throws(() => validateProductTaskReview(dir, state, [{ ...review[0], interactionId: 'unrelated' }]), /matching formal evidence/);
+  assert.throws(() => validateProductTaskReview(dir, state, [{ ...review[0], rationale: '' }]), /concrete reasoning/);
+  assert.throws(() => validateProductTaskReview(dir, state, [{ ...review[0], verdict: 'failed' }]), /passed verdict/);
+  assert.throws(() => validateProductTaskReview(dir, state, [review[0], review[0]]), /cover every confirmed task/);
   delete trace.steps[0].observation; capture();
   assert.throws(() => validateFormalInteractionEvidence(dir, state, interactions), /not an observed confirmed task/);
 } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -63,4 +71,4 @@ assert.deepEqual(await runFormalAuthentication(hiddenSuccessPage, { authenticati
 let leaked = false;
 await assert.rejects(runFormalAuthentication({ url: () => 'https://outside.invalid/', locator: () => { leaked = true; } }, { authentication: auth, credentials: { username: 'fixture-user', password: 'fixture-password' }, url: 'https://app.invalid/' }), /outside the application origin/);
 assert.equal(leaked, false);
-console.log(JSON.stringify({ status: 'passed', checks: 22 }));
+console.log(JSON.stringify({ status: 'passed', checks: 29 }));
