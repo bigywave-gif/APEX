@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { validateApiSample } from './api-sample-schema.mjs';
+import { validateApiCaseCoverage } from './api-case-coverage.mjs';
 import { apiInput, apiContractEvidenceCurrent } from './api-contract-evidence.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,23 +27,25 @@ try { apiInput(runDir, contractRef); apiInput(runDir, samplesRef); } catch (erro
 const contract = read(path.join(runDir, contractRef));
 const samples = read(path.resolve(runDir, samplesRef));
 if (!Array.isArray(samples)) die('samples.json must be an array');
-if (!Array.isArray(contract.endpoints) || !contract.endpoints.length) die('API contract must contain at least one endpoint');
+try { validateApiCaseCoverage(contract.endpoints, samples); } catch (error) { die(error.message); }
 let inputBindings;
 try { inputBindings = [...new Set([contractRef, samplesRef, ...contract.endpoints.flatMap(endpoint => [endpoint.requestSchema, endpoint.responseSchema])])].map(ref => apiInput(runDir, ref)); } catch (error) { die(error.message); }
 const evidence = [];
 for (const endpoint of contract.endpoints) {
-  const sample = samples.find(item => item.method === endpoint.method && item.path === endpoint.path);
-  if (!sample) { evidence.push({ id: `${endpoint.method} ${endpoint.path}`, status: 'failed', errors: ['sample missing'] }); continue; }
-  const errors = [];
-  if ('request' in sample) errors.push(...validateApiSample(sample.request, schemaAt(runDir, endpoint.requestSchema), 'request'));
-  else errors.push('request missing');
-  if ('response' in sample) errors.push(...validateApiSample(sample.response, schemaAt(runDir, endpoint.responseSchema), 'response'));
-  else errors.push('response missing');
-  evidence.push({ id: `${endpoint.method} ${endpoint.path}`, status: errors.length ? 'failed' : 'passed', errors });
+  const matched = samples.filter(item => item.method === endpoint.method && item.path === endpoint.path);
+  const requestSchema = schemaAt(runDir, endpoint.requestSchema), responseSchema = schemaAt(runDir, endpoint.responseSchema);
+  for (const sample of matched) {
+    const errors = [];
+    if ('request' in sample) errors.push(...validateApiSample(sample.request, requestSchema, 'request'));
+    else errors.push('request missing');
+    if ('response' in sample) errors.push(...validateApiSample(sample.response, responseSchema, 'response'));
+    else errors.push('response missing');
+    evidence.push({ id: endpoint.method + ' ' + endpoint.path + (sample.caseId ? ' [' + sample.caseId + ']' : ''), status: errors.length ? 'failed' : 'passed', errors });
+  }
 }
 const result = { status: evidence.every(item => item.status === 'passed') ? 'passed' : 'failed', scope: 'supplied-samples-only', contractRef, samplesRef, inputBindings, evidence, checkedAt: new Date().toISOString() };
 if (!apiContractEvidenceCurrent(runDir, state, result)) die('API contract, schemas or samples changed during verification');
 const output = path.join(runDir, 'evidence', 'contract-verification.json');
 write(output, result);
-console.log(JSON.stringify({ evidence: output, status: result.status, endpoints: evidence.length, failed: evidence.filter(item => item.status !== 'passed').length }));
+console.log(JSON.stringify({ evidence: output, status: result.status, endpoints: contract.endpoints.length, cases: evidence.length, failed: evidence.filter(item => item.status !== 'passed').length }));
 if (result.status !== 'passed') process.exitCode = 2;

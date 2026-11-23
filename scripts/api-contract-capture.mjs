@@ -6,6 +6,7 @@ import { canonicalApexRoot } from './apex-paths.mjs';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
 import { apiInput } from './api-contract-evidence.mjs';
+import { validateApiCaseCoverage } from './api-case-coverage.mjs';
 import { openApiMutationJournal } from './api-mutation-journal.mjs';
 import { runCancellationRequested } from './run-ledger.mjs';
 import { apiSamplesRef, apiObservationRef, apiBrowserRef, observedRuntimeOrigin, observeHttpCases } from './api-http-observation.mjs';
@@ -20,13 +21,8 @@ try {
   const contractRef = state.artifacts?.apiContract || 'api-contract.json', casesRef = path.relative(runDir, path.resolve(casesArg));
   const contractBinding = apiInput(runDir, contractRef), casesBinding = apiInput(runDir, casesRef), registration = apiInput(runDir, state.artifacts.implementationRegistration), browser = apiInput(runDir, apiBrowserRef);
   const contract = JSON.parse(fs.readFileSync(path.join(runDir, contractRef))), input = JSON.parse(fs.readFileSync(path.join(runDir, casesRef)));
-  if (!Array.isArray(contract.endpoints) || !contract.endpoints.length || !Array.isArray(input.cases) || input.cases.length !== contract.endpoints.length) throw new Error('one observation case per contract endpoint is required');
-  const matched = new Set();
+  validateApiCaseCoverage(contract.endpoints, input.cases);
   for (const item of input.cases) {
-    const matching = contract.endpoints.filter(endpoint => endpoint.method === item.method && endpoint.path === item.path);
-    const key = `${item.method} ${item.path}`;
-    if (matching.length !== 1 || matched.has(key)) throw new Error('observation cases must uniquely match contract endpoints');
-    matched.add(key);
     const pattern = '^' + item.path.split('/').map(part => part.startsWith(':') && part.length > 1 ? '[^/]+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('/') + '$';
     const url = new URL(item.route, 'http://127.0.0.1');
     if (!new RegExp(pattern).test(url.pathname)) throw new Error('observation route does not match the contract endpoint');

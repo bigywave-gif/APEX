@@ -144,6 +144,7 @@ for (const [name, script] of [
   ['responsive-evidence', 'responsive-evidence-test.mjs'],
   ['verification-policy', 'verification-policy-test.mjs'],
   ['api-sample-schema', 'api-sample-schema-test.mjs'],
+  ['api-case-coverage', 'api-case-coverage-test.mjs'],
   ['api-contract-evidence', 'api-contract-evidence-test.mjs'],
   ['api-http-observation', 'api-http-observation-test.mjs'],
   ['quality-measurement', 'quality-measurement-test.mjs'],

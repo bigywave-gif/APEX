@@ -62,7 +62,7 @@ export async function observeHttpCases(origin, cases, { journal = null, writeCon
     let responseBody; try { responseBody = JSON.parse(responseText); } catch { throw new Error('API response is not JSON'); }
     const containsSecret = value => typeof value === 'string' ? secrets.some(secret => value.includes(secret)) : Array.isArray(value) ? value.some(containsSecret) : value && typeof value === 'object' ? Object.entries(value).some(([key, child]) => containsSecret(key) || containsSecret(child)) : false;
     if (containsSecret(responseBody)) throw new Error('API response contains the authentication secret');
-    return { method: item.method, path: item.path, request: item.request, response: responseBody };
+    return { ...(item.caseId ? { caseId: item.caseId } : {}), method: item.method, path: item.path, request: item.request, response: responseBody };
     };
     const sample = item.method === 'GET' ? await dispatch() : await journal.execute(item.executionId, { origin, writeContext, credential: bearer ? journal.credentialFingerprint(bearer) : null, method: item.method, path: item.path, route: item.route, request: item.request, expectedStatus: item.expectedStatus }, dispatch);
     samples.push(sample);

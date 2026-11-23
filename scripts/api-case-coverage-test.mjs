@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { validateApiCaseCoverage } from './api-case-coverage.mjs';
+const endpoint = { method: 'GET', path: '/items' }, one = { ...endpoint }, first = { ...endpoint, caseId: 'first' }, second = { ...endpoint, caseId: 'second' };
+assert.equal(validateApiCaseCoverage([endpoint], [one]).size, 1);
+assert.equal(validateApiCaseCoverage([endpoint], [first, second]).get(JSON.stringify(['GET', '/items'])).length, 2);
+assert.throws(() => validateApiCaseCoverage([endpoint], [first, one]), /require unique case IDs/);
+assert.throws(() => validateApiCaseCoverage([endpoint], [first, first]), /IDs must be unique/);
+assert.throws(() => validateApiCaseCoverage([endpoint, endpoint], [first]), /duplicate API contract endpoint/);
+assert.throws(() => validateApiCaseCoverage([endpoint], [{ method: 'GET', path: '/other' }]), /does not match/);
+assert.throws(() => validateApiCaseCoverage([endpoint, { method: 'POST', path: '/items' }], [first]), /has no case/);
+console.log(JSON.stringify({ status: 'passed', scope: 'multiple distinct API cases and endpoint coverage' }));
