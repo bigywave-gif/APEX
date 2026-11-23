@@ -2,6 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 const hash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+export const formalReviewArtifacts = ['experienceStrategy', 'visualSandboxFiles', 'runtimeStateMatrix'];
+export function formalReviewBindings(runDir, state) {
+  const root = fs.realpathSync(runDir);
+  return formalReviewArtifacts.map(artifact => {
+    const reference = state.artifacts?.[artifact];
+    if (typeof reference !== 'string' || !reference.trim()) throw new Error(`formal review input is missing: ${artifact}`);
+    const file = path.resolve(runDir, reference);
+    if (!fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`)) throw new Error(`formal review input is missing or outside the run: ${artifact}`);
+    return { artifact, path: reference, sha256: hash(file) };
+  });
+}
 export function hasFormalObservation(step) {
   const observation = step?.observation;
   return typeof observation?.selector === 'string' && Boolean(observation.selector.trim()) && ['text', 'value', 'visible', 'checked', 'attribute'].includes(observation.property) && (observation.property !== 'attribute' || (typeof observation.attribute === 'string' && Boolean(observation.attribute.trim())));

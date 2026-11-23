@@ -9,6 +9,7 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { archiveArtifacts, commitRunState, readRunState, visualSkillLoads } from './run-ledger.mjs';
 import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, rebudgetAgentJobs, registerAgent, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { resolveTasteSkill, loadTasteSkill, requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
+import { formalReviewBindings } from './formal-interaction-evidence.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const registryFile = path.join(apexRoot, 'registry', 'agency-role-registry.json');
@@ -101,6 +102,7 @@ function currentSelectionInputs(runDir, stage) {
     const reference = state.artifacts?.[artifact]; const file = reference && path.resolve(runDir, reference);
     return file && file.startsWith(`${path.resolve(runDir)}${path.sep}`) && fs.existsSync(file) ? [{ artifact, path: reference, sha256: hash(file) }] : [];
   });
+  if (stage === 'verify' && state.roleChain?.confirmationModel === 'two-confirmations') bindings.push(...formalReviewBindings(runDir, state));
   // A material visual revision is a first-class Agent input.  Without this
   // binding, a re-selected visual stage can reuse old completed jobs despite
   // the user having changed the visual direction.
