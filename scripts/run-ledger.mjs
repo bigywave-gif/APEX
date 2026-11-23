@@ -588,18 +588,22 @@ export function settleAgentJob(runDir, jobId, { status, result = null, error = n
     database.exec('BEGIN IMMEDIATE'); const job = database.prepare('SELECT * FROM agent_jobs WHERE job_id = ?').get(jobId);
     assertCurrentAgentLease(job, jobId, leaseToken);
     if (budgetExceeded && (status !== 'failed' || !usage || !Number(job.reserved_tokens || 0) || !Number.isInteger(usage.inputTokens) || !Number.isInteger(usage.outputTokens) || usage.inputTokens + usage.outputTokens <= Number(job.reserved_tokens))) throw new Error('budget-exceeded settlement requires actual usage above the active reservation');
-    recordSettledAttemptUsage(database, job, usage, budgetExceeded ? 'budget-exceeded' : status, timestamp);
-    if (status === 'succeeded') database.prepare("UPDATE agent_jobs SET status = 'succeeded', result_json = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(JSON.stringify(result || {}), timestamp, jobId);
-    else if (budgetExceeded || Number(job.attempt) >= Number(job.max_attempts)) {
-      database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(String(error || 'agent job failed'), timestamp, jobId);
-      database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, job.attempt, String(error || 'agent job failed'), job.payload_json, timestamp);
+    const payload = parseJson(job.payload_json), reported = usage && Number.isInteger(usage.inputTokens) && Number.isInteger(usage.outputTokens) ? usage.inputTokens + usage.outputTokens : 0;
+    const prior = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
+    const exceeded = budgetExceeded || (Number(job.reserved_tokens || 0) > 0 && reported > Number(job.reserved_tokens)) || (Number.isInteger(payload.stageTokenBudget) && prior + reported > payload.stageTokenBudget);
+    const reason = exceeded ? 'agent attempt exceeded its recorded token budget' : String(error || 'agent job failed');
+    recordSettledAttemptUsage(database, job, usage, exceeded ? 'budget-exceeded' : status, timestamp);
+    if (status === 'succeeded' && !exceeded) database.prepare("UPDATE agent_jobs SET status = 'succeeded', result_json = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(JSON.stringify(result || {}), timestamp, jobId);
+    else if (exceeded || Number(job.attempt) >= Number(job.max_attempts)) {
+      database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(reason, timestamp, jobId);
+      database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, job.attempt, reason, job.payload_json, timestamp);
     } else {
       const calculatedDelay = Math.min(60_000, 1000 * (2 ** (Number(job.attempt) - 1)));
       const delayMs = retryDelayMs === null ? calculatedDelay : retryDelayMs;
       if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 60_000) throw new Error('retry delay must be an integer from 0 to 60000ms');
       database.prepare("UPDATE agent_jobs SET status = 'queued', available_at = ?, last_error = ?, started_at = NULL, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(new Date(Date.now() + delayMs).toISOString(), String(error || 'agent job failed'), jobId);
     }
-    database.prepare("UPDATE agent_sessions SET status = CASE WHEN ? = 'succeeded' THEN 'ready' WHEN (SELECT status FROM agent_jobs WHERE job_id = ?) = 'dead-letter' THEN 'failed' ELSE 'ready' END, updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(status, jobId, timestamp, jobId, job.agent_id);
+    database.prepare("UPDATE agent_sessions SET status = CASE WHEN (SELECT status FROM agent_jobs WHERE job_id = ?) = 'dead-letter' THEN 'failed' ELSE 'ready' END, updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(jobId, timestamp, jobId, job.agent_id);
     database.exec('COMMIT');
     return agentRuntimeStatus(runDir, jobId);
   } catch (failure) { try { database.exec('ROLLBACK'); } catch {} throw failure; } finally { database.close(); }

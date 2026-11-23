@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, agentRuntimeStatus, rebudgetAgentJobs } from './run-ledger.mjs';
+import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, agentRuntimeStatus, rebudgetAgentJobs, recordObservedTokenUsage } from './run-ledger.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-attempt-usage-'));
 try {
   registerAgent(root, { agentId: 'reviewer', vocation: 'review', stage: 'visual' });
@@ -54,5 +54,21 @@ try {
   assert.equal(legacyStatus.reservedTokens, 0); assert.equal(legacyStatus.leaseExpiresAt, null);
   const unchanged = new DatabaseSync(path.join(root, 'run-ledger.sqlite'), { readOnly: true });
   assert.equal(unchanged.prepare('SELECT reserved_tokens FROM agent_jobs WHERE job_id = ?').get(limited.jobId).reserved_tokens, 20); unchanged.close();
+  for (const [agentId, status, used] of [['over-success', 'succeeded', 11], ['over-failure', 'failed', 12]]) {
+    registerAgent(root, { agentId, vocation: 'review', stage: 'gate1' });
+    const item = enqueueAgentJob(root, { agentId, stage: 'gate1', inputHash: agentId, payload: { tokenBudget: 10, stageTokenBudget: 100 } });
+    const lease = claimAgentJob(root, item.jobId);
+    const settled = settleAgentJob(root, item.jobId, { status, result: { shouldNotPublish: true }, leaseToken: lease.leaseToken, usage: { inputTokens: used, outputTokens: 0, usageSource: 'provider-reported' } });
+    assert.equal(settled.jobs[0].status, 'dead-letter'); assert.equal(settled.jobs[0].result, null);
+    assert.equal(settled.sessions.find(session => session.agentId === agentId).status, 'failed');
+    assert.throws(() => settleAgentJob(root, item.jobId, { status, leaseToken: lease.leaseToken }), /not running/);
+  }
+  assert.equal(agentRuntimeStatus(root).tokenUsage.gate1, 23);
+  registerAgent(root, { agentId: 'stage-over', vocation: 'review', stage: 'baseline' });
+  const stageJob = enqueueAgentJob(root, { agentId: 'stage-over', stage: 'baseline', inputHash: 'stage-over', payload: { tokenBudget: 10, stageTokenBudget: 15 } });
+  const stageLease = claimAgentJob(root, stageJob.jobId);
+  recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'stage_over_host_call_1', inputTokens: 10, outputTokens: 0, usageSource: 'provider-reported' });
+  const stageResult = settleAgentJob(root, stageJob.jobId, { status: 'succeeded', leaseToken: stageLease.leaseToken, usage: { inputTokens: 6, outputTokens: 0, usageSource: 'provider-reported' } });
+  assert.equal(stageResult.jobs[0].status, 'dead-letter'); assert.equal(stageResult.tokenUsage.baseline, 16);
   console.log(JSON.stringify({ status: 'passed', scope: 'failed, interrupted, over-budget accounting, controlled recovery and legacy status' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -51,7 +51,7 @@ try {
     console.log(JSON.stringify(renewAgentJobLease(runDir, jobId, leaseToken)));
   } else if (command === 'succeed' || command === 'fail') {
     const [jobId, stage, detail = '{}', leaseToken = null, usageJson = null] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
-    requireRouterAction(runDir, action); const usage = usageJson ? readJson(usageJson) : null; const value = command === 'succeed' ? { status: 'succeeded', result: readJson(detail), leaseToken, usage } : { status: 'failed', error: detail, leaseToken, usage }; console.log(JSON.stringify(settleAgentJob(runDir, jobId, value)));
+    requireRouterAction(runDir, action); const usage = usageJson ? readJson(usageJson) : null; const value = command === 'succeed' ? { status: 'succeeded', result: readJson(detail), leaseToken, usage } : { status: 'failed', error: detail, leaseToken, usage }; const outcome = settleAgentJob(runDir, jobId, value); console.log(JSON.stringify(outcome)); if (command === 'succeed' && outcome.jobs[0]?.status !== 'succeeded') fail(`agent job was not accepted as succeeded: ${outcome.jobs[0]?.status || 'unknown'}`);
   } else if (command === 'tokens') {
     const [stage, input = '0', output = '0', limit = 'null', agentId = ''] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     requireRouterAction(runDir, action); console.log(JSON.stringify(recordTokenUsage(runDir, { stage, agentId: agentId || null, inputTokens: Number(input), outputTokens: Number(output), limit: limit === 'null' ? null : Number(limit) })));
