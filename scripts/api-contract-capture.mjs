@@ -32,10 +32,15 @@ try {
     if (!new RegExp(pattern).test(url.pathname)) throw new Error('observation route does not match the contract endpoint');
   }
   const origin = observedRuntimeOrigin(runDir, state), journal = openApiMutationJournal(project);
-  let samples; try { samples = await observeHttpCases(origin, input.cases, { journal, writeContext: { registration: registration.sha256, contract: contractBinding.sha256, browserCapture: browser.sha256 }, cancelled: () => runCancellationRequested(runDir) }); } finally { journal.close(); }
+  let samples, authBindings; try {
+    const names = [...new Set(input.cases.map(item => item.auth?.bearerEnv).filter(Boolean))].sort();
+    authBindings = names.map(name => ({ name, fingerprint: journal.credentialFingerprint(process.env[name]) }));
+    samples = await observeHttpCases(origin, input.cases, { journal, writeContext: { registration: registration.sha256, contract: contractBinding.sha256, browserCapture: browser.sha256 }, cancelled: () => runCancellationRequested(runDir) });
+    if (authBindings.some(binding => journal.credentialFingerprint(process.env[binding.name]) !== binding.fingerprint)) throw new Error('API credentials changed during capture');
+  } finally { journal.close(); }
   if ([contractBinding, casesBinding, registration, browser].some(binding => apiInput(runDir, binding.reference).sha256 !== binding.sha256) || !implementationRegistrationCurrent(runDir, state, project)) throw new Error('observation input or implementation changed during capture');
   const output = path.join(runDir, apiSamplesRef); fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, `${JSON.stringify(samples, null, 2)}\n`);
-  const observation = { kind: 'controlled-http-observation', status: 'captured', projectRoot: project, origin, contract: contractBinding, implementationRegistration: registration, browserCapture: browser, cases: casesBinding, samples: apiInput(runDir, apiSamplesRef), capturedAt: new Date().toISOString(), limitations: ['Captures configured JSON requests and responses on the local runtime; does not prove untested cases or remote deployment behavior.'] };
+  const observation = { kind: 'controlled-http-observation', status: 'captured', projectRoot: project, origin, contract: contractBinding, implementationRegistration: registration, browserCapture: browser, cases: casesBinding, authBindings, samples: apiInput(runDir, apiSamplesRef), capturedAt: new Date().toISOString(), limitations: ['Captures configured JSON requests and responses on the local runtime; does not prove untested cases or remote deployment behavior.'] };
   fs.writeFileSync(path.join(runDir, apiObservationRef), `${JSON.stringify(observation, null, 2)}\n`);
   console.log(JSON.stringify({ status: 'captured', samples: path.join(runDir, apiSamplesRef), observation: path.join(runDir, apiObservationRef), count: samples.length }));
 } catch (error) { console.error(`API capture failed: ${error.message}`); process.exitCode = 1; }

@@ -47,7 +47,10 @@ try {
   run('apex-action.mjs', ['run', project, runId, session, replayAuth.authorizationRef, 'verify', 'api-contract-capture.mjs', 'capture', runDir, casesFile]);
   assert.equal(await (await fetch(new URL('/writecount', url), { headers: { connection: 'close' } })).text(), '1', 'write replay must not repeat the request');
   const observedState = JSON.parse(fs.readFileSync(stateFile));
+  process.env.APEX_API_FIXTURE_TOKEN = apiToken;
   assert.equal(apiObservationCurrent(runDir, observedState, project, 'evidence/api-observed-samples.json'), true, 'actual controlled capture must have valid receipts');
+  process.env.APEX_API_FIXTURE_TOKEN = 'changed-api-token-145'; assert.equal(apiObservationCurrent(runDir, observedState, project, 'evidence/api-observed-samples.json'), false, 'changed credential must invalidate observed evidence');
+  delete process.env.APEX_API_FIXTURE_TOKEN; assert.equal(apiObservationCurrent(runDir, observedState, project, 'evidence/api-observed-samples.json'), false, 'missing credential must invalidate observed evidence'); process.env.APEX_API_FIXTURE_TOKEN = apiToken;
   const contractAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
   run('apex-action.mjs', ['run', project, runId, session, contractAuth.authorizationRef, 'verify', 'contract-verifier.mjs', 'verify', runDir, path.join(runDir, 'evidence/api-observed-samples.json')]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/contract-verification.json'))).status, 'passed');
@@ -77,4 +80,4 @@ try {
   assert.equal(Number(await (await fetch(new URL('/count', url), { headers: { connection: 'close' } })).text()), loginCount, 'cross-origin redirect must not submit credentials');
   visit(path.join(runDir, 'evidence')); visit(path.join(runDir, 'operations'));
   console.log(JSON.stringify({ status: 'passed', checks: 15, scope: 'real-browser-router-api-capture-and-local-auth-fixture' }));
-} finally { if (server) server.kill('SIGTERM'); fs.rmSync(project, { recursive: true, force: true }); }
+} finally { delete process.env.APEX_API_FIXTURE_TOKEN; if (server) server.kill('SIGTERM'); fs.rmSync(project, { recursive: true, force: true }); }

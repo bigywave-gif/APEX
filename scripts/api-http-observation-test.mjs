@@ -51,7 +51,7 @@ try {
   await assert.rejects(observeHttpCases(origin, [{ method: 'GET', path: '/', route: '//example.org/', request: {}, expectedStatus: 200 }]), /invalid/);
   const put = (ref, value) => { const f = path.join(root, ref); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(value)); };
   const state = { artifacts: { implementationRegistration: 'registration.json', apiContract: 'contract.json' } };
-  put('registration.json', {}); put('contract.json', {}); put('cases.json', {}); put(apiSamplesRef, samples);
+  put('registration.json', {}); put('contract.json', {}); put('cases.json', { cases: [] }); put(apiSamplesRef, samples);
   put(apiBrowserRef, { kind: 'runtime', status: 'passed', evidence: [{ status: 'captured', url: `${origin}/` }] });
   const registration = apiInput(root, 'registration.json'), browserCapture = apiInput(root, apiBrowserRef);
   put('operations/browser.json', { action: 'verify', status: 'succeeded', script: 'browser-capture.mjs', outputFileHashes: { [apiBrowserRef]: browserCapture.sha256 }, runInputHashes: { [registration.reference]: registration.sha256 } });

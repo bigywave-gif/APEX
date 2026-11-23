@@ -3,6 +3,7 @@ import path from 'node:path';
 import { apiInput } from './api-contract-evidence.mjs';
 import { controlledOutput } from './verification-policy.mjs';
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
+import { apiCredentialFingerprint } from './api-mutation-journal.mjs';
 
 export const apiSamplesRef = 'evidence/api-observed-samples.json';
 export const apiObservationRef = 'evidence/api-http-observation.json';
@@ -75,6 +76,12 @@ export function apiObservationCurrent(runDir, state, projectRoot, samplesRef) {
     const observation = JSON.parse(fs.readFileSync(path.join(runDir, apiObservationRef), 'utf8'));
     if (observation.kind !== 'controlled-http-observation' || observation.status !== 'captured' || observation.origin !== observedRuntimeOrigin(runDir, state) || observation.projectRoot !== fs.realpathSync(projectRoot)) return false;
     if (observation.contract?.reference !== (state.artifacts?.apiContract || 'api-contract.json') || observation.implementationRegistration?.reference !== state.artifacts?.implementationRegistration || observation.browserCapture?.reference !== apiBrowserRef || observation.samples?.reference !== apiSamplesRef) return false;
-    return [observation.contract, observation.implementationRegistration, observation.browserCapture, observation.samples, observation.cases].every(item => item?.sha256 && apiInput(runDir, item.reference).sha256 === item.sha256);
+    if (![observation.contract, observation.implementationRegistration, observation.browserCapture, observation.samples, observation.cases].every(item => item?.sha256 && apiInput(runDir, item.reference).sha256 === item.sha256)) return false;
+    const cases = JSON.parse(fs.readFileSync(path.resolve(runDir, observation.cases.reference), 'utf8')).cases;
+    if (!Array.isArray(cases)) return false;
+    const names = [...new Set(cases.map(item => item.auth?.bearerEnv).filter(Boolean))].sort();
+    const bindings = observation.authBindings || [];
+    if (!Array.isArray(bindings) || bindings.length !== names.length || bindings.some((item, index) => item.name !== names[index])) return false;
+    return bindings.every(item => typeof process.env[item.name] === 'string' && apiCredentialFingerprint(projectRoot, process.env[item.name]) === item.fingerprint);
   } catch { return false; }
 }
