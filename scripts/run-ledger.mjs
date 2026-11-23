@@ -523,6 +523,16 @@ function stageUsageIncomplete(database, stage) {
     try { return !['provider-reported', 'estimated'].includes(JSON.parse(row.metadata_json)?.usageSource); } catch { return true; }
   });
 }
+function agentBudgetSnapshot(database, job) {
+  const payload = parseJson(job.payload_json), limit = payload?.stageTokenBudget;
+  const used = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
+  const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = ?").get(job.stage).total);
+  const incompleteUsage = stageUsageIncomplete(database, job.stage);
+  const ownReserved = Number(database.prepare('SELECT reserved_tokens FROM agent_jobs WHERE job_id = ?').get(job.job_id)?.reserved_tokens || 0);
+  const validLimit = Number.isInteger(limit) && limit > 0;
+  const reportedAvailable = validLimit ? Math.max(0, limit - used - reserved) : null;
+  return { used, reserved, stageBudget: validLimit ? limit : null, incompleteUsage, available: incompleteUsage ? null : reportedAvailable, reportedAvailable, overcommitted: !validLimit ? null : used + reserved > limit ? true : incompleteUsage ? null : false, budgetScope: validLimit && ownReserved > 0 ? 'reported-usage-only' : 'not-reserved' };
+}
 export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
   requireNonEmpty(jobId, 'jobId');
   if (claimKey !== null && (typeof claimKey !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(claimKey))) throw new Error('claim key must be a durable random identifier of 16 to 128 safe characters');
@@ -533,8 +543,9 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
     if (!job) throw new Error(`agent job does not exist: ${jobId}`);
     if (job.status === 'running' && claimKey && job.claim_key === claimKey) {
       assertCurrentAgentLease(job, jobId, job.lease_token);
+      const budget = agentBudgetSnapshot(database, job);
       database.exec('COMMIT');
-      return { ...job, leaseToken: job.lease_token, leaseExpiresAt: job.lease_expires_at, reservedTokens: Number(job.reserved_tokens || 0), budgetScope: job.reserved_tokens ? 'reported-usage-only' : 'not-reserved', payload: parseJson(job.payload_json), idempotent: true };
+      return { ...job, leaseToken: job.lease_token, leaseExpiresAt: job.lease_expires_at, reservedTokens: Number(job.reserved_tokens || 0), ...budget, payload: parseJson(job.payload_json), idempotent: true };
     }
     if (job.status !== 'queued') throw new Error(`agent job is not queued: ${jobId}/${job.status}`);
     const registration = database.prepare('SELECT stage FROM agents WHERE agent_id = ?').get(job.agent_id);
@@ -570,8 +581,9 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
     const leaseExpiresAt = new Date(Date.now() + AGENT_JOB_LEASE_MS).toISOString();
     database.prepare("UPDATE agent_jobs SET status = 'running', attempt = attempt + 1, started_at = ?, lease_token = ?, lease_expires_at = ?, claim_key = ?, reserved_tokens = ? WHERE job_id = ? AND status = 'queued'").run(timestamp, leaseToken, leaseExpiresAt, claimKey, reservedTokens, jobId);
     database.prepare("UPDATE agent_sessions SET status = 'working', updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(timestamp, jobId, job.agent_id);
+    const budget = agentBudgetSnapshot(database, job);
     database.exec('COMMIT');
-    return { ...job, status: 'running', attempt: Number(job.attempt) + 1, leaseToken, leaseExpiresAt, reservedTokens, budgetScope: reservedTokens ? 'reported-usage-only' : 'not-reserved', payload };
+    return { ...job, status: 'running', attempt: Number(job.attempt) + 1, leaseToken, leaseExpiresAt, reservedTokens, ...budget, payload };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 function assertCurrentAgentLease(job, jobId, leaseToken) {

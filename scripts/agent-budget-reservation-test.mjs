@@ -55,6 +55,23 @@ try {
   const unknownClaim = claimAgentJob(root, unknownJob.jobId);
   assert.equal(unknownClaim.status, 'budget-exhausted'); assert.equal(unknownClaim.available, null);
   assert.equal(unknownClaim.reportedAvailable, 100); assert.equal(unknownClaim.incompleteUsage, true);
+  const eligible = enqueueAgentJob(root, { agentId: 'unknown-budget', stage: 'baseline', inputHash: 'unknown-eligible', payload: { tokenBudget: 40, stageTokenBudget: 100 } });
+  const claimKey = 'unknown_claim_fixture_0001';
+  const uncertainClaim = claimAgentJob(root, eligible.jobId, { claimKey });
+  assert.equal(uncertainClaim.status, 'running'); assert.equal(uncertainClaim.incompleteUsage, true); assert.equal(uncertainClaim.available, null); assert.equal(uncertainClaim.reportedAvailable, 60); assert.equal(uncertainClaim.overcommitted, null);
+  const replay = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(replay.idempotent, true); assert.equal(replay.available, null); assert.equal(replay.incompleteUsage, true);
+  recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'late_host_usage_0001', inputTokens: 70, outputTokens: 0, usageSource: 'provider-reported', limit: 100 });
+  const lateReplay = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(lateReplay.available, null); assert.equal(lateReplay.reportedAvailable, 0); assert.equal(lateReplay.overcommitted, true);
 
-  console.log(JSON.stringify({ status: 'passed', checks: 26, scope: 'concurrent-claims-and-failed-attempts' }));
+
+  const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-legacy-budget-'));
+  try {
+    registerAgent(legacyRoot, { agentId: 'legacy', vocation: 'review', stage: 'visual' });
+    const legacy = enqueueAgentJob(legacyRoot, { agentId: 'legacy', stage: 'visual', inputHash: 'legacy', payload: {} });
+    const legacyKey = 'legacy_claim_fixture_0001';
+    assert.equal(claimAgentJob(legacyRoot, legacy.jobId, { claimKey: legacyKey }).budgetScope, 'not-reserved');
+    rebudgetAgentJobs(legacyRoot, { stage: 'visual', jobIds: [legacy.jobId], perAgentBudget: 40, stageBudget: 100 });
+    assert.equal(claimAgentJob(legacyRoot, legacy.jobId, { claimKey: legacyKey }).budgetScope, 'not-reserved', 'rebudgeting a running legacy job cannot invent a reservation');
+  } finally { fs.rmSync(legacyRoot, { recursive: true, force: true }); }
+  console.log(JSON.stringify({ status: 'passed', scope: 'concurrent claims, failed attempts and incomplete usage reporting' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
