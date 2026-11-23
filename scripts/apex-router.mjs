@@ -12,7 +12,7 @@ import { canonicalApexRoot, globalBridge } from './apex-paths.mjs';
  */
 import crypto from 'node:crypto';
 import { demoPresentation, verifyChatPresentation } from './chat-demo.mjs';
-import { validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
+import { observedControlCoverageStatus, validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -759,6 +759,10 @@ function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
   const sandboxRoot = manifest?.entrypoint && path.resolve(run.runDir, path.dirname(manifest.entrypoint));
   if (!runtimeFile || !sandboxFiles || !runtime || !manifest || !sandboxRoot || path.resolve(run.runDir, runtime.runtimeRoot || '') !== sandboxRoot || runtime.status !== 'running' || !/^http:\/\/127\.0\.0\.1:\d+\/$/.test(String(runtime.url || '')) || demo?.url !== runtime.url || !actionOutputReceiptFor(run.runDir, runtimeFile, 'generate_visual', true) || !actionOutputReceiptFor(run.runDir, sandboxFiles, 'generate_visual', true)) fail('runtime Demo registration requires a successful current Run visual-sandbox runtime and manifest; file URLs, formal services, and unverified sources are forbidden');
   if (!interactiveDemoReady(state, run.runDir)) fail('runtime Demo registration requires verified interactive user journeys for the current source');
+  if (usesCombinedPlan(state)) {
+    const coverage = observedControlCoverageStatus(verifyDemoInteractions(run.runDir, read(artifactFile(run.runDir, demo.interactionEvidence.path)), demo.url, { requireJourneyLocation: true }).controlCoverage);
+    if (!coverage.ready) fail(`runtime Demo registration requires coverage of observed controls: ${coverage.reason}${coverage.controls.length ? `: ${coverage.controls.join(', ')}` : ''}`);
+  }
   const receipt = { schemaVersion: '3.0', type: 'runtime-demo-registration', projectId: projectId(root), runId: run.runId, sessionId, registeredAt: now(), artifacts: records };
   const relative = path.join('registrations', `runtime-demo-${Date.now()}.json`); write(path.join(run.runDir, relative), receipt);
   runControllerCommand('register', [run.runDir, 'runtimeDemo', state.artifacts.runtimeDemo]);
@@ -1308,6 +1312,10 @@ function interactiveDemoRefreshRequired(state, runDir) {
 function runtimeDemoRegistrationReady(state, runDir) {
   if (!runDir || !state.artifacts?.runtimeDemo || !state.artifacts?.designCandidates || !state.artifacts?.visualReference || !state.artifacts?.gate1VisualOutput) return false;
   if (!interactiveDemoReady(state, runDir)) return false;
+  if (usesCombinedPlan(state)) {
+    try { const demo = read(artifactFile(runDir, state.artifacts.runtimeDemo)); const capture = read(artifactFile(runDir, demo.interactionEvidence.path)); if (!observedControlCoverageStatus(verifyDemoInteractions(runDir, capture, demo.url, { requireJourneyLocation: true }).controlCoverage).ready) return false; }
+    catch { return false; }
+  }
   const required = ['runtimeDemo', 'designCandidates', 'visualReference', 'gate1VisualOutput'];
   return required.every(artifact => {
     const reference = state.artifacts[artifact];
@@ -1772,6 +1780,12 @@ function automaticWorkStep(state, runDir, action) {
       } catch { return false; }
     })();
     if (!runtimeEvidenceCurrent) return step('capture-runtime-browser-evidence', '验证前端 Demo 的任务交互并采集浏览器证据', ['runtime-browser-spec.json', 'evidence/runtime-browser-capture.json'], '内部从已确认来源、入口和运行时 URL 生成浏览器规格，再调用 browser-capture.mjs capture；必须验证 DOM 中每项已选来源，并真实执行 interactionContract 的全部操作，核对可见状态变化与重置；截图、动效帧不能代替交互通过证据。');
+    if (usesCombinedPlan(state)) {
+      const runtime = read(artifactFile(runDir, state.artifacts.visualSandboxRuntime));
+      const coverage = observedControlCoverageStatus(verifyDemoInteractions(runDir, read(runtimeEvidence), runtime.url, { requireJourneyLocation: true }).controlCoverage);
+      if (coverage.reason === 'browser control inventory is missing') return step('capture-runtime-browser-evidence', '重新采集 Demo 的控件与交互证据', ['runtime-browser-spec.json', 'evidence/runtime-browser-capture.json'], '当前交互回执缺少控件盘点；在同一 Run 重新调用 browser-capture.mjs，核实真实旅程及已观察控件，不新增用户确认。');
+      if (!coverage.ready) return step('repair-demo-control-coverage', '补全已观察控件的真实交互', ['demo-source-input.json', 'demo-source-manifest.json', 'visual-sandbox-files.json'], `当前控件盘点未通过：${coverage.reason}${coverage.controls.length ? `；未覆盖：${coverage.controls.join('、')}` : ''}。${coverage.reason === 'browser control inventory was truncated' ? '盘点已达到容量上限，必须保留未验证状态并处理容量问题，不得删除必要控件以绕过检查。' : '在当前已确认视觉方案内补充可重复的交互旅程或修复控件，重新编译源码、物化并采集浏览器证据。'}不新增用户确认。禁用、只读或隐藏控件不在此项盘点内，未访问状态仍须结合产品方案检查。`);
+    }
     if (!runFile('runtimeVisualBaseline') || !runFile('runtimeDemo') || !runFile('runtimeSourceLock') || !interactiveDemoReady(state, runDir)) return step('freeze-runtime-visual-baseline', '冻结真实运行时视觉基线', ['runtime-visual-baseline-input.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'runtime-demo.json'], '内部根据已确认来源、真实浏览器证据和运行时依赖生成基线输入，并调用 runtime-visual-baseline.mjs compile；不得手填 URL、截图或来源哈希。');
     if (!runFile('visualReference') || !runFile('gate1VisualOutput')) return step('emit-runtime-visual-reference', '从已冻结 Demo 生成视觉引用', ['visual-reference-input.json', 'visual-reference.json', 'gate1-visual-output.json'], '内部仅使用已冻结运行时截图、内容锁、布局锁、图表口径和 Existing 页面骨架映射调用 visual-reference-compiler.mjs emit。');
     if (!runFile('designCandidates')) return step('record-selected-runtime-design-candidate', '登记已确认方案的运行时候选证据', ['design-candidates.json'], '内部将视觉方案中的已选候选与其真实运行时截图、策略哈希和取舍依据写入 design-candidates.json，再调用 experience-evaluator.mjs candidates；禁止生成虚假的替代效果图或要求用户再次确认视觉。');

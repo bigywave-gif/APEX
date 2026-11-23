@@ -8,11 +8,37 @@ const objectHash = value => demoHash(JSON.stringify(value));
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const assert = (value, message) => { if (!value) throw new Error(`Interactive Demo: ${message}`); };
 
+export function observedControlCoverageStatus(coverage) {
+  if (coverage?.scope !== 'observed-journey-states-only' || !Array.isArray(coverage.untestedControls) || typeof coverage.truncated !== 'boolean') return { ready: false, reason: 'browser control inventory is missing', controls: [] };
+  if (coverage.truncated) return { ready: false, reason: 'browser control inventory was truncated', controls: [] };
+  const exemptions = coverage.sharedControlReviews || [];
+  if (!Array.isArray(exemptions)) return { ready: false, reason: 'shared control review is invalid', controls: [] };
+  const observed = new Map((coverage.observedControls || []).map(item => [item.key, item]));
+  const untested = new Set(coverage.untestedControls.map(item => item?.key)), exercised = new Set(coverage.exercisedControls || []), reviewed = new Set();
+  for (const item of exemptions) {
+    const source = observed.get(item?.key), target = observed.get(item?.equivalentTo);
+    const sameIdentity = typeof item?.key === 'string' && typeof item?.equivalentTo === 'string' && item.key.includes('|') && item.equivalentTo.includes('|') && item.key.split('|').slice(1).join('|') === item.equivalentTo.split('|').slice(1).join('|');
+    if (!sameIdentity || !source || !target || !untested.has(item.key) || !exercised.has(item.equivalentTo) || reviewed.has(item.key) || source.tag !== target.tag || source.role !== target.role || source.type !== target.type || typeof item.rationale !== 'string' || item.rationale.trim().length < 8) return { ready: false, reason: 'shared control review is invalid or not tied to a tested equivalent', controls: [] };
+    reviewed.add(item.key);
+  }
+  const controls = coverage.untestedControls.map(item => item?.key).filter(key => !reviewed.has(key));
+  if (controls.some(key => !nonempty(key))) return { ready: false, reason: 'browser control inventory contains invalid identities', controls: [] };
+  return controls.length ? { ready: false, reason: 'observed controls have no executed journey', controls } : { ready: true, reason: null, controls: [] };
+}
+
 export function validateInteractionContract(contract, tasks = []) {
   assert(contract?.schemaVersion === '1.0' && contract.kind === 'interactive-ui-prototype', 'interactionContract must describe an interactive-ui-prototype');
   assert(contract.dataMode === 'mock', 'the frontend Demo must use isolated mock data');
   assert(nonempty(contract.notice?.selector) && nonempty(contract.notice?.text), 'a visible sample-data notice is required');
   assert(Array.isArray(contract.journeys) && contract.journeys.length > 0, 'executable user journeys are required');
+  if (contract.sharedControlReviews !== undefined) {
+    assert(Array.isArray(contract.sharedControlReviews), 'shared control reviews must be an array');
+    const keys = new Set();
+    for (const item of contract.sharedControlReviews) {
+      assert(nonempty(item?.key) && nonempty(item?.equivalentTo) && typeof item.rationale === 'string' && item.rationale.trim().length >= 8 && !keys.has(item.key), 'shared control review needs unique keys, a tested equivalent and a concrete rationale');
+      keys.add(item.key);
+    }
+  }
   const ids = new Set();
   for (const journey of contract.journeys) {
     assert(/^[a-zA-Z0-9_-]+$/.test(journey?.id || '') && !ids.has(journey.id), 'journey IDs must be unique safe names');
@@ -80,13 +106,13 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     for (const ref of [actual.screenshot, actual.dom]) assert(ref && demoHash(fs.readFileSync(localFile(runDir, ref.path))) === ref.sha256, `missing or changed browser artifact: ${expected.id}`);
   }
   const testedActions = source.contract.journeys.flatMap(journey => journey.steps.map(step => ({ journeyId: journey.id, selector: step.selector, action: step.action })));
-  const inventoryAvailable = evidence.journeys.every(journey => Array.isArray(journey.observedControls) && Array.isArray(journey.exercisedControls) && typeof journey.controlInventoryTruncated === 'boolean');
+  const inventoryAvailable = evidence.journeys.every(journey => journey.controlInventoryVersion === '1.1' && Array.isArray(journey.observedControls) && Array.isArray(journey.exercisedControls) && typeof journey.controlInventoryTruncated === 'boolean');
   const observed = new Map(), exercised = new Set();
   if (inventoryAvailable) for (const journey of evidence.journeys) {
     for (const control of journey.observedControls) { assert(nonempty(control?.key), 'invalid observed control identity'); observed.set(control.key, control); }
     for (const key of journey.exercisedControls) { assert(nonempty(key), 'invalid exercised control identity'); exercised.add(key); }
   }
-  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
+  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), sharedControlReviews: source.contract.sharedControlReviews || [], truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
 }
 
 // This function is serialized into Playwright CLI run-code. It has no closure
@@ -103,13 +129,13 @@ export async function runDemoJourney(page, input) {
       if (!(element instanceof HTMLElement) || !element.getClientRects().length || getComputedStyle(element).visibility === 'hidden' || element.matches(':disabled') || element.closest('[aria-disabled="true"], [aria-hidden="true"], [inert]') || element.matches('input[readonly],textarea[readonly]')) continue;
       if (typeof element.checkVisibility === 'function' && !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
       let key;
-      if (element.id && document.querySelectorAll(`#${CSS.escape(element.id)}`).length === 1) key = `id:${element.id}`;
+      if (element.id && document.querySelectorAll(`#${CSS.escape(element.id)}`).length === 1) key = `id:${encodeURIComponent(element.id)}`;
       else {
         const parts = []; let node = element;
         while (node && node.nodeType === 1) { const siblings = node.parentElement ? [...node.parentElement.children].filter(item => item.tagName === node.tagName) : [node]; parts.unshift(`${node.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(node) + 1})`); node = node.parentElement; }
         key = `path:${parts.join('>')}`;
       }
-      key = `route:${location.pathname}${location.search}${location.hash}|${key}`;
+      key = `route:${encodeURIComponent(`${location.pathname}${location.search}${location.hash}`)}|${key}`;
       found.set(key, { key, tag: element.tagName.toLowerCase(), role: element.getAttribute('role') || null, type: element.getAttribute('type') || null });
     }
     return [...found.values()];
@@ -169,7 +195,7 @@ export async function runDemoJourney(page, input) {
   catch (cause) { error ||= cause.message; }
   finally { await page.unroute('**/*', guard); }
   const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, observedControls: [...controls.values()], exercisedControls: [...exercisedControls], controlInventoryTruncated, error, html };
+  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, controlInventoryVersion: '1.1', observedControls: [...controls.values()], exercisedControls: [...exercisedControls], controlInventoryTruncated, error, html };
 }
 
 export function journeyCode(input) {

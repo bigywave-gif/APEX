@@ -5,7 +5,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { agentRuntimeStatus } from './run-ledger.mjs';
-import { demoContract, demoFragment } from './interactive-demo-test-fixture.mjs';
+import { chatDemoContract as demoContract, demoFragment } from './interactive-demo-test-fixture.mjs';
 import { verifyDemoInteractions } from './interactive-demo.mjs';
 import crypto from 'node:crypto';
 const core=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -102,7 +102,8 @@ try {
 
  const tokenHash=`sha256:${crypto.createHash('sha256').update('{}').digest('hex')}`;
  const fragment=demoFragment.replace('layout-a chart-b style-a font-a content-a','layout component style font content').replace('<div id="apex-chat-example"',`<div data-apex-node="main" data-apex-component="main" data-apex-component-kind="panel" data-apex-token-hash="${tokenHash}" id="apex-chat-example"`);
- const demoInput=put('demo-source-input.json',{schemaVersion:'3.0',entrypoint:'index.html',interactionContract:demoContract,chatPreview:{fragment:'preview.html'},files:[{path:'preview.html',content:fragment}],sourceBindings:selections.map(item=>({sourceSelectionId:item.id,files:['preview.html']}))});
+ const sourceInput={schemaVersion:'3.0',entrypoint:'index.html',interactionContract:{...demoContract,journeys:demoContract.journeys.filter(item=>item.id!=='input')},chatPreview:{fragment:'preview.html'},files:[{path:'preview.html',content:fragment}],sourceBindings:selections.map(item=>({sourceSelectionId:item.id,files:['preview.html']}))};
+ const demoInput=put('demo-source-input.json',sourceInput);
  invoke('generate_visual','demo-source-compiler.mjs',['compile',dir,demoInput]);
  invoke('generate_visual','visual-sandbox-writer.mjs',['materialize',dir,path.join(dir,'demo-source-manifest.json')]);
  invoke('generate_visual','visual-sandbox-runtime.mjs',['start',dir]);
@@ -111,6 +112,15 @@ try {
  invoke('generate_visual','browser-capture.mjs',['capture',dir,runtime.url,browserSpec]);
  const capture=JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json')));
  verifyDemoInteractions(dir,capture,runtime.url);
+ const gapStatus=route(['status',project,id,session]);
+ assert.equal(gapStatus.executionDirective.currentStep.id,'repair-demo-control-coverage');
+ assert.match(gapStatus.executionDirective.currentStep.details,/project-name/);
+ assert.ok(!gapStatus.allowedActions.includes('register_runtime_demo'));
+ const correctedInput=put('demo-source-corrected.json',{...sourceInput,interactionContract:demoContract});
+ invoke('generate_visual','demo-source-compiler.mjs',['compile',dir,correctedInput]);
+ invoke('generate_visual','visual-sandbox-writer.mjs',['materialize',dir,path.join(dir,'demo-source-manifest.json')]);
+ invoke('generate_visual','browser-capture.mjs',['capture',dir,runtime.url,browserSpec]);
+ assert.equal(verifyDemoInteractions(dir,JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json'))),runtime.url).controlCoverage.untestedControls.length,0);
  const baselineInput=put('runtime-visual-baseline-input.json',{schemaVersion:'3.0',runtimeRoot:'visual-sandbox',referenceScreenId:'desktop',patterns:[]});
  invoke('generate_visual','runtime-visual-baseline.mjs',['compile',dir,project,baselineInput]);
  const baseline=JSON.parse(fs.readFileSync(path.join(dir,'runtime-visual-baseline.json')));

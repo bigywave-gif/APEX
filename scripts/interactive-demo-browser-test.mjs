@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { demoContract, demoFragment } from './interactive-demo-test-fixture.mjs';
+import { chatDemoContract as demoContract, demoFragment } from './interactive-demo-test-fixture.mjs';
 import { verifyDemoInteractions, journeyCode } from './interactive-demo.mjs';
 import { bindStitchScreen } from './stitch-screen-binding.mjs';
 import { formalStitchProgress } from './formal-stitch-progress.mjs';
@@ -84,8 +84,8 @@ try {
   if (baselineValidation.status !== 0) throw new Error(`a real no-motion Demo baseline must satisfy its schema: ${baselineValidation.stderr || baselineValidation.stdout}`);
   if (baseline.screenCaptures?.length !== 2 || !['desktop', 'mobile'].every(id => baseline.screenCaptures.some(item => item.id === id && item.screenshot.sha256 && item.dom.sha256)) || baseline.journeyCaptures?.length !== demoContract.journeys.length || !demoContract.journeys.every(journey => baseline.journeyCaptures.some(item => item.id === journey.id && item.task === journey.task && /^\d+x\d+$/.test(item.viewport) && item.finalUrl.startsWith(runtime.url) && item.screenshot.sha256 && item.dom.sha256))) throw new Error('real browser baseline must bind both viewports and every executed user journey to its screenshot and DOM');
   const demo = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-demo.json')));
-  if (demo.kind !== 'interactive-ui-prototype' || demo.journeyCount !== 2 || demo.presentation.screenshotOnlyAllowed !== false || demo.presentation.preferred !== 'chat-inline' || !demo.presentation.contentReference?.includes('preview.html')) throw new Error('compiled Demo did not retain the interaction contract');
-  if (demo.controlCoverage?.scope !== 'observed-journey-states-only' || demo.controlCoverage.truncated || !['route:/|id:settings-tab', 'route:/|id:projects-tab', 'route:/|id:project-name'].every(key => demo.controlCoverage.untestedControls.some(item => item.key === key)) || demo.controlCoverage.untestedControls.some(item => ['route:/|id:increment', 'route:/|id:reset'].includes(item.key))) throw new Error('Demo coverage must expose observed but untested controls without mislabeling executed actions');
+  if (demo.kind !== 'interactive-ui-prototype' || demo.journeyCount !== demoContract.journeys.length || demo.presentation.screenshotOnlyAllowed !== false || demo.presentation.preferred !== 'chat-inline' || !demo.presentation.contentReference?.includes('preview.html')) throw new Error('compiled Demo did not retain the interaction contract');
+  if (demo.controlCoverage?.scope !== 'observed-journey-states-only' || demo.controlCoverage.truncated || demo.controlCoverage.untestedControls.length || !['route:%2F|id:settings-tab', 'route:%2F|id:projects-tab', 'route:%2F|id:project-name', 'route:%2F|id:notifications'].every(key => demo.controlCoverage.observedControls.some(item => item.key === key))) throw new Error('complete Demo journeys must exercise all observed sample controls');
   // Prove that dispatching a real click without the expected UI change fails.
   const cli = fs.readdirSync(npmCacheRoot).map(name => path.join(npmCacheRoot, name, 'node_modules/@playwright/cli/playwright-cli.js')).find(file => fs.existsSync(file));
   if (!cli) throw new Error('browser acceptance needs the installed Playwright CLI');
@@ -129,13 +129,13 @@ try {
       const match = result.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
       let trace = match && JSON.parse(match[1]); if (typeof trace === 'string') trace = JSON.parse(trace);
       const keys = (trace?.observedControls || []).map(item => item.key);
-      if (result.status !== 0 || trace?.status !== 'passed' || !keys.includes('route:/control-audit-fixture.html|id:custom-radio') || !keys.includes('route:/control-audit-fixture.html|id:custom-slider') || keys.includes('route:/control-audit-fixture.html|id:disabled-control') || !trace.exercisedControls.includes('route:/control-audit-fixture.html|id:custom-radio')) throw new Error('custom controls or disabled ancestors were misclassified');
+      if (result.status !== 0 || trace?.status !== 'passed' || !keys.includes('route:%2Fcontrol-audit-fixture.html|id:custom-radio') || !keys.includes('route:%2Fcontrol-audit-fixture.html|id:custom-slider') || keys.includes('route:%2Fcontrol-audit-fixture.html|id:disabled-control') || !trace.exercisedControls.includes('route:%2Fcontrol-audit-fixture.html|id:custom-radio')) throw new Error('custom controls or disabled ancestors were misclassified');
     } finally { fs.rmSync(customControlFile, { force: true }); }
     const routeJourney = { ...demoContract.journeys[0], route: '/?variant=other' };
     const routeResult = cliCall(['run-code', journeyCode({ journey: routeJourney, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/sample-other-route.png') })]);
     const routeMatch = routeResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
     let routeTrace = routeMatch && JSON.parse(routeMatch[1]); if (typeof routeTrace === 'string') routeTrace = JSON.parse(routeTrace);
-    if (routeResult.status !== 0 || routeTrace?.status !== 'passed' || !routeTrace.observedControls.some(item => item.key === 'route:/?variant=other|id:increment') || routeTrace.observedControls.some(item => item.key === 'route:/|id:increment')) throw new Error('control inventory must distinguish identical IDs on different routes');
+    if (routeResult.status !== 0 || routeTrace?.status !== 'passed' || !routeTrace.observedControls.some(item => item.key === 'route:%2F%3Fvariant%3Dother|id:increment') || routeTrace.observedControls.some(item => item.key === 'route:%2F|id:increment')) throw new Error('control inventory must distinguish identical IDs on different routes');
   } finally { cliCall(['close']); }
   // Formal verification can replace its capture file without invalidating Demo evidence.
   const frozen = JSON.parse(fs.readFileSync(path.join(runDir, demo.interactionEvidence.path)));
@@ -250,8 +250,8 @@ try {
     const job = agentRuntimeStatus(runDir).jobs.find(item => item.jobId === selection.agentJobs['product-manager']);
     const claim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, job.jobId, 'verify']);
     if (claim.status !== 'running') throw new Error('product reviewer must claim a running job');
-    const interaction = repeated.formalInteractions.journeys.find(item => item.task === '添加示例项目');
-    const advisory = { schemaVersion: '1.0', roleId: 'product-manager', stage: 'verify', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'product-observation', classification: 'fact', statement: '正式浏览器执行添加项目并观察到数量变化。', evidence: [roleState.artifacts.runtimeStateMatrix] }], recommendations: [{ id: 'product-result', choice: '确认添加任务的可观察结果。', rationale: '真实交互结果与演示任务一致。', acceptance: ['添加后数量增加。'] }], execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'browser-fixture', sessionId: job.payload.agentSessionId, skillBindings: job.payload.skillBindings, leaseToken: claim.leaseToken }, status: 'ready', productReview: [{ task: interaction.task, interactionId: interaction.id, evidence: interaction.evidence, expectedOutcome: '添加后数量增加', observedOutcome: '数量从 0 增加到 1', rationale: '添加操作与对应数量变化符合任务', verdict: 'passed' }] };
+    const productReview = repeated.formalInteractions.journeys.map(item => ({ task: item.task, interactionId: item.id, evidence: item.evidence, expectedOutcome: `示例任务“${item.task}”按合同改变状态`, observedOutcome: item.steps.map(step => `${JSON.stringify(step.before)} → ${JSON.stringify(step.after)}`).join('；'), rationale: '测试夹具中的动作与观察结果对应该示例任务', verdict: 'passed' }));
+    const advisory = { schemaVersion: '1.0', roleId: 'product-manager', stage: 'verify', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'product-observation', classification: 'fact', statement: '正式浏览器执行示例任务并观察到状态变化。', evidence: [roleState.artifacts.runtimeStateMatrix] }], recommendations: [{ id: 'product-result', choice: '确认示例任务的可观察结果。', rationale: '真实交互结果与演示任务一致。', acceptance: ['示例任务状态变化可见。'] }], execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'browser-fixture', sessionId: job.payload.agentSessionId, skillBindings: job.payload.skillBindings, leaseToken: claim.leaseToken }, status: 'ready', productReview };
     const reviewInput = write('fixture-product-review.json', advisory);
     run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'record', runDir, 'verify', reviewInput]);
     if (agentRuntimeStatus(runDir, job.jobId).jobs[0].status !== 'succeeded') throw new Error('product review must settle its own durable job');

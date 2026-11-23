@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
+import { observedControlCoverageStatus, validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
 import { demoContract, seedInteractionFixture } from './interactive-demo-test-fixture.mjs';
 
 let checks = 0;
@@ -27,12 +27,24 @@ try {
   assert.equal(verified.controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
   assert.deepEqual(verified.controlCoverage.testedActions.map(item => item.selector), ['#increment', '#increment', '#reset']); checks++;
   const inventoried = structuredClone(capture);
-  for (const journey of inventoried.interactiveDemo.journeys) { journey.observedControls = [{ key: 'id:increment', tag: 'button' }, { key: 'id:settings', tag: 'button' }]; journey.exercisedControls = ['id:increment']; journey.controlInventoryTruncated = false; }
+  for (const journey of inventoried.interactiveDemo.journeys) { journey.controlInventoryVersion = '1.1'; journey.observedControls = [{ key: 'id:increment', tag: 'button' }, { key: 'id:settings', tag: 'button' }]; journey.exercisedControls = ['id:increment']; journey.controlInventoryTruncated = false; }
   const coverage = verifyDemoInteractions(runDir, inventoried, url).controlCoverage;
   assert.equal(coverage.scope, 'observed-journey-states-only'); checks++;
   assert.deepEqual(coverage.untestedControls.map(item => item.key), ['id:settings']); checks++;
+  assert.equal(observedControlCoverageStatus(coverage).ready, false); checks++;
+  assert.deepEqual(observedControlCoverageStatus(coverage).controls, ['id:settings']); checks++;
+  assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }).ready, true); checks++;
+  assert.equal(observedControlCoverageStatus(verified.controlCoverage).ready, false); checks++;
+  const oldInventory = structuredClone(inventoried); delete oldInventory.interactiveDemo.journeys[0].controlInventoryVersion;
+  assert.equal(verifyDemoInteractions(runDir, oldInventory, url).controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
+  const shared = { scope: 'observed-journey-states-only', truncated: false, observedControls: [{ key: 'route:/|id:home', tag: 'button', role: null, type: 'button' }, { key: 'route:/settings|id:home', tag: 'button', role: null, type: 'button' }], exercisedControls: ['route:/|id:home'], untestedControls: [{ key: 'route:/settings|id:home' }], sharedControlReviews: [{ key: 'route:/settings|id:home', equivalentTo: 'route:/|id:home', rationale: '同一导航组件在两个路由保持相同行为' }] };
+  assert.equal(observedControlCoverageStatus(shared).ready, true); checks++;
+  assert.equal(observedControlCoverageStatus({ ...shared, exercisedControls: [] }).ready, false); checks++;
+  assert.equal(observedControlCoverageStatus({ ...shared, sharedControlReviews: [{ ...shared.sharedControlReviews[0], equivalentTo: 'route:/|id:other' }] }).ready, false); checks++;
+  assert.equal(observedControlCoverageStatus({ ...shared, sharedControlReviews: [{ ...shared.sharedControlReviews[0], rationale: '一样' }] }).ready, false); checks++;
   inventoried.interactiveDemo.journeys[0].controlInventoryTruncated = true;
   assert.equal(verifyDemoInteractions(runDir, inventoried, url).controlCoverage.truncated, true); checks++;
+  assert.equal(observedControlCoverageStatus(verifyDemoInteractions(runDir, inventoried, url).controlCoverage).ready, false); checks++;
   const legacyCapture = structuredClone(capture);
   for (const journey of legacyCapture.interactiveDemo.journeys) { delete journey.finalUrl; delete journey.viewport; }
   verifyDemoInteractions(runDir, legacyCapture, url); checks++;

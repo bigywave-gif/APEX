@@ -46,6 +46,7 @@ export const workflowNodes = Object.freeze({
   'rebuild-invalid-run-local-demo-source': node('generate_visual', ['demo-source-manifest.json', 'visual-sandbox-files.json'], actionScript('visual-sandbox-writer.mjs')),
   'start-run-local-demo': node('generate_visual', ['visual-sandbox-runtime.json'], actionScript('visual-sandbox-runtime.mjs')),
   'capture-runtime-browser-evidence': node('generate_visual', ['evidence/runtime-browser-capture.json'], actionScript('browser-capture.mjs')),
+  'repair-demo-control-coverage': node('generate_visual', ['demo-source-manifest.json', 'visual-sandbox-files.json'], actionScript('demo-source-compiler.mjs')),
   'freeze-runtime-visual-baseline': node('generate_visual', ['runtime-visual-baseline.json', 'runtime-demo.json', 'runtime-source-lock.json'], actionScript('runtime-visual-baseline.mjs')),
   'emit-runtime-visual-reference': node('generate_visual', ['visual-reference.json', 'gate1-visual-output.json'], actionScript('visual-reference-compiler.mjs')),
   'record-selected-runtime-design-candidate': node('generate_visual', ['design-candidates.json'], actionScript('experience-evaluator.mjs')),
