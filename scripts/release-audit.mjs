@@ -31,6 +31,12 @@ progressTimer.unref();
 // Auditing must not create a release or advance the version before checks pass.
 const versionResult = spawnSync(process.execPath, [versionManager, 'analyze'], { encoding: 'utf8' });
 results.push(check('release-version', versionResult.status === 0, (versionResult.stderr || versionResult.stdout || 'version policy analyzed').trim()));
+try {
+  const analysis = JSON.parse(versionResult.stdout || '{}');
+  const baseline = JSON.parse(fs.readFileSync(path.join(apexRoot, 'registry', 'release-baseline.json'), 'utf8'));
+  const current = versionResult.status === 0 && analysis.status === 'analyzed' && Array.isArray(analysis.changed) && analysis.changed.length === 0 && baseline.version === analysis.current;
+  results.push(check('release-baseline-current', current, current ? `release baseline matches ${analysis.current}` : `release baseline does not match current version or files: baseline=${baseline.version || 'missing'}, current=${analysis.current || 'missing'}, changed=${Array.isArray(analysis.changed) ? analysis.changed.length : 'unknown'}; finalize the release baseline after the intended release candidate is verified`));
+} catch (error) { results.push(check('release-baseline-current', false, `release baseline could not be verified: ${error.message}`)); }
 const bridgeSyncResult = spawnSync(process.execPath, [bridgeSync], { encoding: 'utf8' });
 results.push(check('global-bridge-published', bridgeSyncResult.status === 0, (bridgeSyncResult.stderr || bridgeSyncResult.stdout || 'ok').trim()));
 const manifest = fs.existsSync(path.join(apexRoot, 'manifest.yaml')) ? fs.readFileSync(path.join(apexRoot, 'manifest.yaml'), 'utf8') : '';
