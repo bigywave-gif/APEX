@@ -238,6 +238,13 @@ const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
 const execution = await runControlledSubprocess(process.execPath, [target, ...scriptArgs], {
   timeoutMs: executionTimeoutMs, runDir: runDirectory,
+  onSpawn: localProcess => {
+    const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+    if (receipt.status !== 'running' || receipt.authorizationRef !== authorizationRef) throw new Error('running operation receipt changed');
+    const temporary = `${receiptFile}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, `${JSON.stringify({ ...receipt, localProcess }, null, 2)}\n`);
+    fs.renameSync(temporary, receiptFile);
+  },
   env: { ...process.env, APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: authorizationRef, APEX_ROUTER_ACTION: action, APEX_ROUTER_OPERATION_RECEIPT: path.relative(runDirectory, receiptFile) }
 });
 const finishedAt = new Date().toISOString();
@@ -272,7 +279,7 @@ const productionAfter = action === 'generate_visual' ? productionSnapshot() : nu
 const productionChangedFiles = productionBefore && productionAfter ? productionChanges(productionBefore, productionAfter) : [];
 const productionBoundaryError = productionChangedFiles.length ? `generate_visual modified formal project files outside .apex: ${productionChangedFiles.map(item => item.path).join(', ')}; Demo generation is restricted to the current run visual-sandbox` : null;
 const timedOut = execution.error?.code === 'ETIMEDOUT';
-const executionError = execution.error ? `${execution.error.code || 'spawn-error'}: ${execution.error.message}` : '';
+const executionError = execution.error ? `${execution.error.code || 'spawn-error'}: ${execution.error.message}${execution.error.code === 'APEX_SUBPROCESS_IDENTITY_UNAVAILABLE' ? '; external side effects remain unverified' : ''}` : '';
 const succeeded = execution.status === 0 && !execution.error && !productionBoundaryError && !stateReconciliationError;
 // Failed operations may still emit useful evidence; hashes identify it without marking it as a successful artifact.
 const outputHashes = outputFileHashes(execution.stdout);

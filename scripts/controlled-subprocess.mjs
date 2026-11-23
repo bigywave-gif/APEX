@@ -3,7 +3,7 @@ import { runCancellationRequested } from './run-ledger.mjs';
 
 // Local child processes are isolated so cancellation can stop their process
 // group without signalling unrelated sessions. Remote effects remain unknown.
-export function runControlledSubprocess(command, args, { env, runDir, timeoutMs, maxBuffer = 1024 * 1024, pollMs = 500, monitorFailureGraceMs = 5000 }) {
+export function runControlledSubprocess(command, args, { env, runDir, timeoutMs, maxBuffer = 1024 * 1024, pollMs = 500, monitorFailureGraceMs = 5000, onSpawn = null }) {
   return new Promise(resolve => {
     try {
       if (runCancellationRequested(runDir, { busyTimeoutMs: 5000, requireLedger: true })) return resolve({ status: null, signal: null, error: null, stdout: '', stderr: '', cancelled: true });
@@ -19,6 +19,10 @@ export function runControlledSubprocess(command, args, { env, runDir, timeoutMs,
       try { if (detached) process.kill(-child.pid, name); else child.kill(name); } catch (failure) { if (failure.code !== 'ESRCH') error ||= failure; }
     };
     const stop = () => { signal('SIGTERM'); if (!escalation) escalation = setTimeout(() => signal('SIGKILL'), 2000); };
+    if (child.pid && onSpawn) {
+      try { onSpawn({ pid: child.pid, processGroup: detached ? child.pid : null, platform: process.platform }); }
+      catch (cause) { error = Object.assign(new Error(`failed to persist subprocess identity: ${cause.message}`), { code: 'APEX_SUBPROCESS_IDENTITY_UNAVAILABLE' }); stop(); }
+    }
     const append = (current, chunk) => {
       if (current.length + chunk.length > maxBuffer) { error ||= Object.assign(new Error('controlled subprocess output exceeded maxBuffer'), { code: 'ENOBUFS' }); stop(); return current; }
       return Buffer.concat([current, chunk]);

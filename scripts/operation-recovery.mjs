@@ -20,7 +20,17 @@ export function inspectRunningOperations(runDir, activeReceiptRef = '') {
     if (!owner || owner.host !== os.hostname() || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) { deferred.push({ reference, reason: 'owner-unverified' }); continue; }
     try { process.kill(owner.pid, 0); deferred.push({ reference, reason: 'gateway-live', pid: owner.pid }); }
     catch (error) {
-      if (error.code === 'ESRCH') interrupted.push({ reference, receipt });
+      if (error.code === 'ESRCH') {
+        const local = receipt.localProcess;
+        if (!local || local.platform !== process.platform || process.platform === 'win32' || !Number.isSafeInteger(local.processGroup) || local.processGroup <= 0 || local.pid !== local.processGroup) {
+          deferred.push({ reference, reason: 'subprocess-group-unverified' }); continue;
+        }
+        try { process.kill(-local.processGroup, 0); deferred.push({ reference, reason: 'subprocess-group-live', pid: local.pid }); }
+        catch (groupError) {
+          if (groupError.code === 'ESRCH') interrupted.push({ reference, receipt });
+          else deferred.push({ reference, reason: 'subprocess-group-unverified', pid: local.pid, code: groupError.code || 'unknown' });
+        }
+      }
       else deferred.push({ reference, reason: 'gateway-status-unverified', pid: owner.pid, code: error.code || 'unknown' });
     }
   }

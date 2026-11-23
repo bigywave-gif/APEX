@@ -25,6 +25,9 @@ try {
     const result=JSON.parse(recovery.stdout);assert.equal(result.status,'waiting');assert.ok(result.deferredOperations.some(item=>item.reason==='gateway-live'));
     const receipts=fs.readdirSync(path.join(dir,'operations')).filter(name=>name.endsWith('.json')).map(name=>JSON.parse(fs.readFileSync(path.join(dir,'operations',name),'utf8')));
     assert.ok(receipts.some(item=>item.action==='collect_existing_baseline'&&item.status==='running'));
+    const activeReceipt=receipts.find(item=>item.action==='collect_existing_baseline');
+    assert.ok(Number.isSafeInteger(activeReceipt.localProcess?.pid));
+    if(process.platform!=='win32')assert.equal(activeReceipt.localProcess.processGroup,activeReceipt.localProcess.pid);
     fs.writeSync(writer,'{}');fs.closeSync(writer);
     const code=await Promise.race([ended,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('live operation did not finish')),10000))]);clearTimeout(timer);
     assert.equal(code,0,err||out);

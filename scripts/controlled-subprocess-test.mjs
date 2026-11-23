@@ -6,6 +6,8 @@ try {
   const state={runId:'subprocess',revision:1,lifecycle:'active',artifacts:{}};fs.writeFileSync(path.join(dir,'state.json'),JSON.stringify(state));initializeLedger(dir,state,'fixture');
   const options={env:process.env,runDir:dir,timeoutMs:5000,pollMs:50};
   const ok=await runControlledSubprocess(process.execPath,['-e','process.stdout.write("ok")'],options);assert.equal(ok.status,0);assert.equal(ok.stdout,'ok');
+  const identityFailure=await runControlledSubprocess(process.execPath,['-e','setInterval(()=>{},1000)'],{...options,onSpawn:()=>{throw new Error('fixture write failure')}});
+  assert.equal(identityFailure.error?.code,'APEX_SUBPROCESS_IDENTITY_UNAVAILABLE');assert.ok(identityFailure.signal);
   const missing=await runControlledSubprocess(path.join(dir,'missing-executable'),[],options);assert.equal(missing.error?.code,'ENOENT');
   const monitorDir=fs.mkdtempSync(path.join(os.tmpdir(),'apex-monitor-'));
   try {
@@ -36,5 +38,5 @@ try {
     assert.ok(fs.existsSync(ready),'the signal-ignoring child must start before timeout');assert.equal(tree.error?.code,'ETIMEDOUT');assert.ok(Date.now()-began>=2800,'the child must require escalation after ignoring SIGTERM');
   }
   const pending=runControlledSubprocess(process.execPath,['-e','setInterval(()=>{},1000)'],options);setTimeout(()=>fenceRunCancellation(dir,'session','fixture'),150);const stopped=await pending;assert.equal(stopped.cancelled,true);assert.ok(stopped.signal);
-  console.log(JSON.stringify({status:'passed',checks:process.platform==='win32'?16:19,scope:'local-subprocess-success-timeout-output-limit-cancellation-and-monitor-recovery'}));
+  console.log(JSON.stringify({status:'passed',checks:process.platform==='win32'?18:21,scope:'local-subprocess-success-timeout-output-limit-cancellation-and-monitor-recovery'}));
 } finally {fs.rmSync(dir,{recursive:true,force:true});}
