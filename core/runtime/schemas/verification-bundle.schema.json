@@ -16,6 +16,7 @@
     "performance": { "type": "array" },
     "contract": { "type": "array" },
     "unverified": { "type": "array" },
-    "gate3": { "enum": ["pending", "passed", "failed"] }
+    "gate3": { "enum": ["pending", "passed", "failed"] },
+    "verificationStatus": { "enum": ["passed", "failed"] }
   }
 }

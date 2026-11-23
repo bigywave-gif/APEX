@@ -603,7 +603,7 @@ function validateGate3(runDir) {
   if (!reviewFile.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(reviewFile) || !reviewReceipt.startsWith(`${path.resolve(runDir)}${path.sep}operations${path.sep}`) || !fs.existsSync(reviewReceipt)) throw new Error('Gate 3 industry benchmark review or controlled-operation receipt is missing');
   const review = validateFile('industry-benchmark-review.schema.json', reviewFile); const receipt = readJson(reviewReceipt);
   if (industry.status !== 'passed' || industry.assessmentMode !== 'evidence-bound-review' || industry.visualPlanHash !== hashFile(currentPlan) || industry.provenanceHash !== hashFile(provenanceFile) || industry.reviewHash !== hashFile(reviewFile) || review.visualPlanHash !== hashFile(currentPlan) || receipt.status !== 'succeeded' || receipt.action !== 'verify' || receipt.script !== 'industry-benchmark.mjs' || receipt.inputFileHashes?.[industry.reviewPath] !== industry.reviewHash || industry.average < 4 || industry.scores.some(item => item.result !== 'passed')) throw new Error('Gate 3 industry benchmark is not evidence-bound to the current plan, runtime evidence, and controlled review');
-  if (verification.gate3 !== 'passed' || verification.unverified?.length) throw new Error('Verification Bundle has failures or unverified checks');
+  if ((verification.verificationStatus ?? verification.gate3) !== 'passed' || verification.unverified?.length) throw new Error('Verification Bundle has failures or unverified checks');
   if (state.roleChain?.confirmationModel === 'two-confirmations') for (const kind of ['accessibility', 'performance']) {
     if (!(contract.verificationRequirements || []).includes(kind)) continue;
     const checks = verification[kind] || [];

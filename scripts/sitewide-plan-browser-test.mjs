@@ -118,6 +118,7 @@ try{
  invoke('verify','project-intake.mjs',['scan',dir,project]);
  const verificationPlan=invoke('verify','verification-planner.mjs',['generate',dir]);assert.ok(verificationPlan.warnings.some(item=>item.includes('No executable project verification command')));
  const verification=invoke('verify','verification-orchestrator.mjs',['run',dir,verificationPlan.verificationPlan,project]);assert.equal(verification.verificationStatus,'passed');assert.equal(verification.gate3,'pending','verification bundle must not claim final Gate 3');
+ const verificationBundle=JSON.parse(fs.readFileSync(path.join(dir,'verification-bundle.json')));assert.equal(verificationBundle.verificationStatus,'passed');assert.equal(verificationBundle.gate3,'pending');
  const afterVerification=route(['status',project,id,session]);assert.equal(afterVerification.gates.gate3,'pending');assert.equal(afterVerification.executionDirective.currentStep.id,'seal-verification-evidence');
  const capturePath='evidence/runtime-browser-capture.json',captureHash=fileHash(capturePath);
  const captureReceipt=fs.readdirSync(path.join(dir,'operations')).find(name=>{try{const receipt=JSON.parse(fs.readFileSync(path.join(dir,'operations',name)));return receipt.status==='succeeded'&&receipt.script==='browser-capture.mjs'&&receipt.outputFileHashes?.[capturePath]===captureHash}catch{return false}});

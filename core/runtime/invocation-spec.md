@@ -75,6 +75,8 @@ Gate 1 与视觉方案的用户可读正文也属于该边界。Existing 局部�
 
 验证计划执行结果中的 `verificationStatus` 只表示已声明检查的汇总结果；新模型返回的 `gate3` 是 Router 状态中的实际 Gate 3 状态。即使验证计划通过，也须完成设计复核、证据封存和剩余 Gate 校验后才能声明最终交付通过。
 
+新生成的验证包也分别记录 `verificationStatus` 与生成时的 `gate3` 状态；该状态是生成时快照，最终 Gate 结果以 Router 当前状态为准。历史验证包没有 `verificationStatus` 时，兼容读取其旧版 `gate3` 检查汇总字段，不据此单独认定最终交付。
+
 ## 交付路线与确认
 
 本节编号 1–6 中的独立 Gate 1、Stitch 和实施冻结确认仅适用于 `gate-summary-only` 旧 Run；新 Run 依照上方 `two-confirmations` 和 Router 返回的实际确认与路线决策执行。自动节点、证据与授权约束对两种模型均适用。

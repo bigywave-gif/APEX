@@ -95,11 +95,13 @@ for (const category of required) {
     if (result.status !== 'passed') bundle.unverified.push({ category, id: check.id, status: result.status, reason: result.reason || result.error || 'check-failed' });
   }
 }
-bundle.gate3 = bundle.unverified.length ? 'failed' : 'passed';
+const verificationStatus = bundle.unverified.length ? 'failed' : 'passed';
+bundle.verificationStatus = verificationStatus;
+bundle.gate3 = state.roleChain?.confirmationModel === 'two-confirmations' ? (['passed', 'failed'].includes(state.gates?.gate3?.status) ? state.gates.gate3.status : 'pending') : verificationStatus;
 write(path.join(runDir, 'verification-bundle.json'), bundle);
 state.artifacts.verificationBundle = 'verification-bundle.json';
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
 write(stateFile, state);
-console.log(JSON.stringify({ verificationStatus: bundle.gate3, gate3: state.roleChain?.confirmationModel === 'two-confirmations' ? state.gates?.gate3?.status || 'pending' : bundle.gate3, unverified: bundle.unverified.length, verificationBundle: path.join(runDir, 'verification-bundle.json') }));
-if (bundle.gate3 !== 'passed') process.exitCode = 2;
+console.log(JSON.stringify({ verificationStatus, gate3: bundle.gate3, unverified: bundle.unverified.length, verificationBundle: path.join(runDir, 'verification-bundle.json') }));
+if (verificationStatus !== 'passed') process.exitCode = 2;
