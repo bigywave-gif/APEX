@@ -135,6 +135,7 @@ for (const [name, script] of [
   ['run-metrics-contract', 'run-metrics-test.mjs'],
   ['adapter-coverage-status', 'adapter-coverage-status-test.mjs'],
   ['project-adapter', 'project-adapter-test.mjs'],
+  ['project-scan', 'project-scan-test.mjs'],
   ['project-adapter-integration', 'project-adapter-integration-test.mjs'],
   ['design-contract-evidence', 'design-contract-evidence-test.mjs'],
   ['visual-skill-decision', 'visual-skill-decision-test.mjs'],

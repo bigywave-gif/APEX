@@ -1176,6 +1176,7 @@ function existingVisualBaselineStatus(runDir, state) {
     const browserStatus = existingBrowserCaptureFreshness(runDir, state, referenceStatus);
     if (!browserStatus.ready) return browserStatus;
     const inventory = read(inventoryFile);
+    if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) return { ready: false, reason: 'project inventory scan was truncated; expand its limits and rescan' };
     const reference = read(referenceFile);
     const skeleton = read(skeletonFile);
     const baseline = read(baselineFile);
@@ -1711,6 +1712,8 @@ function automaticWorkStep(state, runDir, action) {
   if (action === 'recover') return step('reconcile-run-integrity', '修复并重新对账当前 Run 的完整性', ['run-ledger.sqlite', 'state.json'], '当前 Run 的产物、谱系或 Agent 作业存在不一致。通过 recover 调用 apex-recover.mjs；无法自动修复时必须保留失败回执，禁止继续 Gate。');
   if (action === 'collect_existing_baseline') {
     if (!runFile('projectInventory')) return step('capture-project-inventory', '扫描正式项目入口、技术栈与脚本', ['project-inventory.json'], '通过 collect_existing_baseline 调用 project-intake.mjs scan；仅扫描正式项目，排除 .apex 与临时 Demo。');
+    const inventory = read(artifactFile(runDir, state.artifacts.projectInventory));
+    if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) return step('expand-project-inventory', '扩大项目扫描范围', ['project-scan-options.json', 'project-inventory.json'], '扫描结果存在截断。在当前 Run 内创建新的扫描选项文件（不得覆盖已登记输入），提高发生截断的 maxSourceFiles、maxEntrypoints、maxRoutes（各不超过 1000000），以新的 collect_existing_baseline 授权调用 project-intake.mjs scan <run-dir> <project-root> <options>，直至完整；达到上限仍截断时保留未验证状态。不得增加用户确认。');
     const reference = existingCodeReferenceFreshness(runDir, state);
     if (!reference.ready) return step('freeze-code-reference', '从当前目标页生成或刷新 Existing 代码闭包与页面骨架', ['baseline-code-scope-input.json', 'code-reference.json', 'page-skeleton.json'], `内部根据当前需求、真实入口和路由生成范围输入，再调用 existing-code-reference.mjs capture。当前原因：${reference.reason}。不得使用模板 Replace 值，也不得复用已漂移的快照。`);
     const display = existingBrowserCaptureFreshness(runDir, state, reference);

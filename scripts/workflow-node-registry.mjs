@@ -25,6 +25,7 @@ const routerCommand = command => ({ kind: 'router-command', command });
 export const workflowNodes = Object.freeze({
   'reconcile-run-integrity': node('recover', ['run-ledger.sqlite', 'state.json'], actionScript('apex-recover.mjs'), { inputPolicy: 'current-run-ledger-projection-and-operation-receipts-only', completion: 'reconciliation reports consistent; otherwise retain the typed repair-required receipt', failurePolicy: 'never resume a downstream gate while reconciliation remains repair-required', retry: 'repair the reported durable artifact, lineage, or Agent-job inconsistency before requesting another Router status' }),
   'capture-project-inventory': node('collect_existing_baseline', ['project-inventory.json'], actionScript('project-intake.mjs')),
+  'expand-project-inventory': node('collect_existing_baseline', ['project-inventory.json'], actionScript('project-intake.mjs')),
   'freeze-code-reference': node('collect_existing_baseline', ['code-reference.json', 'page-skeleton.json'], actionScript('existing-code-reference.mjs')),
   'capture-existing-browser-baseline': node('collect_existing_baseline', ['evidence/existing-browser-capture.json'], actionScript('browser-capture.mjs')),
   'freeze-existing-baseline': node('collect_existing_baseline', ['existing-baseline.json'], actionScript('baseline-collector.mjs')),

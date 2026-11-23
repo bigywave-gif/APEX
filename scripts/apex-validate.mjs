@@ -283,6 +283,7 @@ function validateGate1(runDir, stateFile = path.join(runDir, 'state.json')) {
   if (state.track === 'existing') {
     validateRoleStage(runDir, state, 'baseline');
     const inventory = validateFile('project-inventory.schema.json', requireArtifact(runDir, state, 'projectInventory', 'project-inventory.json'));
+    if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) throw new Error('Project Inventory scan is truncated; expand its limits and rescan before Gate 1');
     const baseline = validateFile('existing-baseline.schema.json', requireArtifact(runDir, state, 'existingBaseline', 'existing-baseline.json'));
     rejectPlaceholders(inventory, 'Project Inventory');
     const freeze = validateFile('functional-freeze.schema.json', requireArtifact(runDir, state, 'functionalFreeze', 'functional-freeze.json'));
