@@ -15,10 +15,14 @@ try {
   const pendingSession = agentRuntimeStatus(root).sessions[0];
   assert.equal(registerAgent(root, { agentId: 'backend-engineer', vocation: 'backend', stage: 'gate1' }).sessionId, pendingSession.sessionId);
   assert.throws(() => registerAgent(root, { agentId: 'backend-engineer', vocation: 'backend', stage: 'visual' }), /queued or running/);
+  assert.throws(() => enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'visual', inputHash: 'wrong-stage' }), /stage does not match/);
   assert.deepEqual(agentRuntimeStatus(root).sessions[0], pendingSession);
   assert.equal(enqueueAgentJob(root, { jobId: first.jobId, agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:input', payload: { contract: 'api' }, maxAttempts: 2 }).idempotent, true, 'replaying the same durable job must not create a duplicate');
   const timingDb = new DatabaseSync(path.join(root, 'run-ledger.sqlite'));
   const originalAvailable = timingDb.prepare('SELECT available_at FROM agent_jobs WHERE job_id = ?').get(first.jobId).available_at;
+  timingDb.prepare('UPDATE agent_jobs SET stage = ? WHERE job_id = ?').run('visual', first.jobId);
+  assert.throws(() => claimAgentJob(root, first.jobId), /controlled role repair is required/);
+  timingDb.prepare('UPDATE agent_jobs SET stage = ? WHERE job_id = ?').run('gate1', first.jobId);
   timingDb.prepare('UPDATE agent_jobs SET available_at = ? WHERE job_id = ?').run('invalid-timestamp', first.jobId);
   assert.throws(() => claimAgentJob(root, first.jobId), /invalid Agent job backoff timestamp/);
   assert.equal(agentRuntimeStatus(root, first.jobId).jobs[0].status, 'queued');
@@ -125,5 +129,5 @@ try {
     assert.deepEqual(supersedeQueuedAgentJobs(repairRoot, 'verify', [running.jobId, queued.jobId]), []);
     assert.doesNotThrow(() => registerAgent(repairRoot, { agentId: 'reviewer-b', vocation: 'reviewer', stage: 'visual' }));
   } finally { fs.rmSync(repairRoot, { recursive: true, force: true }); }
-  console.log(JSON.stringify({ status: 'passed', checks: 64 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 66 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -472,7 +472,7 @@ export function enqueueAgentJob(runDir, { jobId = crypto.randomUUID(), agentId, 
   try {
     database.exec('BEGIN IMMEDIATE');
     if (JSON.parse(latestSnapshot(database)?.state_json || '{}').lifecycle === 'cancelled') throw new Error('cannot enqueue an Agent job for a cancelled run');
-    const agent = database.prepare('SELECT agent_id, status FROM agents WHERE agent_id = ?').get(agentId);
+    const agent = database.prepare('SELECT agent_id, stage, status FROM agents WHERE agent_id = ?').get(agentId);
     if (!agent) throw new Error(`agent is not ready: ${agentId}`);
     const session = database.prepare('SELECT session_id, status FROM agent_sessions WHERE agent_id = ?').get(agentId);
     if (!session) throw new Error(`agent session is not ready: ${agentId}`);
@@ -484,6 +484,7 @@ export function enqueueAgentJob(runDir, { jobId = crypto.randomUUID(), agentId, 
       database.exec('COMMIT');
       return { jobId, status: existing.status, availableAt: existing.available_at, idempotent: true };
     }
+    if (agent.stage !== stage) throw new Error(`agent job stage does not match its registration: ${agentId}/${stage}/${agent.stage}`);
     if (agent.status !== 'ready') throw new Error(`agent is not ready: ${agentId}`);
     if (session.status !== 'ready') throw new Error(`agent session is not ready: ${agentId}`);
     database.prepare('INSERT INTO agent_jobs (job_id, agent_id, stage, status, attempt, max_attempts, available_at, input_hash, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -523,6 +524,8 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       return { ...job, leaseToken: job.lease_token, leaseExpiresAt: job.lease_expires_at, reservedTokens: Number(job.reserved_tokens || 0), budgetScope: job.reserved_tokens ? 'reported-usage-only' : 'not-reserved', payload: parseJson(job.payload_json), idempotent: true };
     }
     if (job.status !== 'queued') throw new Error(`agent job is not queued: ${jobId}/${job.status}`);
+    const registration = database.prepare('SELECT stage FROM agents WHERE agent_id = ?').get(job.agent_id);
+    if (!registration || registration.stage !== job.stage) throw new Error(`queued agent job stage does not match its registration; controlled role repair is required: ${jobId}`);
     if (claimKey && database.prepare('SELECT 1 FROM agent_claim_keys WHERE job_id = ? AND claim_key = ?').get(jobId, claimKey)) throw new Error(`claim key belongs to a prior agent attempt: ${jobId}`);
     const availableAt = Date.parse(job.available_at);
     if (!Number.isFinite(availableAt)) throw new Error(`invalid Agent job backoff timestamp requires investigation: ${jobId}`);
@@ -762,8 +765,8 @@ export function agentRuntimeStatus(runDir, jobId = null) {
       else stage.unverified += 1;
     }
     const deadLetters = database.prepare('SELECT job_id, agent_id, stage, attempts, reason, created_at FROM dead_letters ORDER BY created_at DESC LIMIT 20').all();
-    const sessions = database.prepare('SELECT session_id, agent_id, status, context_hash, skill_bindings_json, last_job_id, updated_at FROM agent_sessions ORDER BY agent_id').all();
-    return { jobs: jobs.map(job => ({ jobId: job.job_id, agentId: job.agent_id, stage: job.stage, status: job.status, attempt: job.attempt, maxAttempts: job.max_attempts, reservedTokens: job.status === 'running' ? Number(job.reserved_tokens || 0) : 0, availableAt: job.available_at, leaseExpiresAt: job.status === 'running' ? job.lease_expires_at || null : null, error: job.last_error, payload: parseJson(job.payload_json), result: parseJson(job.result_json) })), counts: Object.fromEntries(counts.map(item => [item.status, item.count])), tokenUsage: Object.fromEntries(tokens.map(item => [item.stage, Number(item.total)])), tokenUsageCoverage, tokenUsageScope: 'recorded-agent-and-independent-host-usage; unknown-or-unrecorded-host-calls-are-not-included', traces: Object.fromEntries(traces.map(item => [item.status, item.count])), sessions: sessions.map(item => ({ sessionId: item.session_id, agentId: item.agent_id, status: item.status, contextHash: item.context_hash, skillBindings: parseJson(item.skill_bindings_json), lastJobId: item.last_job_id, updatedAt: item.updated_at })), deadLetters: deadLetters.map(item => ({ jobId: item.job_id, agentId: item.agent_id, stage: item.stage, attempts: item.attempts, reason: item.reason, createdAt: item.created_at })) };
+    const sessions = database.prepare('SELECT s.session_id, s.agent_id, s.status, s.context_hash, s.skill_bindings_json, s.last_job_id, s.updated_at, a.stage AS registration_stage FROM agent_sessions s LEFT JOIN agents a ON a.agent_id = s.agent_id ORDER BY s.agent_id').all();
+    return { jobs: jobs.map(job => ({ jobId: job.job_id, agentId: job.agent_id, stage: job.stage, status: job.status, attempt: job.attempt, maxAttempts: job.max_attempts, reservedTokens: job.status === 'running' ? Number(job.reserved_tokens || 0) : 0, availableAt: job.available_at, leaseExpiresAt: job.status === 'running' ? job.lease_expires_at || null : null, error: job.last_error, payload: parseJson(job.payload_json), result: parseJson(job.result_json) })), counts: Object.fromEntries(counts.map(item => [item.status, item.count])), tokenUsage: Object.fromEntries(tokens.map(item => [item.stage, Number(item.total)])), tokenUsageCoverage, tokenUsageScope: 'recorded-agent-and-independent-host-usage; unknown-or-unrecorded-host-calls-are-not-included', traces: Object.fromEntries(traces.map(item => [item.status, item.count])), sessions: sessions.map(item => ({ sessionId: item.session_id, agentId: item.agent_id, registrationStage: item.registration_stage, status: item.status, contextHash: item.context_hash, skillBindings: parseJson(item.skill_bindings_json), lastJobId: item.last_job_id, updatedAt: item.updated_at })), deadLetters: deadLetters.map(item => ({ jobId: item.job_id, agentId: item.agent_id, stage: item.stage, attempts: item.attempts, reason: item.reason, createdAt: item.created_at })) };
   } finally { database.close(); }
 }
 

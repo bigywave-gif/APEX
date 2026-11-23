@@ -1530,6 +1530,8 @@ function roleStageState(state, runDir, stage) {
       ]);
       const runtime = agentRuntimeStatus(runDir);
       const jobs = new Map(runtime.jobs.map(job => [job.jobId, job]));
+      const registrations = new Map(runtime.sessions.map(session => [session.agentId, session.registrationStage]));
+      if (selection.selectedRoles.some(roleId => { const job = jobs.get(selection.agentJobs?.[roleId]); return job?.status === 'queued' && registrations.get(job.agentId) !== job.stage; })) return repairState();
       const running = selection.selectedRoles.some(roleId => jobs.get(selection.agentJobs?.[roleId])?.status === 'running');
       const budgetObsolete = !supportedBudgetPolicies.has(selection.tokenBudget?.policy) || selection.tokenBudget.policy !== 'role-input-and-required-skill-reserve-v2' || !Number.isInteger(selection.tokenBudget?.perAgent) || selection.tokenBudget.perAgent < Number(selection.tokenBudget?.inputFloor || 0) || selection.selectedRoles.some(roleId => !Number.isInteger(selection.tokenBudget?.perRole?.[roleId]));
       if (budgetObsolete && !running) return 'rebudget';

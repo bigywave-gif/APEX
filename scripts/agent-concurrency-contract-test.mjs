@@ -11,7 +11,7 @@ try {
     const agentId = `agent-${i}`; registerAgent(root, { agentId, vocation: 'review', stage: 'visual' });
     return enqueueAgentJob(root, { agentId, stage: 'visual', inputHash: `input-${i}` }).jobId;
   });
-  const extraJobs = Array.from({ length: 6 }, (_, i) => enqueueAgentJob(root, { agentId: `agent-${i}`, stage: 'other', inputHash: 'another-task' }).jobId);
+  const extraJobs = Array.from({ length: 6 }, (_, i) => enqueueAgentJob(root, { agentId: `agent-${i}`, stage: 'visual', inputHash: 'another-task' }).jobId);
   const moduleUrl = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-ledger.mjs')).href;
   const code = `import {claimAgentJob} from ${JSON.stringify(moduleUrl)}; console.log(JSON.stringify(claimAgentJob(process.argv[1],process.argv[2])));`;
   const results = await Promise.all(jobs.map(id => new Promise((resolve, reject) => {

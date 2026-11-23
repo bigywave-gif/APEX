@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { agentRuntimeStatus } from './run-ledger.mjs';
 import { demoContract, demoFragment } from './interactive-demo-test-fixture.mjs';
 import { verifyDemoInteractions } from './interactive-demo.mjs';
@@ -240,7 +241,16 @@ try {
  const beforeRoles=route(['status',project,id,session]);
  assert.equal(beforeRoles.executionDirective.currentStep.id,'implementation-role-select');
  invoke('compile_visual_bundle','role-advisory.mjs',['select',dir,'implementation']);
- const implementation=JSON.parse(fs.readFileSync(path.join(dir,'advisories/implementation/selection.json')));
+ let implementation=JSON.parse(fs.readFileSync(path.join(dir,'advisories/implementation/selection.json')));
+ const legacyRole=implementation.selectedRoles[0];
+ const ledger=new DatabaseSync(path.join(dir,'run-ledger.sqlite'));
+ ledger.prepare('UPDATE agents SET stage = ? WHERE agent_id = ?').run('visual',legacyRole); ledger.close();
+ assert.equal(route(['status',project,id,session]).executionDirective.currentStep.id,'implementation-role-repair');
+ const legacyJob=implementation.agentJobs[legacyRole];
+ invoke('compile_visual_bundle','role-advisory.mjs',['repair',dir,'implementation']);
+ assert.equal(agentRuntimeStatus(dir,legacyJob).jobs[0].status,'cancelled');
+ invoke('compile_visual_bundle','role-advisory.mjs',['select',dir,'implementation']);
+ implementation=JSON.parse(fs.readFileSync(path.join(dir,'advisories/implementation/selection.json')));
  assert.ok(implementation.inputBindings.some(binding=>binding.artifact==='visualSourceManifest'&&binding.path==='visual-source-manifest.json'));
  assert.ok(implementation.inputBindings.some(binding=>binding.artifact==='dependencyLock'&&binding.path==='dependency-lock.json'));
  assert.ok(implementation.inputBindings.some(binding=>binding.artifact==='implementationMap'&&binding.path==='implementation-map.json'));
