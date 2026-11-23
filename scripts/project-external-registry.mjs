@@ -36,6 +36,7 @@ function previousRunIntents(layout, includeCurrent = false) {
       if (ledgerStat.isSymbolicLink()) throw new Error('previous Run ledger must not be a symlink');
       const db = new DatabaseSync(ledger, { readOnly: true });
       try {
+        db.exec('PRAGMA busy_timeout=5000');
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").get()) {
           const indexed = new Map();
           for (const row of db.prepare("SELECT event_type, payload_json FROM events WHERE event_type IN ('external-submission-intent','external-submission-observation') ORDER BY id").all()) {
@@ -74,7 +75,7 @@ export function inspectProjectExternalIntents(runDir) {
   let reservations = [];
   if (stat) {
     const db = new DatabaseSync(layout.database, { readOnly: true });
-    try { reservations = db.prepare("SELECT intent_id AS intentId, run_dir AS runDir, provider, operation, image_hash AS imageHash, prompt_hash AS promptHash, project_id AS projectId, status, created_at AS createdAt, updated_at AS updatedAt FROM submissions WHERE status NOT IN ('ready','consumed','not-submitted') ORDER BY created_at").all(); }
+    try { db.exec('PRAGMA busy_timeout=5000'); reservations = db.prepare("SELECT intent_id AS intentId, run_dir AS runDir, provider, operation, image_hash AS imageHash, prompt_hash AS promptHash, project_id AS projectId, status, created_at AS createdAt, updated_at AS updatedAt FROM submissions WHERE status NOT IN ('ready','consumed','not-submitted') ORDER BY created_at").all(); }
     finally { db.close(); }
   }
   return {

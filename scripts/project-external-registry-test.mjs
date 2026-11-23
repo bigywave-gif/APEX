@@ -2,10 +2,17 @@ import assert from 'node:assert/strict';import fs from 'node:fs';import os from 
 import {initializeLedger,recordExternalSubmissionIntent,recordExternalSubmissionObservation,externalSubmissionIntents,fenceRunCancellation} from './run-ledger.mjs';
 import {reserveProjectExternalIntent,inspectProjectExternalIntents} from './project-external-registry.mjs';
 import crypto from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 const project=fs.mkdtempSync(path.join(os.tmpdir(),'apex-cross-run-')),runs=path.join(project,'.apex','runs');
 function run(id){const dir=path.join(runs,id);fs.mkdirSync(dir,{recursive:true});const state={runId:id,revision:1,lifecycle:'active',artifacts:{}};fs.writeFileSync(path.join(dir,'state.json'),JSON.stringify(state));initializeLedger(dir,state,'fixture');return dir;}
 try {
  const a=run('a'),b=run('b'),c=run('c'),d=run('d'),moduleUrl=pathToFileURL(path.join(path.dirname(process.argv[1]),'run-ledger.mjs')).href;
+ const locked=run('locked'),waiting=run('waiting');const lockedDb=new DatabaseSync(path.join(locked,'run-ledger.sqlite'));
+ lockedDb.exec('PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
+ const lockedCode=`import {recordExternalSubmissionIntent} from ${JSON.stringify(moduleUrl)};console.log('starting');try{recordExternalSubmissionIntent(process.argv[1],{intentId:'lock-wait',provider:'stitch',operation:'upload',imageHash:'sha256:lock',promptHash:'sha256:lock',projectId:'lock-project'});console.log('acquired')}catch(e){console.error(e.message);process.exitCode=2}`;
+ let started;const starting=new Promise(resolve=>started=resolve);
+ const waitingResult=new Promise((resolve,reject)=>{const p=spawn(process.execPath,['--input-type=module','-e',lockedCode,waiting]);let out='';p.stdout.on('data',x=>{out+=x;started()});p.stderr.on('data',x=>out+=x);p.on('error',reject);p.on('close',status=>resolve({status,out}));});
+ await starting;await new Promise(resolve=>setTimeout(resolve,350));lockedDb.exec('COMMIT');lockedDb.close();const afterLock=await waitingResult;assert.equal(afterLock.status,0,`temporary previous-Run lock must be retried: ${afterLock.out}`);
  const code=`import {recordExternalSubmissionIntent} from ${JSON.stringify(moduleUrl)};try{recordExternalSubmissionIntent(process.argv[1],{intentId:process.argv[2],provider:'stitch',operation:'upload',imageHash:'sha256:image',promptHash:'sha256:prompt',projectId:'stitch-project'});console.log('acquired')}catch(e){console.log(e.message);process.exitCode=2}`;
  const invoke=(dir,id)=>new Promise((resolve,reject)=>{const p=spawn(process.execPath,['--input-type=module','-e',code,dir,id]);let out='';p.stdout.on('data',x=>out+=x);p.on('error',reject);p.on('close',status=>resolve({status,out,dir,id}));});
  const results=await Promise.all([invoke(a,'first'),invoke(b,'second')]);assert.equal(results.filter(x=>x.status===0).length,1,JSON.stringify(results));assert.equal(results.filter(x=>x.status===2&&x.out.includes('unresolved matching external submission')).length,1,JSON.stringify(results));
@@ -44,5 +51,5 @@ try {
  const otherProject=path.join(project,'empty'),emptyRun=path.join(otherProject,'.apex','runs','empty');fs.mkdirSync(emptyRun,{recursive:true});const empty=inspectProjectExternalIntents(emptyRun);assert.equal(empty.registryPresent,false);assert.equal(fs.existsSync(path.join(otherProject,'.apex','external-submissions.sqlite')),false);
 
  const bad=run('bad');fs.writeFileSync(path.join(bad,'stitch-job.json'),'{');const badCheck=run('bad-check');assert.throws(()=>recordExternalSubmissionIntent(badCheck,{intentId:'bad-retry',provider:'stitch',operation:'upload',imageHash:'sha256:bad',promptHash:'sha256:bad-prompt'}),/cannot verify previous Run Stitch job/);
- console.log(JSON.stringify({status:'passed',checks:process.platform==='win32'?22:25,scope:'two concurrent Runs, cancellation, ready observation, independent inputs, legacy job, orphan reservation; no remote calls'}));
+ console.log(JSON.stringify({status:'passed',scope:'temporary ledger locks, concurrent Runs, cancellation, ready observation, independent inputs, legacy job and orphan reservation; no remote calls'}));
 } finally {fs.rmSync(project,{recursive:true,force:true});}
