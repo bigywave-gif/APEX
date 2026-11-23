@@ -6,6 +6,11 @@ import crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { appendLedgerEvent, readRunState, recordExternalSubmissionObservation } from './run-ledger.mjs';
+import { availableStitchSkills, loadStitchSkill } from './required-visual-skill.mjs';
+import { stitchAdaptationForFreeze } from './stitch-adaptation.mjs';
+import { validateMultiStitch } from './stitch-screen-progress.mjs';
+import { autoBindStitchScreens } from './stitch-screen-binding.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const endpoint = process.env.STITCH_HOST || 'https://stitch.googleapis.com/mcp';
@@ -73,12 +78,38 @@ function isStrictDownload(item) {
   const value = `${item.field} ${item.url}`.toLowerCase();
   return /\.html?(?:$|[?#])/.test(value) || /(?:screenshot|preview|render)/.test(value) && /\.(?:png|jpe?g|webp)(?:$|[?#])/.test(value);
 }
+function stitchFileResources(metadata) {
+  const screen = metadata?.screen || metadata;
+  const html = screen?.htmlCode || screen?.html_code;
+  const image = screen?.screenshot;
+  const valid = item => typeof item?.name === 'string' && /^projects\/[^/]+\/files\/[^/]+$/.test(item.name);
+  return valid(html) && valid(image) ? { html: html.name, screenshot: image.name } : null;
+}
+async function downloadNamedScreen(resources) {
+  const htmlResult = await tool('download_file', { name: resources.html });
+  const imageResult = await tool('download_file', { name: resources.screenshot });
+  if (typeof htmlResult.html !== 'string' || !htmlResult.html.trim()) die('Stitch HTML file resource did not return HTML');
+  if (typeof imageResult.image !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageResult.image)) die('Stitch screenshot file resource did not return base64 image bytes');
+  const bytes = Buffer.from(imageResult.image, 'base64');
+  const extension = bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) ? '.png' : bytes.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex')) ? '.jpg' : bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP' ? '.webp' : null;
+  if (!extension) die('Stitch screenshot file resource has an unsupported image format');
+  return { html: Buffer.from(htmlResult.html, 'utf8'), screenshot: bytes, extension };
+}
 async function materializeDownloads(metadata, artifactDir) {
   // Strict parity consumes only the HTML export and rendered screenshot. Do not
   // serially download arbitrary image assets, fonts, or archives returned by MCP.
-  const downloads = [...new Map(findUrls(metadata).filter(isStrictDownload).map(item => [item.url, item])).values()];
+  const resources = stitchFileResources(metadata);
   const values = [];
   fs.mkdirSync(artifactDir, { recursive: true });
+  if (resources) {
+    const downloaded = await downloadNamedScreen(resources);
+    for (const [kind, bytes, extension] of [['html', downloaded.html, '.html'], ['screenshot', downloaded.screenshot, downloaded.extension]]) {
+      const file = path.join(artifactDir, `${kind}${extension}`); fs.writeFileSync(file, bytes);
+      values.push({ field: kind, resource: resources[kind], hash: hash(bytes), kind, path: file });
+    }
+    return { urls: [], values, combined: hash(values) };
+  }
+  const downloads = [...new Map(findUrls(metadata).filter(isStrictDownload).map(item => [item.url, item])).values()];
   for (let index = 0; index < downloads.length; index += 1) {
     const entry = downloads[index];
     const url = entry.url;
@@ -101,6 +132,7 @@ function firstAsset(downloads, kind) {
 }
 function jobPath(runDir, input) { return path.resolve(input || path.join(runDir, 'stitch-job.json')); }
 function readyMetadata(metadata) {
+  if (stitchFileResources(metadata)) return true;
   const downloads = findUrls(metadata).filter(isStrictDownload);
   const hasHtml = downloads.some(item => /\.html?(?:$|[?#])/.test(`${item.field} ${item.url}`.toLowerCase()));
   const hasScreenshot = downloads.some(item => /(?:screenshot|preview|render)/.test(`${item.field} ${item.url}`.toLowerCase()) && /\.(?:png|jpe?g|webp)(?:$|[?#])/.test(`${item.field} ${item.url}`.toLowerCase()));
@@ -113,9 +145,9 @@ async function observeScreen(runDir, file, attemptsArg) {
   const projectId = bareProject(job.projectId);
   let latest = null;
   for (let index = 0; index < attempts; index += 1) {
-    latest = await tool('get_screen', { name: `projects/${projectId}/screens/${job.screenId}`, projectId, screenId: job.screenId });
+    latest = await tool('get_screen', { name: `projects/${projectId}/screens/${job.screenId}` });
     job.attempts = Number(job.attempts || 0) + 1; job.lastObservedAt = new Date().toISOString(); job.metadataHash = hash(latest);
-    if (readyMetadata(latest)) { job.status = 'ready'; job.readyAt = job.lastObservedAt; write(file, job); console.log(JSON.stringify({ status: 'ready', job: file, projectId: job.projectId, screenId: job.screenId, attempts: job.attempts })); return; }
+    if (readyMetadata(latest)) { job.status = 'ready'; job.readyAt = job.lastObservedAt; write(file, job); if (job.intentId) recordExternalSubmissionObservation(runDir, { intentId: job.intentId, status: 'ready', projectId: job.projectId, screenId: job.screenId, at: job.readyAt }); console.log(JSON.stringify({ status: 'ready', job: file, projectId: job.projectId, screenId: job.screenId, attempts: job.attempts })); return; }
     job.status = 'pending'; write(file, job);
     if (index < attempts - 1) await new Promise(resolve => setTimeout(resolve, 1000 * (2 ** index)));
   }
@@ -129,7 +161,7 @@ async function snapshot(selection, runDir) {
   const rawScreens = [];
   for (const chosen of selection.approvedScreens) {
     const name = `projects/${projectId}/screens/${chosen.screenId}`;
-    const metadata = await tool('get_screen', { name, projectId, screenId: chosen.screenId });
+    const metadata = await tool('get_screen', { name });
     const downloads = await materializeDownloads(metadata, path.join(runDir, 'evidence', 'stitch', 'screens', chosen.screenId));
     const html = firstAsset(downloads, 'html');
     const image = firstAsset(downloads, 'screenshot');
@@ -149,12 +181,13 @@ function imageInputTools(tools) {
     return /(?:upload|attach|add)[_-]?(?:reference[_-]?)?(?:image|screenshot|wireframe)|(?:reference|source)[_-]?(?:image|screenshot|wireframe)|image[_-]?(?:upload|input|reference)|wireframe[_-]?upload/i.test(`${name} ${description}`);
   });
 }
-function updateState(runDir, reference, current) {
+function updateState(runDir, reference, current, automatic = false) {
   const stateFile = path.join(runDir, 'state.json');
   if (!fs.existsSync(stateFile)) return;
   const state = read(stateFile);
   state.artifacts.stitchFreeze = reference;
   state.locks.stitchCurrent = current;
+  if (automatic) state.locks.stitchApproved = true;
   if (current && state.locks.visualApproved) state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE';
   state.revision = Number(state.revision || 0) + 1;
   state.updatedAt = new Date().toISOString();
@@ -165,6 +198,30 @@ const [command, ...args] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command === 'list-projects') {
   console.log(JSON.stringify(await tool('list_projects', { filter: args[0] || 'view=owned' }), null, 2));
+} else if (command === 'probe-screen') {
+  const name = args[0];
+  if (!/^projects\/[^/]+\/screens\/[^/]+$/.test(name || '')) die('probe-screen requires a complete screen resource name');
+  const metadata = await tool('get_screen', { name }); const resources = stitchFileResources(metadata);
+  if (!resources) die('screen does not expose both named HTML and screenshot resources');
+  const result = await downloadNamedScreen(resources);
+  console.log(JSON.stringify({ status: 'passed', htmlBytes: result.html.length, screenshotBytes: result.screenshot.length, screenshotFormat: result.extension, htmlHash: hash(result.html), screenshotHash: hash(result.screenshot) }));
+} else if (command === 'skills') {
+  const [runArg, subcommand, name, expectedHash] = args;
+  if (!runArg || !['list', 'load'].includes(subcommand)) die('usage: skills <run-dir> list | skills <run-dir> load <name> <sha256>');
+  const runDir = path.resolve(runArg);
+  try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
+  const state = readRunState(runDir);
+  if (state.deliveryRoute !== 'stitch' || !state.locks?.effectApproved) die('Stitch adaptation skills require the confirmed Demo and selected Stitch route');
+  const boundary = 'Only apply rules compatible with the confirmed Demo; never silently change its layout, content, behavior, tokens, or accessibility.';
+  if (subcommand === 'list') console.log(JSON.stringify({ status: 'available', skills: availableStitchSkills(), boundary }));
+  else {
+    let skill; try { skill = loadStitchSkill(name, expectedHash); } catch (error) { die(error.message); }
+    const baselineRef = state.artifacts?.runtimeVisualBaseline, root = fs.realpathSync(runDir);
+    let demoBaselineHash = null;
+    if (baselineRef && !path.isAbsolute(baselineRef)) { const baseline = fs.realpathSync(path.resolve(root, baselineRef)); if (!baseline.startsWith(`${root}${path.sep}`)) die('Demo baseline must remain inside the Run'); demoBaselineHash = hash(fs.readFileSync(baseline)); }
+    appendLedgerEvent(runDir, { type: 'stitch-adaptation-skill-loaded', name: skill.name, sha256: skill.sha256, path: skill.path, demoBaselineHash, operationReceipt: process.env.APEX_ROUTER_OPERATION_RECEIPT || null });
+    console.log(JSON.stringify({ status: 'loaded', skill, boundary }));
+  }
 } else if (command === 'capabilities') {
   const result = await rpc('tools/list');
   const tools = Array.isArray(result?.tools) ? result.tools : [];
@@ -175,7 +232,7 @@ if (command === 'list-projects') {
   if (!runDirArg || !jobArg || !projectId || !screenId) die('usage: bind-screen <run-dir> <stitch-job.json> <project-id> <screen-id>');
   const runDir = path.resolve(runDirArg); try { requireRouterAction(runDir, 'observe_stitch'); } catch (error) { die(error.message); }
   const file = jobPath(runDir, jobArg); const job = read(file);
-  if (!['submitted', 'pending'].includes(job.status)) die('only a submitted or pending Stitch job may bind a Screen');
+  if (!['submission-uncertain', 'submitted', 'pending'].includes(job.status)) die('only an uncertain, submitted or pending Stitch job may bind a Screen');
   job.projectId = projectId; job.screenId = screenId; job.status = 'bound'; job.boundAt = new Date().toISOString(); write(file, job);
   console.log(JSON.stringify({ status: 'bound', job: file, projectId, screenId }));
 } else if (command === 'await-screen') {
@@ -190,14 +247,22 @@ if (command === 'list-projects') {
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
   const selectionFile = path.resolve(selectionArg);
   const selection = read(selectionFile);
+  const state = read(path.join(runDir, 'state.json'));
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && selection.approvedScreens?.length > 1) {
+    const baselineFile = state.artifacts?.runtimeVisualBaseline && path.join(runDir, state.artifacts.runtimeVisualBaseline);
+    if (!baselineFile || !fs.existsSync(baselineFile)) die('multi-screen Stitch requires the confirmed Demo baseline');
+    try { selection.approvedScreens = autoBindStitchScreens(runDir, read(baselineFile), selection.approvedScreens); } catch (error) { die(error.message); }
+  }
   const pendingJob = path.join(runDir, 'stitch-job.json');
+  let skillAdaptation = null;
   if (fs.existsSync(pendingJob)) {
     const job = read(pendingJob);
     if (job.status !== 'ready') die('Stitch job is not ready; bind and observe the generated Screen before freezing');
     if (!selection.approvedScreens.some(screen => screen.screenId === job.screenId)) die('canvas selection does not include the ready Stitch job Screen');
+    try { skillAdaptation = stitchAdaptationForFreeze(runDir, state, job, selection); } catch (error) { die(error.message); }
   }
   const snap = await snapshot(selection, runDir);
-  const freeze = { schemaVersion: '3.0', projectId: selection.projectId, canvasUrl: selection.canvasUrl, approval: selection.approval, approvedScreens: snap.approvedScreens, excludedScreens: selection.excludedScreens, ...(selection.generationInput ? { generationInput: selection.generationInput } : {}), fingerprints: { screenSetHash: hash({ listed: snap.listedHash, approved: snap.approvedScreens }), designSystemHash: snap.designSystemHash }, syncedAt: new Date().toISOString() };
+  const freeze = { schemaVersion: '3.0', projectId: selection.projectId, canvasUrl: selection.canvasUrl, approval: selection.approval, approvedScreens: snap.approvedScreens, excludedScreens: selection.excludedScreens, ...(selection.generationInput ? { generationInput: selection.generationInput } : {}), ...(skillAdaptation ? { skillAdaptation } : {}), fingerprints: { screenSetHash: hash({ listed: snap.listedHash, approved: snap.approvedScreens }), designSystemHash: snap.designSystemHash }, syncedAt: new Date().toISOString() };
   const freezeFile = path.join(runDir, 'stitch-freeze.json');
   write(freezeFile, freeze);
   write(path.join(runDir, 'stitch-raw.json'), { schemaVersion: '3.0', projectId: selection.projectId, screens: snap.rawScreens, designSystems: snap.designSystems });
@@ -208,7 +273,13 @@ if (command === 'list-projects') {
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
   const stateFile = path.join(runDir, 'state.json');
   const state = read(stateFile);
-  if (!state.locks.effectApproved || !state.locks.stitchApproved) die('effect-image approval and Stitch approval are required before sealing Stitch');
+  if (!state.locks.effectApproved) die('a confirmed runtime Demo is required before sealing Stitch');
+  const automatic = state.roleChain?.confirmationModel === 'two-confirmations';
+  if (!automatic && !state.locks.stitchApproved) die('Stitch approval is required before sealing Stitch');
+  if (automatic) {
+    const validation = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'pre-stitch-machine-seal', runDir], { encoding: 'utf8' });
+    if (validation.status !== 0) die((validation.stderr || validation.stdout).trim());
+  }
   const evidenceFile = path.join(runDir, state.artifacts.stitchParityEvidence || 'stitch-parity-evidence.json');
   const evidence = read(evidenceFile);
   if (evidence.status !== 'passed' || !evidence.strictPixelMatch || !Array.isArray(evidence.unmatched) || evidence.unmatched.length) die('strict Stitch parity evidence must pass before sealing');
@@ -217,8 +288,15 @@ if (command === 'list-projects') {
   if (!fs.existsSync(contractFile) || hash(fs.readFileSync(contractFile)) !== evidence.structuralVerification.contractHash) die('strict Stitch structure contract is missing or changed');
   const contract = read(contractFile);
   if (contract.source !== 'stitch-screen-export' || contract.sourceImageHash !== evidence.stitchImageHash || contract.verification?.status !== 'passed') die('strict Stitch structure contract is not a passed export of the compared screen');
-  updateState(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json', true);
-  console.log(JSON.stringify({ sealed: true, stitchFreeze: state.artifacts.stitchFreeze || 'stitch-freeze.json' }));
+  if (automatic) {
+    const freeze = read(path.join(runDir, state.artifacts.stitchFreeze));
+    const reference = read(path.join(runDir, state.artifacts.visualReference));
+    const multi = freeze.approvedScreens.length > 1 ? validateMultiStitch(runDir, state, freeze, reference) : null;
+    const receipt = { schemaVersion: '3.0', type: 'stitch-machine-seal', status: 'validated', runId: state.runId, freeze: { path: state.artifacts.stitchFreeze, sha256: hash(fs.readFileSync(path.join(runDir, state.artifacts.stitchFreeze))) }, parity: { path: state.artifacts.stitchParityEvidence, sha256: hash(fs.readFileSync(evidenceFile)) }, ...(multi ? { screens: multi.screens } : {}), validatedAt: new Date().toISOString() };
+    const receiptFile = path.join(runDir, 'machine-seals', 'stitch.json'); fs.mkdirSync(path.dirname(receiptFile), { recursive: true }); const temporary = `${receiptFile}.${process.pid}.tmp`; write(temporary, receipt); fs.renameSync(temporary, receiptFile);
+  }
+  updateState(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json', true, automatic);
+  console.log(JSON.stringify({ sealed: true, stitchFreeze: state.artifacts.stitchFreeze || 'stitch-freeze.json', ...(automatic ? { machineSeal: path.join(runDir, 'machine-seals', 'stitch.json') } : {}) }));
 } else if (command === 'check') {
   const runDir = path.resolve(args[0] || '.');
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
@@ -233,4 +311,4 @@ if (command === 'list-projects') {
     console.log(JSON.stringify({ current: false, changed: true }));
     process.exitCode = 2;
   } else console.log(JSON.stringify({ current: true, changed: false }));
-} else die('commands: list-projects | capabilities | bind-screen | await-screen | freeze | seal | check');
+} else die('commands: list-projects | probe-screen | capabilities | bind-screen | await-screen | freeze | seal | check');

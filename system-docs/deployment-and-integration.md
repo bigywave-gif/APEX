@@ -3,7 +3,7 @@
 ## 文档登记
 
 - 文档名称：APEX 部署与接入文档
-- 当前版本：4.37.5
+- 当前版本：4.45.0
 - 文档类型：系统级部署与接入主文档
 - 适用对象：平台维护者、迁移执行人、项目接入人
 
@@ -18,7 +18,7 @@
 
 ## 3.0.2 接入要求
 
-APEX 接入不止复制 Core 与选择 connector。首次真实任务必须按项目事实选择 Greenfield 或 Existing 轨道：前者建立 Product / Architecture / Site Contract，后者完成真实 Baseline / Functional Freeze / Impact。两条轨道在 Gate 1 效果图与参数合同、Stitch 可编辑画布和暂存 Freeze 阶段汇合；自动严格编排完成 Stitch Seal、Visual Bundle、Implementation Map 与依赖锁，并通过机器 Gate 2 才能实施。运行时必须自动采集 DOM 与截图完成第二段严格 Gate，最终以 Verification Bundle 和 Gate 3 完成真实验收。
+APEX 接入需要按项目事实选择 Greenfield 或 Existing 轨道。Existing 先采集真实页面、代码与功能基线并冻结变更范围；产品角色与设计师依次形成方案。新 Run 由用户确认视觉方案后生成可交互 Demo，用户确认 Demo 后选择 Stitch 或直接代码。Stitch 是可选路线；候选与已确认 Demo 不一致时，须由用户选择保留 Demo 直接落地或调整方案。两条路线均需编译 Visual Bundle、Implementation Map 和依赖锁，通过机器 Gate 2 后实施；最终以实际浏览器、功能与适用范围回归证据完成 Gate 3。旧 Run 按原确认模型恢复。
 
 ## 一、最小交付包
 
@@ -73,7 +73,7 @@ npm run preflight
 - 可编辑项目文件
 - 可访问项目文档
 - 可执行结构化步骤输出
-- Node.js 18+、Git 与 npm
+- Node.js 22.13+（22.x）或 23.4+、Git 与 npm；Preflight 同时检查 `node:sqlite` 是否可用
 
 推荐要求：
 
@@ -240,7 +240,7 @@ adapter 只能做项目映射，不应复制 Core。
 
 接入时原则：
 
-- 这些底座是候选可执行来源，而不是只供参考的样式图库；选中后必须记录资源 ID、版本、文件/API、许可和落地方式。
+- `google-design-md` 是设计规范知识，不是可运行组件来源；新 Run 按场景选择它，并始终实际加载必选的 `taste-skill`。组件、图标、动效等可执行来源须在选中后记录资源 ID、版本、文件/API、许可和落地方式。
 - 它们不应迫使宿主项目统一改写为某个框架
 - 不适配的宿主项目只能选择现有项目代码或 native-web 等其他真实来源；不得以“等价说明”替代实际加载、物化和运行时验收。
 
@@ -273,3 +273,8 @@ adapter 只能做项目映射，不应复制 Core。
 - [../PACKAGING.md](../PACKAGING.md)
 - [../connectors/connector-selection.md](../connectors/connector-selection.md)
 - [../adapters/README.md](../adapters/README.md)
+
+
+## 聊天内可交互 Demo
+
+Codex 支持 visualize 时，Demo 默认嵌入聊天正文。宿主必须在最终回复原样输出 Router 返回的 `presentation.contentReference`，文件保持在当前项目 Run 内；不能只打开侧栏或给出 localhost 链接。缺少宿主能力或已选源码不兼容片段时，打开同 Run HTTP Demo 并登记具体回退原因。历史 Run 继续兼容浏览器展示；不需要增加服务、依赖或确认。完整字段、输出规则和验证边界见 `core/runtime/interactive-demo-contract.md`。

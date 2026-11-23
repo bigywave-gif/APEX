@@ -86,6 +86,7 @@ def setup_styles():
         "small": ParagraphStyle("small", parent=base["BodyText"], fontName=TEXT_FONT_NAME, fontSize=8.6, leading=15, textColor=grey, firstLineIndent=0),
         "bullet": ParagraphStyle("bullet", parent=base["BodyText"], fontName=TEXT_FONT_NAME, fontSize=10, leading=19, leftIndent=20, firstLineIndent=-18, textColor=colors.HexColor("#1E293B"), spaceAfter=5),
         "table": ParagraphStyle("table", parent=base["BodyText"], fontName=TEXT_FONT_NAME, fontSize=8.6, leading=14, textColor=colors.HexColor("#1E293B")),
+        "table_header": ParagraphStyle("table_header", parent=base["BodyText"], fontName=TEXT_FONT_NAME, fontSize=8.6, leading=14, textColor=colors.white),
     }
 
 
@@ -105,7 +106,7 @@ def bullets(items, styles):
 
 
 def table(rows, widths, styles, header=True):
-    converted = [[p(str(cell), styles["table"]) for cell in row] for row in rows]
+    converted = [[p(str(cell), styles["table_header"] if header and index == 0 else styles["table"]) for cell in row] for index, row in enumerate(rows)]
     t = Table(converted, colWidths=widths, repeatRows=1 if header else 0, hAlign="LEFT")
     rules = [
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
@@ -122,7 +123,7 @@ def table(rows, widths, styles, header=True):
 def workflow_visual(styles):
     rows = [
         ["用户短需求", "轨道判断", "Gate 1", "方案确认后直接生成运行时 Demo"],
-        ["意图提炼", "Greenfield / Existing", "范围与合同确认", "运行时 Demo登记后选择 Stitch / 直接代码"],
+        ["意图提炼", "Greenfield / Existing", "范围与合同确认", "Demo 确认后选择 Stitch / 直接代码"],
         ["Gate 2", "前后端实施", "Proof / 回归", "Gate 3"],
         ["视觉冻结", "Implementation Map", "真实运行证据", "Verification Bundle"],
     ]
@@ -158,10 +159,10 @@ def architecture_visual(styles):
 def prototype_visual(styles):
     rows = [
         ["需求导演台", "视觉冻结台", "交付验收台"],
-        ["用户意图：专业、高级的成长报告<br/>已提炼：目标 / 假设 / 风险<br/>待确认：业务范围与质量线<br/>当前 Gate：Gate 1", "Visual：方案确认后自动生成 Demo<br/>Demo 登记后：Stitch 或直接代码<br/>Stitch：单独生成与单独确认<br/>当前阶段：视觉冻结", "实现映射：组件 / API / 权限<br/>真实证据：浏览器 / 契约 / 性能<br/>回归状态：页面家族通过<br/>当前 Gate：Gate 3"],
+        ["用户意图：专业、高级的成长报告<br/>已提炼：目标 / 假设 / 风险<br/>待确认：业务范围与质量线<br/>当前 Gate：Gate 1", "Visual：方案确认后自动生成 Demo<br/>Demo 展示后：用户确认<br/>确认后：可选 Stitch 或直接代码<br/>当前阶段：视觉冻结", "实现映射：组件 / API / 权限<br/>真实证据：浏览器 / 契约 / 性能<br/>回归状态：页面家族通过<br/>当前 Gate：Gate 3"],
         ["下一步：受控推进", "下一步：受控推进", "下一步：受控推进"],
     ]
-    visual = Table([[p(cell, styles["table"]) for cell in row] for row in rows], colWidths=[56.7*mm]*3, rowHeights=[12*mm, 50*mm, 11*mm])
+    visual = Table([[p(cell, styles["table_header"] if index in (0, 2) else styles["table"]) for cell in row] for index, row in enumerate(rows)], colWidths=[56.7*mm]*3, rowHeights=[12*mm, 50*mm, 11*mm])
     visual.setStyle(TableStyle([
         ("GRID", (0,0), (-1,-1), .6, colors.HexColor("#CBD5E1")), ("VALIGN", (0,0), (-1,-1), "TOP"),
         ("BACKGROUND", (0,0), (0,0), colors.HexColor("#102A4A")), ("BACKGROUND", (1,0), (1,0), colors.HexColor("#5B21B6")), ("BACKGROUND", (2,0), (2,0), colors.HexColor("#047857")),
@@ -281,7 +282,7 @@ def create_visual_assets(directory: Path):
     image, draw = _canvas("端到端交付工作流图", "每个阶段都有明确输入、机器前置、用户确认与可追溯产物；变化会撤销后续失效结论")
     nodes = [
         (75, "01", "Intake", "短需求 → Intent Brief"), (345, "02", "事实勘测", "Greenfield / Existing Baseline"),
-        (615, "G1", "需求确认", "Delivery Contract"), (885, "03", "Visual", "视觉确认 → 自动生成并登记 Demo"),
+        (615, "G1", "产品方案", "Delivery Contract"), (885, "03", "Visual", "方案确认 → Demo 确认"),
         (1155, "G2", "视觉冻结", "Visual Bundle"), (1425, "04", "受控实施", "前后端 / 映射 / 依赖锁"),
         (1695, "G3", "真实验收", "Verification Bundle"),
     ]
@@ -303,11 +304,11 @@ def create_visual_assets(directory: Path):
     # Detailed control flow: separates user confirmations from machine gates.
     image, draw = _canvas("全链路流程与审核门", "用户确认决定方案；机器 Gate 决定能否继续、能否写代码、能否交付")
     stages = [
-        ("01", "需求拆解确认", "Intent / Contract / Strategy", "用户确认"),
+        ("01", "产品方案", "Intent / Contract / Strategy", "角色产物"),
         ("02", "视觉实施方案确认", "布局 / 色彩 / 动效 / 依赖", "用户确认"),
-        ("03", "运行时 Demo生成与登记", "可访问页面 / DOM / 来源 / 浏览器证据", "机器工件"),
-        ("04", "Stitch 确认", "画布 / 保真 / 可编辑原型", "用户确认"),
-        ("05", "实施冻结确认", "Bundle / Map / Dependency Lock", "用户确认"),
+        ("03", "交互式 Demo 确认", "可操作页面 / 任务 / 浏览器证据", "用户确认"),
+        ("04", "选择交付路线", "可选 Stitch / 直接代码", "用户选择"),
+        ("05", "实施冻结", "Bundle / Map / Dependency Lock", "机器校验"),
         ("G2", "机器 Gate 2", "冻结完整性 / 可实现性 / 依赖锁", "机器放行代码与安装"),
         ("G3", "机器 Gate 3", "真实页面 / 动效 / 功能 / 回归", "机器形成交付结论"),
     ]
@@ -395,7 +396,7 @@ class WorkflowDiagram(Flowable):
         c, navy, blue = self.canv, colors.HexColor("#102A4A"), colors.HexColor("#2563EB")
         c.translate(0, -self.height)
         c.setFont(TEXT_FONT_NAME, 8)
-        steps = [("用户短需求", "意图提炼"), ("Existing /\nGreenfield", "轨道判断"), ("Gate 1", "范围与合同"), ("Visual", "方案确认 → Demo → 登记"), ("Stitch / 直接代码", "运行时 Demo登记后选择"), ("前后端实施", "实现映射"), ("Proof / 回归", "真实运行"), ("Gate 3", "证据交付")]
+        steps = [("用户短需求", "意图提炼"), ("Existing /\nGreenfield", "轨道判断"), ("Gate 1", "范围与合同"), ("Visual", "方案确认 → Demo → 登记"), ("Stitch / 直接代码", "Demo 确认后选择"), ("前后端实施", "实现映射"), ("Proof / 回归", "真实运行"), ("Gate 3", "证据交付")]
         positions = [(i * 42.5 * mm, 49 * mm) for i in range(4)] + [(i * 42.5 * mm, 11 * mm) for i in range(4)]
         for i, ((title, sub), (x, y)) in enumerate(zip(steps, positions)):
             fill = colors.HexColor("#E8F0FE") if "Gate" not in title else colors.HexColor("#DBEAFE")
@@ -549,7 +550,7 @@ def build(version: str):
         ["功能域", "核心能力", "关键产物 / 结果"],
         ["需求准入", "短需求提炼、轨道识别、范围与风险判断", "Intent Brief、Delivery Contract、Gate 1"],
         ["Existing 勘测", "代码、路由、页面、接口、规范与保护边界读取", "Project Inventory、Existing Baseline、Functional Freeze"],
-        ["视觉工程", "视觉方案确认后自动生成并登记运行时 Demo，不追加 Demo 确认；其后 Stitch 单独确认或进入直接代码路线", "Visual Reference、直接代码实施方案或 Stitch Freeze、Site Contract、Visual Bundle"],
+        ["视觉工程", "视觉方案确认后生成交互式 Demo；用户确认 Demo 后选择可选 Stitch 或直接代码", "Visual Reference、直接代码实施方案或 Stitch Freeze、Site Contract、Visual Bundle"],
         ["实施编排", "设计节点到组件、API、权限、事件与测试映射", "Implementation Map、Dependency Lock、受控实施授权"],
         ["质量验证", "浏览器、契约、视觉、无障碍、性能、回归验证", "Verification Plan、Evidence、Verification Bundle、Gate 3"],
         ["运行治理", "Router、审批、session、授权、lease、恢复、版本发布", "Run State、事件、授权回执、Checkpoint、Release Audit"],
@@ -570,7 +571,7 @@ def build(version: str):
         ["对象", "主要字段 / 内容", "生命周期"],
         ["Project Identity", "projectId、projectRoot", "首次接入建立，阻止项目混用"],
         ["Run State", "track、scope、phase、gates、locks、revision、artifacts", "Router 内部控制；每次状态写入递增 revision"],
-        ["Approval Receipt", "gate、session、工件路径与 SHA-256", "Gate 1 / 视觉方案 / Stitch / 实施确认时冻结"],
+        ["Approval Receipt", "gate、session、工件路径与 SHA-256", "视觉方案和交互式 Demo 确认时冻结"],
         ["Authorization Receipt", "项目、run、session、action、stateHash、过期时间", "动作执行前签发；状态变化即失效"],
         ["Evidence Bundle", "浏览器、契约、视觉、无障碍、性能、回归证据", "Gate 3 前汇集；缺项不能自动通过"],
     ], widths=[35*mm, 76*mm, 59*mm])
@@ -581,8 +582,8 @@ def build(version: str):
         ["阶段", "系统动作", "用户 / 机器决策"],
         ["1. 准入", "创建新 run，识别 Greenfield / Existing、范围、授权", "Router 校验 session；不复用跨 session run"],
         ["2. 分析", "提炼意图、收集规范；Existing 读取真实基线", "影响业务语义、权限、外部依赖的事项请求确认"],
-        ["3. Gate 1", "冻结需求、质量、风险、Existing 保护边界", "用户确认后才允许正式视觉"],
-        ["4. 视觉", "确认视觉描述与实施方案后直接生成并登记运行时 Demo", "运行时 Demo登记后才选择 Stitch 的独立确认或直接代码；两者均冻结同一运行时 Demo；变化撤销旧 Gate 2"],
+        ["3. Gate 1", "冻结需求、质量、风险、Existing 保护边界", "产品方案完成后交由设计师形成视觉方案"],
+        ["4. 视觉", "确认视觉描述与实施方案后直接生成并登记运行时 Demo", "用户确认可交互 Demo 后选择 Stitch 或直接代码；两者均冻结 Demo 基线，变化使相关授权失效"],
         ["5. Gate 2 / 实施", "编译 Visual Bundle、实现映射与依赖锁", "机器验证通过后开放项目写入授权"],
         ["6. 验证 / Gate 3", "执行真实浏览器、契约、质量与回归证据", "证据完整且通过才形成交付结论"],
     ], widths=[27*mm, 79*mm, 64*mm])
@@ -596,7 +597,7 @@ def build(version: str):
         ["维度", "Greenfield", "Existing"],
         ["起点", "用户意图、业务目标、领域与体验方向", "真实项目代码、页面、路由、接口、已有规范与保护边界"],
         ["强制前置", "Intent Brief、Delivery Contract", "Project Inventory、Existing Baseline、Functional Freeze"],
-        ["视觉前提", "Gate 1 产品与质量确认", "先完成只读基线；否则不得正式出运行时 Demo或 Stitch"],
+        ["视觉前提", "产品方案与质量证据完成", "先完成只读基线；否则不得正式出运行时 Demo或 Stitch"],
         ["交付结果", "新能力的前后端实现与验证", "保留既有事实并完成可追踪的改造与回归"],
     ], widths=[32*mm, 69*mm, 69*mm])
     story += [p("Lite 适合单模块或单交互点；Standard 适合单页整改与局部系统统一；Full 适合整站、页面家族、前后端与视觉系统级交付。范围影响产物深度，不允许降低 Gate 语义。", styles["body"])]
@@ -647,7 +648,7 @@ def build(version: str):
         "识别会改变业务语义、权限、外部依赖或不可逆迁移的事项，形成备选与确认点；其余内容以明确假设推进。",
         "输出 Intent Brief、Delivery Contract、Experience Strategy 与质量门槛；策略必须覆盖信息层级、数据问题/编码/交互、功能状态/事件/验收、视觉系统、响应式、无障碍、动效与反模式。",
         "Experience Evaluator 对当前策略执行 85/100 阈值和关键缺失检查；不通过时回到文案拆解，不得生成正式运行时 Demo。",
-        "Gate 1 后在视觉实施方案中比较信息架构与数据表达取舍，并明确所选方向、真实来源与参数；用户确认完整视觉方案后，系统按该唯一方案生成并登记运行时 Demo。",
+        "产品方案完成后在视觉实施方案中比较信息架构与数据表达取舍，并明确所选方向、真实来源与参数；用户确认完整视觉方案后，系统按该唯一方案生成并登记运行时 Demo。",
     ])
 
     section("4. 质量定义与专业标准", ["APEX 以标准校准而非自创形容词标准。项目可追加公司、行业或职业规范，但必须将它们转为可验证的 Contract、Freeze 或 Evidence。"], rows=[
@@ -662,35 +663,36 @@ def build(version: str):
 
     # Keep the Gate table together: an orphaned last row would weaken a public white paper.
     story.append(PageBreak())
-    section("5. 三个 Gate 与交付状态机", ["Gate 是用户确认与机器验证的组合，不是单纯的流程提示。状态变更必须经 Router，且任何视觉、接口、领域或运行时变化都会撤销受影响的后续证据。"], rows=[
+    section("5. 三个 Gate 与交付状态机", ["用户确认与机器 Gate 相互配合，但属于不同的状态。状态变更必须经 Router，且任何视觉、接口、领域或运行时变化都会撤销受影响的后续证据。"], rows=[
         ["阶段", "用户确认", "机器前置与结果"],
-        ["Gate 1", "目标、范围、数据、风险、质量、假设与体验策略", "Intent Brief、Delivery Contract、Experience Strategy 与通过的 85 分质量证据；Existing 另需 Inventory、Baseline、Functional Freeze；通过后才允许候选视觉"],
-        ["Visual 确认", "需求拆解、视觉描述、布局、色彩、组件、动效、在线候选与待安装依赖；方案确认后直接生成并登记运行时 Demo", "Visual Execution Plan 是唯一视觉确认；运行时 Demo工件必须锁定官方来源、精确版本、API、风险与 Gate 2 后安装计划"],
-        ["Stitch / 直接代码", "运行时 Demo登记后选择：Stitch 内容与画布单独确认；或以同一运行时 Demo、来源、代码目标与实施方案直接实施", "Stitch 须有候选选择哈希、Visual Reference、Stitch Freeze 与严格保真证据；直接代码路线须有登记运行时 Demo与实施方案。两者均不得跳过确认"],
-        ["Gate 2", "所选视觉基线、设计契约、依赖与实现映射", "Site Contract、Visual Bundle、Implementation Map、Dependency Lock，以及与当前实施基线一致的严格校验；通过后开放实施"],
-        ["Proof", "代表页或高风险流程的可实现性", "真实实现、浏览器、结构与合同证据"],
-        ["Gate 3", "真实交付结果", "Verification Bundle：功能、视觉、无障碍、性能、契约、回归，及多视口、默认/加载/空/异常/无权限状态与关键交互的稳定性矩阵"],
+        ["Gate 1", "产品方案汇入视觉方案确认", "Intent Brief、Delivery Contract、Experience Strategy 与通过的 85 分质量证据；Existing 另需 Inventory、Baseline、Functional Freeze；产品角色完成后允许编制视觉方案"],
+        ["Visual 确认", "需求拆解、视觉描述、布局、色彩、组件、动效、在线候选与待安装依赖；方案确认后直接生成并登记运行时 Demo", "Visual Execution Plan 是第一次用户确认；Demo 须锁定来源、版本和运行时交互证据"],
+        ["Stitch / 直接代码", "用户确认交互式 Demo 后选择 Stitch 或直接代码；Stitch 存在差异时选择保留 Demo 或调整", "Stitch 须有来源与一致性证据；直接代码路线绑定已确认 Demo。两者均需机器 Gate 2 与真实验证"],
+        ["Gate 2", "机器校验实施许可", "Site Contract、Visual Bundle、Implementation Map、Dependency Lock，以及与当前实施基线一致的严格校验；通过后开放实施"],
+        ["Proof", "机器验证代表页或高风险流程", "真实实现、浏览器、结构与合同证据"],
+        ["Gate 3", "机器验证真实交付结果", "Verification Bundle：功能、视觉、无障碍、性能、契约、回归，及多视口、默认/加载/空/异常/无权限状态与关键交互的稳定性矩阵"],
     ], widths=[25*mm, 58*mm, 87*mm])
 
-    story += [PageBreak(), p("工作流总览：从短需求到 Gate 3 交付", styles["h1"]), p("下图展示 APEX 的主交付路径。所有场景先完成需求分析、Existing 基线（如适用）、视觉描述与实施方案；视觉方案确认后直接生成并登记严格运行时 Demo，不增加运行时 Demo人工确认。工件齐全后，用户才选择进入独立的 Stitch 确认或直接代码实施方案确认；两者均保留视觉冻结、工程实施和真实验证。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["workflow"], 97), Spacer(1, 4*mm), p("图 5. 视觉方案确认是唯一视觉人工确认；路线选择位于运行时 Demo工件登记之后，Stitch 确认仍是独立确认。", styles["small"]), PageBreak()]
+    story += [PageBreak(), p("工作流总览：从短需求到 Gate 3 交付", styles["h1"]), p("新 Run 先形成产品和视觉方案；用户确认视觉方案后生成并展示交互式 Demo，用户确认 Demo 后选择 Stitch 或直接代码。两条路线均保留机器冻结、工程实施和真实验证；旧 Run 按原模型恢复。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["workflow"], 97), Spacer(1, 4*mm), p("图 5. 两次用户确认分别针对视觉方案和交互式 Demo；路线选择发生在 Demo 确认之后。", styles["small"]), PageBreak()]
 
-    story += [p("全链路审核门：确认、冻结与交付", styles["h1"]), p("本图将用户确认点与机器 Gate 明确分层。确认节点决定“做什么、按什么视觉与依赖方案做”；Gate 2 决定“是否允许写代码和安装已批准依赖”；Gate 3 决定“是否能以真实证据交付”。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["control_flow"], 97), Spacer(1, 4*mm), p("图 6. 用户确认最多四类，其中 Stitch 为条件式确认；任何可见调整都会撤销受影响的下游结论。", styles["small"]), PageBreak()]
+    story += [p("全链路审核门：确认、冻结与交付", styles["h1"]), p("本图将用户确认点与机器 Gate 明确分层。确认节点决定“做什么、按什么视觉与依赖方案做”；Gate 2 决定“是否允许写代码和安装已批准依赖”；Gate 3 决定“是否能以真实证据交付”。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["control_flow"], 97), Spacer(1, 4*mm), p("图 6. 新 Run 的两次主要确认与路线选择分开；实际调整使受影响的下游结论失效。", styles["small"]), PageBreak()]
 
     story += [p("技术架构总览：从宿主到项目证据", styles["h1"]), p("APEX 将 Skill 的发现能力、Router 的流程裁决、Action Gateway 的受控执行与项目真实系统分层隔离。Markdown 定义策略与标准，代码负责不可绕过的状态、授权和并发控制。", styles["body"]), Spacer(1, 4*mm), diagram(visuals["technical"], 97), Spacer(1, 4*mm), p("图 6. 更新路径：Core 更新 → 版本策略 → 文档与 PDF 重建 → 发布审计 → 下一次 Router 调用加载最新 Bridge。", styles["small"]), PageBreak()]
 
-    section("6. 视觉真相源、确认顺序与 Stitch", ["视觉不是统计卡片堆叠或后台管理模板的同义词。APEX 可根据产品任务采用故事化叙事、杂志化编排、现代极简、强动效或其他经确认的视觉方向；关键在于先将参考图和用户意图拆解为体验策略、视觉描述和实施方案，并把 Visual 与 Stitch 的确认清晰分开。"], [
-        "固定前置顺序为：一句话需求/参考图 → 文案与体验策略 → 策略质量评分 → Gate 1 确认 → 视觉效果描述与实施方案确认 → 直接生成并登记运行时 Demo → Stitch 确认或直接代码实施方案确认。不得直接从需求跳到实现。",
-        "视觉方案确认后必须按已确认的唯一方案自动生成运行时 Demo，并完整登记来源、参数与运行时证据；不追加运行时 Demo确认。登记后才允许选择进入 Stitch 或直接代码路线。",
+    section("6. 视觉真相源、确认顺序与 Stitch", ["视觉不是统计卡片堆叠或后台管理模板的同义词。APEX 可根据产品任务采用故事化叙事、杂志化编排、现代极简、强动效或其他经确认的视觉方向；关键在于先将参考图和用户意图拆解为体验策略、视觉描述和实施方案，并把 视觉方案和交互式 Demo 的确认清晰分开。"], [
+        "固定顺序为：产品角色方案 → 设计师方案 → 用户确认视觉方案 → 生成并展示交互式 Demo → 用户确认 Demo → 选择 Stitch 或直接代码 → 机器 Gate 2 → 实施与验证。",
+        "视觉设计与改造须由设计师实际加载 taste-skill，结合产品和基线采用适用规则；其他技能按场景选用。记录来源、哈希与设计决策，不以技能名称或自动评分证明审美。",
+        "视觉方案确认后生成交互式 Demo，完整登记来源、参数与浏览器任务证据；用户确认 Demo 后才选择 Stitch 或直接代码。",
         "直接代码路线不生成 Stitch，但必须将已登记运行时 Demo、代码目标、来源、Implementation Map 与实施方案一起冻结；不因此减少确认或 Gate。",
         "运行时 Demo：定义整体审美、叙事、光影、构图、动态意图与体验上限。",
         "Stitch：提供可编辑的页面结构、尺寸、间距、颜色、字体、组件与内容节点数据。",
         "DESIGN.md / Site Contract：提供 token、响应式、无障碍、交互、动效与禁止模式。",
-        "设计师可直接调整 Stitch；APEX 同步最新画布并比较冻结差异，重大视觉或交互变化会撤销旧 Gate 2。",
-        "Stitch 使用同一 Demo 的截图、DOM、来源清单与参数合同建立画布；无原生图片输入时走 Stitch UI 导入，否则报告能力缺口，禁止静默退化为纯文本。仅当用户明确要求“跳过 Stitch 步骤”时，Router 才可受控地跳过该阶段并锁定已登记 Demo；“继续”或普通 skip 都不会触发该路径。",
+        "设计师调整 Stitch 后，APEX 比较冻结差异；重大视觉或交互变化会撤销旧 Gate 2。",
+        "用户确认 Demo 后可选择 Stitch 或直接代码。Stitch 使用已确认 Demo 的来源和合同；缺少所需能力时报告实际缺口，不静默改变设计输入。",
     ])
 
-    section("7. 严格视觉到代码链路", ["所有路线先将运行时 Demo作为共同视觉基线；选择 Stitch 时，运行时 Demo、Stitch 画布与代码是同一参数化视觉合同的物化结果；选择直接代码时，已登记并被路线选择接受的运行时 Demo、来源与实施方案构成可审计的代码基线。两者都不是人工目测，而是以结构、内容、token 和截图证据共同约束。"], [
-        "Gate 1 后先确认完整视觉描述与实施方案；方案确认后自动生成并登记运行时 Demo与参数合同，锁定中文内容、表格、布局节点、图表编码、组件和 design token，不再增加 Demo 确认。",
+    section("7. 严格视觉到代码链路", ["所有路线先将运行时 Demo作为共同视觉基线；选择 Stitch 时，运行时 Demo、Stitch 画布与代码是同一参数化视觉合同的物化结果；选择直接代码时，已展示并经用户确认的运行时 Demo、来源与实施方案构成可审计的代码基线。两者都不是人工目测，而是以结构、内容、token 和截图证据共同约束。"], [
+        "确认视觉方案后生成并确认交互式 Demo，冻结内容、表格、布局节点、图表编码、组件和 design token。",
         "Stitch Freeze 保存确认 Screen 的 HTML、完整截图、内容哈希和 generation input；strict-replica 完成运行时 Demo到 Stitch 的结构与保真校验后才 Seal。",
         "运行时由真实浏览器采集截图与 DOM。运行时 Demo路线完成 Stitch 到代码的第二段结构和视觉校验；直接代码路线验证其确认描述、来源、映射和运行时结果一致。任何结构、内容或设计 token 差异均不能以人工近似放行。",
         "`data-apex-*` 标记锁定布局、图表、组件和 token；哈希不一致、标记缺失或关键差异均不得进入下一 Gate。",
@@ -702,7 +704,7 @@ def build(version: str):
         "Motion Capability Inventory 与 Selection 在运行时 Demo生成前盘点现有动效资产、已安装库和可用专业能力；动效预览、Motion Contract 和实现映射必须使用同一引擎、API、关键帧和时间参数。",
         "Implementation Map 消费同一份来源清单，并记录代码目标、选择器、实现方式和来源标记。实施代码必须保留 data-apex-source 标记，审计会验证标记真实出现在对应文件中。",
         "Gate 2 验证来源清单、Visual Bundle、动效合同、依赖锁和实现映射；Gate 3 验证真实代码仍保留同一来源标记与运行时证据。未登记来源、未锁版本或相似替代均不能通过。",
-        "明确跳过 Stitch 阶段会写入 stage-skip 决策回执，不会伪造 Stitch Freeze 或放宽 Gate。Visual Bundle、实现对比证据和运行状态矩阵都必须绑定已登记并由路线选择接受的运行时 Demo；普通 `skip stitch` 仍只可豁免人工确认，必须已有真实 Stitch 工件。",
+        "选择直接代码会记录路线决策，不伪造 Stitch Freeze 或放宽 Gate。Visual Bundle、实现对比证据和运行状态矩阵均须绑定用户已确认的 Demo。",
         "运行时 Demo前先展示并确认 Visual Execution Plan：布局、颜色、字体、内容、组件、特效、动效引擎/API、在线候选和待安装依赖。未安装候选只有同时进入确认方案和精确 Dependency Lock 后才可进入 Gate 2；确认前 Router 不授予正式运行时 Demo生成。",
     ])
 

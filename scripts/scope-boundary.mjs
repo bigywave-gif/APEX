@@ -15,7 +15,12 @@ function presentationTermGroups(values) {
     if (!raw) return [];
     const basename = path.basename(raw);
     const stem = basename.replace(/\.[^.]+$/, '');
-    return [...new Set([raw, basename, stem, raw.replace(/[\\/_:.-]+/g, ' '), stem.replace(/[\\/_:.-]+/g, ' ')]
+    // Entry-point stems such as "main" are too generic to establish that a
+    // human-readable proposal republishes a protected file. Keep the full
+    // path/basename signal, but do not treat generic implementation words as
+    // leaked presentation content.
+    const genericStems = new Set(['main', 'index', 'app', 'style', 'styles', 'token', 'tokens', 'theme', 'themes', 'variables']);
+    return [...new Set([raw, basename, ...(genericStems.has(stem) ? [] : [stem, stem.replace(/[\\/_:.-]+/g, ' ')]), raw.replace(/[\\/_:.-]+/g, ' ')]
       .map(item => item.trim()).filter(item => item.length >= 3))];
   }).filter(group => group.length);
 }
@@ -42,11 +47,12 @@ export function assertAffectedOnlyPresentation(content, scope, { requireBaseline
   if (typeof content !== 'string' || !content.trim()) throw new Error('affected-only presentation must contain user-readable content');
   if (!scope || scope.presentationPolicy?.confirmationContent !== 'affected-closure-only' || scope.presentationPolicy?.unchangedContent !== 'reference-baseline-without-republication') throw new Error('affected-only presentation requires the frozen localized presentation policy');
 
+  const sitewide = scope.mode === 'sitewide';
   const affected = boundaryTerms(scope.affected);
   const protectedOnly = [...boundaryTerms(scope.protected)].filter(term => !affected.has(term));
   const normalized = content.toLowerCase();
   const leaked = protectedOnly.find(term => normalized.includes(term));
-  if (leaked) throw new Error(`presentation republishes protected Existing content: ${leaked}`);
+  if (!sitewide && leaked) throw new Error(`presentation republishes protected Existing content: ${leaked}`);
 
   const affectedNodeGroups = presentationTermGroups(scope.affected?.visualNodes);
   const missing = affectedNodeGroups.filter(group => !group.some(term => normalized.includes(term))).map(group => group[0]);
@@ -59,19 +65,38 @@ export function assertAffectedOnlyPresentation(content, scope, { requireBaseline
     const remainder = content.slice(start + heading.length);
     const nextHeading = remainder.search(/^#{2,3}\s/m);
     const block = (nextHeading >= 0 ? remainder.slice(0, nextHeading) : remainder).trim();
-    if (block !== unchangedBaselineSentence) throw new Error('unchanged Existing content must use the single bounded baseline reference without a list or redesign narrative');
+    if (!sitewide && block !== unchangedBaselineSentence) throw new Error('unchanged Existing content must use the single bounded baseline reference without a list or redesign narrative');
+    if (sitewide && !block) throw new Error('site-wide redesign must explain what existing content and behavior are preserved');
   }
 
   const withoutBaselineReference = normalized.replace(unchangedBaselineSentence.toLowerCase(), '');
-  if (/(全站|整站|全部页面|所有页面)/.test(withoutBaselineReference)) throw new Error('localized presentation must not expand into a site-wide proposal');
+  if (!sitewide && /(全站|整站|全部页面|所有页面)/.test(withoutBaselineReference)) throw new Error('localized presentation must not expand into a site-wide proposal');
   return {
     status: 'passed', policy: 'affected-closure-only',
     affectedVisualNodes: scope.affected?.visualNodes || [],
-    protectedContent: 'not-republished', unchangedContent: 'single-baseline-reference'
+    protectedContent: sitewide ? 'preservation-may-be-described' : 'not-republished', unchangedContent: sitewide ? 'preservation-explained' : 'single-baseline-reference'
   };
 }
 
 export { unchangedBaselineSentence };
+
+// Site-wide redesigns must explain every page in the frozen affected set.
+// A shared issue may explicitly name several pages; prose is not proof that
+// the issue is true, so the existing browser and code baseline remains required.
+export function assertSitewideNarrativeCoverage(narrative, scope) {
+  if (scope?.mode !== 'sitewide') return;
+  const pages = scope.affected?.pages, changes = narrative?.changes;
+  if (!Array.isArray(pages) || !pages.length || !Array.isArray(changes) || !changes.length) throw new Error('site-wide redesign needs frozen affected pages and page-specific changes');
+  const allowed = new Set(pages), covered = new Set();
+  for (const item of changes) {
+    const references = item.pages ?? (allowed.has(item.scope) ? [item.scope] : []);
+    if (!Array.isArray(references) || !references.length || references.some(page => typeof page !== 'string' || !allowed.has(page))) throw new Error('site-wide change must identify pages in the frozen affected scope');
+    if (![item.currentIssue, item.change, item.why, item.resolvedOutcome].every(value => typeof value === 'string' && value.trim())) throw new Error('site-wide change must describe the current issue, change, reason and outcome');
+    references.forEach(page => covered.add(page));
+  }
+  const missing = pages.filter(page => !covered.has(page));
+  if (missing.length) throw new Error(`site-wide redesign lacks a current issue, change and outcome for affected pages: ${missing.join(', ')}`);
+}
 
 export function assertComponentsWithinScope(components, scope) {
   const nodes = new Set(scope?.affectedVisualNodes || []), targets = new Set(scope?.affectedRuntimeTargets || scope?.allowedRuntimeTargets || []);

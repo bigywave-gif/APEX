@@ -1,12 +1,12 @@
 {
   "name": "@bigywave/apex",
-  "version": "4.37.5",
+  "version": "4.45.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "APEX user-intent-driven full-stack delivery system",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": "^22.13.0 || >=23.4.0"
   },
   "scripts": {
     "install:apex": "node scripts/install.mjs",
@@ -17,7 +17,31 @@
     "test:workflow": "node scripts/workflow-node-registry-contract-test.mjs",
     "test:hooks": "node scripts/codex-lifecycle-hook-contract-test.mjs",
     "test:roles": "node scripts/role-advisory-contract-test.mjs",
+    "test:visual-skill": "node scripts/required-visual-skill-contract-test.mjs",
+    "test:visual-role-skill": "node scripts/visual-role-skill-integration-test.mjs",
     "test:role-quality": "node scripts/role-quality-evaluator.mjs audit",
-    "release:audit": "node scripts/release-audit.mjs"
+    "test:ledger": "node scripts/run-ledger-contract-test.mjs",
+    "test:agents": "node scripts/agent-runtime-contract-test.mjs",
+    "test:agent-concurrency": "node scripts/agent-concurrency-contract-test.mjs",
+    "test:agent-attempt-usage": "node scripts/agent-attempt-usage-test.mjs",
+    "test:agent-budget-reservation": "node scripts/agent-budget-reservation-test.mjs",
+    "test:run-metrics": "node scripts/run-metrics-test.mjs",
+    "test:design-contract-evidence": "node scripts/design-contract-evidence-test.mjs",
+    "test:preflight": "node scripts/preflight-contract-test.mjs",
+    "reconcile": "node scripts/apex-reconcile.mjs status",
+    "release:audit": "node scripts/release-audit.mjs",
+    "test:default-confirmation": "node scripts/default-confirmation-contract-test.mjs",
+    "test:implementation-seal": "node scripts/implementation-seal-test.mjs",
+    "test:combined-plan": "node scripts/combined-plan-contract-test.mjs",
+    "test:stitch-screen-binding": "node scripts/stitch-screen-binding-test.mjs",
+    "test:stitch-submission": "node scripts/stitch-submission-contract-test.mjs",
+    "test:stitch-route-browser": "node scripts/product-to-demo-browser-test.mjs --stitch-route",
+    "test:visual-reference-chart": "node scripts/visual-reference-chart-contract-test.mjs",
+    "test:runtime-baseline-contract": "node scripts/runtime-baseline-contract-test.mjs",
+    "test:implementation-coverage": "node scripts/implementation-coverage-test.mjs",
+    "test:formal-route-coverage": "node scripts/formal-route-coverage-test.mjs",
+    "test:formal-task-coverage": "node scripts/formal-task-coverage-test.mjs",
+    "test:formal-auth-browser": "node scripts/formal-auth-browser-test.mjs",
+    "test:existing-baseline-browser": "node scripts/existing-baseline-browser-test.mjs"
   }
 }

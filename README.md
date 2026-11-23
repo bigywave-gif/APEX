@@ -2,7 +2,7 @@
 
 ## 4.37.5：登记事务恢复
 
-Gate 1 方案与运行时 Demo 的登记采用“收据先落盘、状态后提交”的可恢复事务。进程在两者之间中断时，Router 在后续 `status` 或 `resume` 中只会重放与当前 `project + run + session`、工件 SHA-256 及原受控操作回执完全一致的收据；不会跨 Session 复用数据、重跑已完成的生成步骤或重复展示同一确认门。
+Gate 1 方案、运行时 Demo 登记与 Demo 展示均采用“收据先落盘、状态后提交”的可恢复事务。运行时 Demo 登记不等于展示：只有当前 Run 的同源聊天片段已准备输出（宿主须在同轮最终回复嵌入），或其 run-local `visual-sandbox` HTTP 回退预览被实际打开，并留下哈希绑定回执后，才开放 Stitch 或直接代码路线；`file://`、正式服务和其他 Run 均会被拒绝。进程在这些边界中断时，Router 在后续 `status` 或 `resume` 中只会重放与当前 `project + run + session`、工件 SHA-256 及原受控操作回执完全一致的收据；不会跨 Session 复用数据、重跑已完成的生成步骤或重复展示同一确认门。
 
 APEX 以 [Apache License 2.0](LICENSE) 发布。
 
@@ -113,7 +113,7 @@ APEX 以 [Apache License 2.0](LICENSE) 发布。
 
 ### `scripts/`
 
-除 Router、Gate、Visual 与验证脚本外，APEX 提供 `role-advisory.mjs`：它把产品、交付、UX/UI、按需的图表/动效、实施审查与证据核验记录为当前 run 的结构化 advisory。角色不直接改项目、不创建额外确认；Router 仅在既有 Gate 的完整方案中汇总其结论。被当前阶段选中的角色必须输出可验证结论；失败保留受控操作回执并阻断当前 Gate，不能以 `unverified` 建议伪造通过。
+除 Router、Gate、Visual 与验证脚本外，APEX 提供 `role-advisory.mjs`：它把产品、交付、后端、UX/UI、前端、按需的图表/动效、QA、实施审查与证据核验记录为当前 run 的结构化 advisory。角色不直接改项目、不创建额外确认；Router 仅在既有 Gate 的完整方案中汇总其结论。每个被选中的职业角色都会创建带输入哈希、预算和 trace 的耐久 Agent Job；失败进入受控重试或死信队列并阻断当前 Gate，不能以 `unverified` 建议伪造通过，也不能因重复重试重复消耗 Token。
 
 每个受控动作还绑定 `run + stateHash + action + script + inputDigest` 的稳定操作键。新的授权不是新的输入：相同操作键的失败只能作为一次可审计阻断，只有运行状态、真实输入或已观察到的环境原因改变后才允许重试。运行时视觉基线同样要求至少两帧真实浏览器截图具有不同 SHA-256，避免静态页面以重复截图伪造动效证据。
 
@@ -168,9 +168,9 @@ npm test
 
 APEX 先编译用户短需求为 Intent Brief 和 Delivery Contract，再按 `Greenfield / Existing` 分轨，并组合 `Lite / Standard / Full` 范围和 `Interactive / Autonomous` 授权。新项目先建立产品、技术、数据和 Site Contract；已有项目先核对真实基线、冻结功能和影响范围。
 
-两条轨道在 Visual 阶段汇合：先完成需求拆解、视觉效果描述和完整视觉实施方案确认，随后立即在项目的隔离 run 沙箱中生成并登记可访问、可交互的运行时 Demo。Demo 是唯一用户视觉审阅产物，不再生成或确认静态效果图；工件齐全后，用户明确选择进入 Stitch 或直接代码。Stitch 路线再经过同一 Demo 的严格导入、一致性校验和 Stitch 确认后 Seal；直接代码路线以已登记 Demo、代码目标和实施方案作为冻结基线。两条路线都必须经过实施冻结、Gate 2、正式生产代码落地和 Gate 3，不能以“直接代码”为由跳过确认或验收。
+新 Run 先由产品角色形成方案，设计师结合需求和真实现状完成视觉方案。用户确认视觉方案后，在隔离 Run 中生成并展示可交互 Demo；用户确认 Demo 后选择 Stitch 或直接代码。Stitch 候选一致时自动验证封存，存在差异时由用户选择保留 Demo 直接落地或调整方案。两条路线均需冻结已确认基线，通过机器 Gate 2、正式代码实现和 Gate 3 验证。旧 Run 按原确认模型恢复。
 
-运行状态和产物位于目标项目 `.apex/runs/<run-id>/`；Checkpoint和内容哈希支持增量恢复，不再因中断无条件重跑全部流程。用户明确终止当前 APEX Run 时，Router 会先以 Run ID 和沙盒根目录验证并停止该 Run 的临时 Demo 服务/端口，再回收该 Run 的候选、截图、缓存、证据、审批和其他临时文件；仅保留 `state.json`、`events.ndjson` 与 `cancellation-receipt.json`。该操作只影响当前 session 绑定 Run，不会停止项目正式服务、清理其他 session/Run 或回滚已获批准的正式代码。
+运行状态和产物位于目标项目 `.apex/runs/<run-id>/`；Checkpoint、内容哈希和 `run-ledger.sqlite` 持久账本支持增量恢复，不再因中断无条件重跑全部流程。用户明确终止当前 APEX Run 时，Router 会先以 Run ID 和沙盒根目录验证并停止该 Run 的临时 Demo 服务/端口，再回收该 Run 的候选、截图、缓存、证据、审批和其他临时文件；仅保留 `state.json` 兼容投影、`run-ledger.sqlite`、`events.ndjson` 与 `cancellation-receipt.json`。该操作只影响当前 session 绑定 Run，不会停止项目正式服务、清理其他 session/Run 或回滚已获批准的正式代码。
 
 ## 系统边界
 
@@ -266,3 +266,9 @@ APEX 支持在使用中持续补充外部能力池，但遵循：
 - [registry/skills/manifest.yaml](registry/skills/manifest.yaml)
 - [registry/skills/activation-matrix.md](registry/skills/activation-matrix.md)
 - [registry/skills/conflict-matrix.md](registry/skills/conflict-matrix.md)
+
+## Demo 交付形式：可交互 UI 原型
+
+APEX Demo 统一为可交互 UI 原型，也称前端 Demo。按确认范围提供可操作的导航、关键任务、表单与状态反馈，使用明确标识的示例数据并提供重置入口；多角色任务支持切换预览视角。源码输入必须包含 `interactionContract`，浏览器实际执行全部任务并验证操作前后的可见变化；静态截图、自动播放动画和无效按钮不能替代交互验收。详情及字段格式见 `core/runtime/interactive-demo-contract.md`。
+
+默认在聊天正文嵌入可直接使用的 Demo，支持页签、按钮、表单、状态反馈与重置。通过 `chatPreview.fragment` 指定自包含 HTML 片段，编译器从同一片段生成 HTTP 验收页；Router 校验哈希并返回 `presentation.contentReference`，宿主必须在本轮最终回复原样输出。不能用 localhost iframe、截图或链接代替聊天交互。仅宿主缺少能力或已选来源无法兼容片段时，说明具体原因并打开同一 Run 浏览器面板。保留来源锁、响应式要求和后续路线选择，不新增确认。

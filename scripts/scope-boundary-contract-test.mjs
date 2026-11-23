@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { assertAffectedOnlyPresentation, assertExistingPlanScope, protectedFileChecks, protectedVisualEvidenceChecks, unchangedBaselineSentence } from './scope-boundary.mjs';
+import { assertAffectedOnlyPresentation, assertExistingPlanScope, assertSitewideNarrativeCoverage, protectedFileChecks, protectedVisualEvidenceChecks, unchangedBaselineSentence } from './scope-boundary.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
@@ -40,6 +40,21 @@ try {
   expectFailure(() => assertExistingPlanScope({ ...basePlan, sourceSelections: [{ visualNodes: ['revenue-chart', 'app-shell'] }] }, frozen, scopeHash), 'out-of-scope source selections must be rejected');
   const localizedPresentation = `# 局部调整\n\n## 1. 需求方向与成功标准\n调整 revenue-chart 的标签可读性。\n\n### 本次变更闭包\n仅修改 revenue-chart。\n\n### 明确保留内容\n${unchangedBaselineSentence}\n\n## 2. 用户、场景与核心任务\n报表用户更快读取 revenue-chart。`;
   assertAffectedOnlyPresentation(localizedPresentation, frozen, { requireBaselineSection: true });
+  const genericFileScope = structuredClone(frozen); genericFileScope.protected.files.push({path:'src/tokens.css',sha256:digest('fixture')});
+  assertAffectedOnlyPresentation(localizedPresentation+'\n设计 tokens 沿用既有规范。', genericFileScope, { requireBaselineSection: true });
+  expectFailure(() => assertAffectedOnlyPresentation(localizedPresentation+'\n修改 src/tokens.css。', genericFileScope, { requireBaselineSection: true }), 'actual protected token file must still be rejected');
+  const sitewideScope = { ...frozen, mode: 'sitewide' };
+  const multiPage = { ...sitewideScope, affected: { ...sitewideScope.affected, pages: ['report', 'settings'] } };
+  const validNarrative = { changes: [{ scope: '共享标题层级', pages: ['report', 'settings'], currentIssue: '现有标题缺少层级', change: '调整标题样式', why: '提高可读性', resolvedOutcome: '两个页面的标题更清晰' }] };
+  assertSitewideNarrativeCoverage(validNarrative, multiPage);
+  expectFailure(() => assertSitewideNarrativeCoverage({ changes: [{ ...validNarrative.changes[0], pages: ['report'] }] }, multiPage), 'site-wide redesign must cover every affected page');
+  expectFailure(() => assertSitewideNarrativeCoverage({ changes: [{ ...validNarrative.changes[0], pages: ['report', 'other'] }] }, multiPage), 'site-wide redesign must reject pages outside the frozen scope');
+  expectFailure(() => assertSitewideNarrativeCoverage({ changes: [{ ...validNarrative.changes[0], resolvedOutcome: ' ' }] }, multiPage), 'site-wide redesign must state the target outcome');
+  assertSitewideNarrativeCoverage({ changes: [] }, frozen); // localized is unchanged
+  const sitewidePresentation = `# 整站改造\n\n## 1. 现状与改造\n现有 revenue-chart 的信息层级不清，调整布局以增强阅读。\n\n### 明确保留内容\n保留 app-shell 的导航及既有功能，继续沿用其业务行为。\n\n## 2. 改造后效果\nrevenue-chart 在新布局中保持清晰可读。`;
+  const sitewideResult = assertAffectedOnlyPresentation(sitewidePresentation, sitewideScope, { requireBaselineSection: true });
+  if (sitewideResult.unchangedContent !== 'preservation-explained') throw new Error('site-wide redesign must allow explicit existing-site preservation');
+  expectFailure(() => assertAffectedOnlyPresentation(sitewidePresentation.replace('保留 app-shell 的导航及既有功能，继续沿用其业务行为。', ''), sitewideScope, { requireBaselineSection: true }), 'site-wide redesign must explain what is preserved');
   expectFailure(() => assertAffectedOnlyPresentation(localizedPresentation.replace('仅修改 revenue-chart。', '修改 revenue-chart，并重新设计 app-shell。'), frozen, { requireBaselineSection: true }), 'protected presentation terms must be rejected');
   expectFailure(() => assertAffectedOnlyPresentation(localizedPresentation.replace(unchangedBaselineSentence, `${unchangedBaselineSentence}\n- app-shell 保持原状`), frozen, { requireBaselineSection: true }), 'unchanged content must not be republished as a list');
   expectFailure(() => assertAffectedOnlyPresentation(localizedPresentation.replace('局部调整', '整站调整'), frozen, { requireBaselineSection: true }), 'localized presentation must reject site-wide framing');
@@ -54,7 +69,7 @@ try {
   if (protectedVisualEvidenceChecks(root, scopeHash, ['app-shell'], interaction).every(item => item.passed)) throw new Error('changed protected visual node must fail');
   fs.writeFileSync(path.join(root, protectedFile), 'export const AppShell = false;\n');
   if (protectedFileChecks(root, frozen.protected.files).every(item => item.passed)) throw new Error('changed protected file must fail');
-  console.log(JSON.stringify({ status: 'passed', cases: ['localized-schema', 'affected-node-closure', 'source-selection-closure', 'affected-only-presentation', 'protected-presentation-non-republication', 'protected-file-hash', 'protected-visual-zero-diff'] }));
+  console.log(JSON.stringify({ status: 'passed', cases: ['localized-schema', 'affected-node-closure', 'source-selection-closure', 'affected-only-presentation', 'sitewide-page-coverage', 'protected-presentation-non-republication', 'protected-file-hash', 'protected-visual-zero-diff'] }));
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

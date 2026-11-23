@@ -6,9 +6,9 @@
   "scope": "standard",
   "authorization": "interactive",
   "roleChain": {
-    "version": "1.0",
+    "version": "1.1",
     "enabled": true,
-    "confirmationModel": "gate-summary-only"
+    "confirmationModel": "two-confirmations"
   },
   "lifecycle": "active",
   "handoff": null,
@@ -72,9 +72,10 @@
     "visualPlanPresentationManifest": null,
     "demoSourceManifest": null,
     "visualSandboxFiles": null,
-    "visualSandboxRuntime": null,
-    "runtimeDemo": null,
-    "designCandidates": null,
+  "visualSandboxRuntime": null,
+  "runtimeDemo": null,
+  "runtimeDemoPresentation": null,
+  "designCandidates": null,
     "domainModel": null,
     "apiContract": null,
     "dataContract": null,
@@ -91,9 +92,11 @@
     "implementationPresentation": null,
     "implementationPresentationManifest": null,
     "runtimeStateMatrix": null,
+    "verificationInventory": null,
     "verificationPlan": null,
     "verificationBundle": null,
     "pageDelta": null,
+    "implementationRegistration": null,
     "changeScope": null,
     "dependencyLock": null,
     "gate1VisualOutput": null

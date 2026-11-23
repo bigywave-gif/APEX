@@ -54,8 +54,9 @@ skills:
   - name: taste-skill
     role: anti-template-taste
     contract: apex/registry/skills/taste-skill.md
-    optional_for:
-      - premium-visual-polish
+    required_for:
+      - visual-design
+      - visual-redesign
   - name: better-icons
     role: icon-system-unification
     contract: apex/registry/skills/better-icons.md
@@ -120,9 +121,9 @@ conflicts:
       - stitch-design
   - when: structure-not-confirmed
     block:
-      - taste-skill
       - react-bits
       - motion-ai-kit
+    note: taste-skill remains required for visual design, but may not override product structure or user intent
 reasoning:
   - design-contract-before-visual-exploration
   - structural-skills-before-aesthetic-skills

@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 /** Regression tests for the APEX Codex invocation boundary. */
 import crypto from 'node:crypto';
+import { readChatPreview } from './chat-demo.mjs';
 import fs from 'node:fs';
+import { seedInteractionFixture } from './interactive-demo-test-fixture.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+import { recordArtifact, commitRunState, initializeLedger, readRunState, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recordTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
@@ -60,10 +64,18 @@ try {
   expect(run(router, ['intake', root, 'run-cancel', 'greenfield', 'standard', 'interactive', 'session-cancel']), 'cancellation regression run must create an isolated session-bound run');
   expect(run(router, ['intake', root, 'run-cancel-other', 'greenfield', 'standard', 'interactive', 'session-cancel-other']), 'cancellation regression must preserve another session run');
   const cancelRunDir = path.join(root, '.apex', 'runs', 'run-cancel');
+  registerAgent(cancelRunDir, { agentId: 'running-agent', vocation: 'design', stage: 'visual' });
+  registerAgent(cancelRunDir, { agentId: 'queued-agent', vocation: 'design', stage: 'visual' });
+  const activeJob = enqueueAgentJob(cancelRunDir, { agentId: 'running-agent', stage: 'visual', inputHash: 'running' });
+  const pendingJob = enqueueAgentJob(cancelRunDir, { agentId: 'queued-agent', stage: 'visual', inputHash: 'queued' });
+  const activeClaim = claimAgentJob(cancelRunDir, activeJob.jobId);
+  recordTokenUsage(cancelRunDir, { stage: 'visual', agentId: 'running-agent', inputTokens: 7, metadata: { usageSource: 'provider-reported' } });
   const otherRunSentinel = path.join(root, '.apex', 'runs', 'run-cancel-other', 'unrelated-session-sentinel.txt');
   fs.writeFileSync(otherRunSentinel, 'must survive current-run cancellation\n');
   const sandboxRoot = path.join(cancelRunDir, 'visual-sandbox'); fs.mkdirSync(sandboxRoot, { recursive: true }); fs.writeFileSync(path.join(sandboxRoot, 'index.html'), '<main>temporary sandbox</main>\n');
   for (const relative of ['evidence/browser/screen.png', 'cache/playwright-daemon/cache.json', 'approvals/gate1.json', 'operations/temporary-operation.json', 'design-candidates.json']) { const file = path.join(cancelRunDir, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'temporary\n'); }
+  fs.writeFileSync(path.join(cancelRunDir, 'operations', 'valid-receipt.json'), JSON.stringify({ action: 'verify', script: 'fixture.mjs', status: 'succeeded', inputFileHashes: {}, outputFileHashes: {}, stdout: 'not retained' }));
+  recordArtifact(cancelRunDir, { artifactId: 'cancel-artifact', reference: 'design-candidates.json', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(cancelRunDir, 'design-candidates.json'))).digest('hex')}` });
   const cancelPort = freePort();
   const canonicalSandboxRoot = fs.realpathSync(sandboxRoot);
   const child = spawn(process.execPath, [sandboxRuntime, 'serve', canonicalSandboxRoot, String(cancelPort), '--apex-run-id', 'run-cancel'], { detached: true, stdio: 'ignore' }); child.unref(); cancellationRuntimePid = child.pid;
@@ -75,27 +87,75 @@ try {
   const cancelled = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行', 'user-terminated-current-run']), 'current-run cancellation must reclaim temporary artifacts');
   cancellationRuntimePid = null;
   if (cancelled.idempotent || cancelled.cancellation?.receipt !== 'cancellation-receipt.json' || !cancelled.cancellation?.removedEntries?.includes('visual-sandbox') || !cancelled.cancellation?.services?.stopped?.some(item => item.pid === child.pid)) throw new Error('cancellation must report both run-local artifact reclamation and the stopped Demo service');
+  if (cancelled.integrity?.status !== 'consistent' || cancelled.integrity?.artifactLineage?.registered !== 1) throw new Error('cancelled Run must retain and archive artifact lineage without reporting reclaimed files missing');
+  try { recordArtifact(cancelRunDir, { artifactId: 'late', reference: 'late.json', sha256: 'sha256:late' }); throw new Error('late artifact registration was accepted'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
+  const cancelDb = new DatabaseSync(path.join(cancelRunDir, 'run-ledger.sqlite'), { readOnly: true });
+  const retainedEvent = JSON.parse(cancelDb.prepare("SELECT payload_json FROM events WHERE event_type = 'cancelled-operation-receipts-retained' ORDER BY id DESC LIMIT 1").get().payload_json); cancelDb.close();
+  if (!retainedEvent.receipts.some(item => item.name === 'valid-receipt.json' && item.status === 'succeeded' && !('stdout' in item)) || !retainedEvent.receipts.some(item => item.status === 'unreadable')) throw new Error('cancellation must retain receipt metadata and unreadable evidence without storing raw output');
+  const cancelReceipt = JSON.parse(fs.readFileSync(path.join(cancelRunDir, 'cancellation-receipt.json'), 'utf8'));
+  if (cancelReceipt.agents?.fencedJobs?.length !== 2 || cancelReceipt.agents.externalInterruption !== 'not-confirmed') throw new Error('cancellation receipt must identify fenced Agent jobs without claiming host interruption');
   const cancelEntries = fs.readdirSync(cancelRunDir).sort();
-  if (JSON.stringify(cancelEntries) !== JSON.stringify(['cancellation-receipt.json', 'events.ndjson', 'state.json'])) throw new Error(`cancellation must retain only the minimal receipt and audit state, received: ${cancelEntries.join(', ')}`);
+  const retainedNames = new Set(['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal', 'state.json']);
+  if (cancelEntries.some(name => !retainedNames.has(name)) || !['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'state.json'].every(name => cancelEntries.includes(name))) throw new Error(`cancellation must retain only the receipt, durable ledger (including possible WAL files), and state projection, received: ${cancelEntries.join(', ')}`);
+  const jobsAfterCancel = agentRuntimeStatus(cancelRunDir).jobs;
+  if (jobsAfterCancel.find(job => job.jobId === activeJob.jobId)?.status !== 'cancelled' || jobsAfterCancel.find(job => job.jobId === pendingJob.jobId)?.status !== 'cancelled') throw new Error('cancellation must fence running and queued jobs in the retained ledger');
+  if (agentRuntimeStatus(cancelRunDir).tokenUsage.visual !== 7) throw new Error('cancellation must retain previously recorded token usage');
+  if (agentRuntimeStatus(cancelRunDir).tokenUsageCoverage.visual?.unknown !== 1) throw new Error('cancelled running attempt must retain unknown usage rather than imply zero cost');
+  try { settleAgentJob(cancelRunDir, activeJob.jobId, { status: 'succeeded', leaseToken: activeClaim.leaseToken }); throw new Error('late Agent completion was accepted'); } catch (error) { if (!String(error.message).includes('not running')) throw error; }
+  try { claimAgentJob(cancelRunDir, pendingJob.jobId); throw new Error('cancelled queued job was claimed'); } catch (error) { if (!String(error.message).includes('not queued')) throw error; }
+  try { registerAgent(cancelRunDir, { agentId: 'running-agent', vocation: 'design', stage: 'visual' }); throw new Error('cancelled Agent was reactivated'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
   const cancelledState = JSON.parse(fs.readFileSync(path.join(cancelRunDir, 'state.json'), 'utf8'));
+  const staleState = { ...cancelledState, lifecycle: 'active', revision: cancelledState.revision + 1 };
+  try { commitRunState(cancelRunDir, staleState); throw new Error('cancelled Run was reactivated by a late state commit'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
+  try { initializeLedger(cancelRunDir, staleState, 'late-compatibility-import'); throw new Error('cancelled Run was reactivated by a late import'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
+  fs.writeFileSync(path.join(cancelRunDir, 'state.json'), JSON.stringify(staleState));
+  if (readRunState(cancelRunDir).lifecycle !== 'cancelled') throw new Error('stale state projection must not reactivate a cancelled Run');
   if (cancelledState.lifecycle !== 'cancelled' || !cancelledState.cancellation?.temporaryArtifactsReclaimed || Object.entries(cancelledState.artifacts).some(([key, value]) => key === 'roleDecisionSummaries' ? Object.keys(value || {}).length : value !== null)) throw new Error('cancellation must clear every temporary artifact reference and record its audited reclamation');
   if (fs.existsSync(path.join(root, '.apex', 'locks', 'project-mutation.lock')) || !fs.existsSync(otherRunSentinel)) throw new Error('cancellation must release only its own lease while preserving other-session data');
   const stoppedProcess = spawnSync('/bin/ps', ['-p', String(child.pid), '-o', 'stat='], { encoding: 'utf8' });
   if (String(stoppedProcess.stdout || '').trim() && !String(stoppedProcess.stdout).includes('Z')) throw new Error('cancellation must stop the run-local Demo process');
+  reject(run(action, ['run', root, 'run-cancel', 'session-cancel', 'obsolete-auth', 'analyze_requirement', 'role-advisory.mjs', 'select', cancelRunDir, 'gate1']), 'cancelled run cannot execute or replay', 'cancelled Run must reject late actions before creating operation files');
+  if (fs.existsSync(path.join(cancelRunDir, 'operations'))) throw new Error('late action must not recreate cancelled Run operation files');
   const repeatedCancel = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行', 'repeat']), 'cancellation must be idempotent');
   if (!repeatedCancel.idempotent || repeatedCancel.cancellation?.type !== 'run-cancellation-reclamation') throw new Error('repeated cancellation must return the retained cancellation receipt without recreating artifacts');
+  expect(run(router, ['intake', root, 'run-cancel-recovery', 'greenfield', 'standard', 'interactive', 'session-cancel-recovery']), 'create cancellation recovery run');
+  const recoveryDir = path.join(root, '.apex', 'runs', 'run-cancel-recovery');
+  registerAgent(recoveryDir, { agentId: 'recovery-agent', vocation: 'design', stage: 'visual' });
+  const recoveryJob = enqueueAgentJob(recoveryDir, { agentId: 'recovery-agent', stage: 'visual', inputHash: 'recovery' });
+  fs.writeFileSync(path.join(recoveryDir, 'visual-sandbox-runtime.json'), JSON.stringify({ pid: 1, runtimeRoot: 'missing' }));
+  reject(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'runtime process cannot be proven run-local', 'unsafe runtime cleanup must fail closed');
+  if (readRunState(recoveryDir).lifecycle !== 'cancelled' || agentRuntimeStatus(recoveryDir).jobs.find(job => job.jobId === recoveryJob.jobId)?.status !== 'cancelled') throw new Error('cleanup failure must retain the cancellation fence');
+  fs.rmSync(path.join(recoveryDir, 'visual-sandbox-runtime.json'));
+  const recoveredCancel = expect(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'retry interrupted cancellation cleanup');
+  if (!recoveredCancel.recoveredCancellation || agentRuntimeStatus(recoveryDir).jobs.find(job => job.jobId === recoveryJob.jobId)?.status !== 'cancelled') throw new Error('cancellation cleanup retry must preserve the fenced job ledger');
   reject(run(runController, ['init', root, 'direct-run', 'greenfield']), 'cannot be executed', 'direct run-controller state mutation must be denied');
   reject(run(runController, ['init', root, 'spoofed-run', 'greenfield'], { APEX_ROUTER_COMMAND: 'init' }), 'cannot be executed', 'spoofed Router environment must not mutate state');
   reject(spawnSync(process.execPath, ['--input-type=module', '-e', `import { executeRunController } from ${JSON.stringify(runController)}; executeRunController('init', [${JSON.stringify(root)}, 'import-bypass', 'greenfield', 'standard', 'interactive']);`], { encoding: 'utf8' }), 'does not provide an export named', 'internal controller must not be importable');
   reject(run(baselineCollector, ['capture', path.join(root, '.apex', 'runs', 'run-a'), 'missing-baseline.json', root]), 'Router authorization is required', 'direct guarded runtime script must be denied');
   reject(run(projectIntake, ['scan', path.join(root, '.apex', 'runs', 'run-a'), root]), 'Router authorization is required', 'direct Existing inventory scan must be denied');
   const runADir = path.join(root, '.apex', 'runs', 'run-a'); const runAStateFile = path.join(runADir, 'state.json'); const runAState = JSON.parse(fs.readFileSync(runAStateFile, 'utf8'));
+  // Ledger reconciliation is a hard workflow predecessor.  A changed
+  // registered artifact must never leave a forward action available, and a
+  // recovery that cannot repair it must surface a typed non-success result.
+  const integritySentinel = path.join(runADir, 'integrity-sentinel.json');
+  const integrityOriginal = '{"status":"original"}\n';
+  fs.writeFileSync(integritySentinel, integrityOriginal);
+  recordArtifact(runADir, { artifactId: 'router-integrity-sentinel', reference: 'integrity-sentinel.json', sha256: `sha256:${crypto.createHash('sha256').update(integrityOriginal).digest('hex')}` });
+  fs.writeFileSync(integritySentinel, '{"status":"tampered"}\n');
+  const integrityBlocked = expect(run(router, ['status', root, 'run-a', 'session-a']), 'a registered artifact hash change must be observable by Router');
+  if (integrityBlocked.nextRequiredAction !== 'recover' || JSON.stringify(integrityBlocked.allowedActions) !== JSON.stringify(['inspect_run', 'recover']) || integrityBlocked.executionDirective?.currentStep?.id !== 'reconcile-run-integrity' || integrityBlocked.terminalResponseContract?.allowed !== false) throw new Error('a reconciliation failure must suppress every forward action and require controlled recovery');
+  const integrityRecoveryAuthorization = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'recover']), 'Router must authorize only the emitted recovery action');
+  reject(run(action, ['run', root, 'run-a', 'session-a', integrityRecoveryAuthorization.authorizationRef, 'recover', 'apex-recover.mjs', runADir]), 'repair-required', 'unrepairable registered-artifact drift must remain a non-success recovery result');
+  fs.writeFileSync(integritySentinel, integrityOriginal);
+  const integrityRestored = expect(run(router, ['status', root, 'run-a', 'session-a']), 'restoring the exact registered artifact must clear the reconciliation block');
+  if (integrityRestored.nextRequiredAction !== 'analyze_requirement' || integrityRestored.allowedActions.includes('recover') === false) throw new Error('a consistent Run must restore its ordinary next action after the observed repair');
   fs.writeFileSync(path.join(runADir, 'delivery-contract.json'), JSON.stringify({ schemaVersion: '3.0', capabilities: ['frontend', 'backend', 'api-contract'], qualityBar: { usability: ['clear task flow'], accessibilityTarget: 'WCAG-2.2-AA', performanceTarget: { lcpMs: 2500, inpMs: 200, cls: 0.1 }, visualBaseline: ['contract test'] }, verificationRequirements: ['unit', 'contract'] }));
   runAState.artifacts.deliveryContract = 'delivery-contract.json'; fs.writeFileSync(runAStateFile, `${JSON.stringify(runAState, null, 2)}\n`);
   const apiContractsPending = expect(run(router, ['status', root, 'run-a', 'session-a']), 'backend/API requirements must remain automatic work before Gate 1');
   if (apiContractsPending.userInteraction?.confirmation || apiContractsPending.terminalResponseContract?.allowed !== false || apiContractsPending.nextRequiredAction !== 'analyze_requirement' || apiContractsPending.executionDirective?.currentStep?.id !== 'derive-intent-and-delivery' || !apiContractsPending.executionDirective?.requiredChain?.includes('derive_and_record_domain_model_from_current_scope') || !apiContractsPending.executionDirective?.requiredChain?.includes('derive_and_record_api_contract_from_current_scope') || !apiContractsPending.executionDirective?.completionEvidence?.includes('domain-model.json') || !apiContractsPending.executionDirective?.completionEvidence?.includes('api-contract.json') || apiContractsPending.executionDirective?.actionAuthorization?.internalSubActions?.length !== 2) throw new Error('template intent or delivery inputs must be regenerated automatically before any Gate 1 confirmation can be exposed');
   if (!routerSource.includes('function gate1InputArtifactsReady') || !routerSource.includes('初始化模板、Replace 文本或未绑定字段必须在此自动替换')) throw new Error('Gate 1 must reject initialization templates before, rather than after, user confirmation');
   if (!routerSource.includes('function gate1PrerequisitesReady') || !routerSource.includes('Gate 1 presentation registration requires all automatic requirement, API/domain, baseline, experience, and role-advisory prerequisites')) throw new Error('Gate 1 registration must reject incomplete automatic prerequisites instead of rendering a premature confirmation');
+if (!routerSource.includes("const roles = roleStageState(state, runDir, 'visual');") || !routerSource.includes('visual-role-${roles}')) throw new Error('visual planning must expose a concrete visual-role step before compiling a plan that requires visual role evidence');
   const domainInput = path.join(runADir, 'domain-input.json'), apiInput = path.join(runADir, 'api-input.json'); fs.writeFileSync(domainInput, JSON.stringify({ schemaVersion: '3.0', entities: [{ name: 'Student', fields: ['id', 'name'] }], rules: ['student must have a unique id'], states: ['active'], permissions: ['read:student'] })); fs.writeFileSync(apiInput, JSON.stringify({ schemaVersion: '3.0', version: 'v1', endpoints: [{ method: 'GET', path: '/students/:id', requestSchema: 'StudentRequest', responseSchema: 'StudentResponse' }], errors: ['NOT_FOUND'], authentication: ['bearer'] }));
   reject(run(contractRecorder, ['domain', runADir, domainInput]), 'Router authorization is required', 'direct domain contract registration must be denied');
   const domainAuthorization = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'record_context']), 'domain contract authorization must be issued');
@@ -126,7 +186,7 @@ try {
   const runBState = JSON.parse(fs.readFileSync(runBStateFile, 'utf8'));
   runBState.gates.gate1 = { status: 'passed', at: '2026-07-23T00:00:00.000Z', evidence: ['test-gate1'] }; runBState.locks.requirementsApproved = true; runBState.locks.visualPlanApproved = false; runBState.phase = 'G-04 VISUAL_PLAN'; fs.writeFileSync(runBStateFile, `${JSON.stringify(runBState, null, 2)}\n`);
   const beforeVisualPlan = expect(run(router, ['status', root, 'run-b', 'session-b']), 'Gate 1 confirmation must automatically enter visual-plan generation');
-  if (beforeVisualPlan.nextRequiredAction !== 'plan_visual' || beforeVisualPlan.executionDirective?.action !== 'plan_visual' || beforeVisualPlan.executionDirective?.currentStep?.id !== 'compile-complete-visual-plan' || beforeVisualPlan.executionDirective?.automatic !== true || beforeVisualPlan.executionDirective?.terminalUserResponseAllowed !== false || !beforeVisualPlan.executionDirective?.forbiddenTerminalResults?.includes('stage-status-only') || beforeVisualPlan.executionDirective?.blockingPolicy?.beforeAttempt !== 'forbidden' || beforeVisualPlan.executionDirective?.actionAuthorization?.action !== 'plan_visual' || !beforeVisualPlan.executionDirective?.prohibitedUserPrompts?.includes('report-missing-visual-execution-plan-before-attempt') || beforeVisualPlan.userInteraction?.mode !== 'no-user-input' || beforeVisualPlan.userInteraction?.terminalUserResponseAllowed !== false || beforeVisualPlan.executionDirective?.completionEvidence?.length !== 2 || beforeVisualPlan.terminalResponseContract?.allowed !== false || beforeVisualPlan.terminalResponseContract?.mustContinueAction !== 'plan_visual' || !beforeVisualPlan.terminalResponseContract?.forbiddenLabels?.includes('继续')) throw new Error('Gate 1 must lead to automatic complete visual-plan generation with a concrete next step; missing plan artifacts before an attempt can never become a blocking user response');
+  if (beforeVisualPlan.nextRequiredAction !== 'plan_visual' || beforeVisualPlan.executionDirective?.action !== 'plan_visual' || beforeVisualPlan.executionDirective?.currentStep?.id !== 'compile-complete-visual-plan' || beforeVisualPlan.executionDirective?.automatic !== true || beforeVisualPlan.executionDirective?.terminalUserResponseAllowed !== false || !beforeVisualPlan.executionDirective?.forbiddenTerminalResults?.includes('stage-status-only') || beforeVisualPlan.executionDirective?.blockingPolicy?.beforeAttempt !== 'forbidden' || beforeVisualPlan.executionDirective?.actionAuthorization?.action !== 'plan_visual' || !beforeVisualPlan.executionDirective?.prohibitedUserPrompts?.includes('report-missing-visual-execution-plan-before-attempt') || beforeVisualPlan.userInteraction?.mode !== 'no-user-input' || beforeVisualPlan.userInteraction?.terminalUserResponseAllowed !== false || beforeVisualPlan.executionDirective?.completionEvidence?.length !== 2 || beforeVisualPlan.terminalResponseContract?.allowed !== false || beforeVisualPlan.terminalResponseContract?.mustContinueAction !== 'plan_visual' || !beforeVisualPlan.terminalResponseContract?.forbiddenLabels?.includes('继续')) throw new Error(`Gate 1 must lead to automatic complete visual-plan generation with a concrete next step; actual=${JSON.stringify({ action: beforeVisualPlan.nextRequiredAction, step: beforeVisualPlan.executionDirective?.currentStep?.id, interaction: beforeVisualPlan.userInteraction?.mode, terminal: beforeVisualPlan.terminalResponseContract?.mustContinueAction })}`);
   expect(run(router, ['intake', root, 'run-gate1-revision', 'greenfield', 'standard', 'interactive', 'session-gate1-revision']), 'a Gate 1 revision regression run must be created');
   const revisionStateFile = path.join(root, '.apex', 'runs', 'run-gate1-revision', 'state.json');
   const revisionState = JSON.parse(fs.readFileSync(revisionStateFile, 'utf8'));
@@ -152,6 +212,7 @@ try {
   if (reopenedGate1.gates.gate1 !== 'revoked' || reopenedGate1.gates.gate2 !== 'revoked' || reopenedGate1.phase !== 'G-01 PRODUCT' || !reopenedGate1.allowedActions.includes('analyze_requirement') || reopenedGate1.allowedActions.includes('plan_visual') || reopenedGate1.userInteraction?.checkpoint !== 'gate1' || reopenedGate1.userInteraction?.mode !== 'no-user-input' || reopenedGate1.terminalResponseContract?.allowed !== false) throw new Error('a material post-Gate-1 requirement must revoke downstream conclusions and automatically rebuild the Gate 1 presentation');
   if (reopenedGate1.revisionOutcome?.kind !== 'reopened-upstream-checkpoint' || !reopenedGate1.revisionOutcome?.reopenedApprovedCheckpoints?.includes('gate1') || reopenedGate1.revisionOutcome?.requiredNextConfirmation !== '确认需求与交付方案') throw new Error('a material revision must explicitly report the unlocked approved checkpoint and the exact re-confirmation that follows rebuilding');
   const reopenedState = JSON.parse(fs.readFileSync(revisionStateFile, 'utf8'));
+  if (!['gate1', 'visual-plan', 'demo', 'stitch', 'implementation'].every(gate => reopenedState.confirmationEpochs?.[gate] === 1)) throw new Error('material product revision must supersede all dependent confirmation epochs');
   const invalidatedRoot = path.join(root, '.apex', 'runs', 'run-gate1-revision', 'invalidated');
   const archivedVisual = fs.existsSync(invalidatedRoot) && fs.readdirSync(invalidatedRoot).some(entry => fs.existsSync(path.join(invalidatedRoot, entry, 'runtime-demo.json')) && fs.existsSync(path.join(invalidatedRoot, entry, 'visual-sandbox', 'index.html')));
   if (reopenedState.locks.requirementsApproved !== false || reopenedState.artifacts.gate1Presentation !== null || reopenedState.artifacts.visualExecutionPlan !== null || reopenedState.artifacts.runtimeDemo !== null || reopenedState.deliveryRoute !== null || fs.existsSync(path.join(root, '.apex', 'runs', 'run-gate1-revision', 'runtime-demo.json')) || fs.existsSync(path.join(root, '.apex', 'runs', 'run-gate1-revision', 'visual-sandbox')) || !archivedVisual || !fs.readFileSync(path.join(root, '.apex', 'runs', 'run-gate1-revision', 'events.ndjson'), 'utf8').includes('gate1-reopened-for-material-revision')) throw new Error('Gate 1 reopening must archive stale runnable Demo artifacts and retain an auditable transition');
@@ -167,16 +228,31 @@ try {
   reject(run(router, ['skip', root, 'run-b', 'session-b', 'visual', 'skip-visual-review', 'user-explicitly-skipped-review']), 'skip requires gate1|visual-plan|stitch|implementation', 'effect generation must not be skipped as a confirmation checkpoint');
   const queuedDirectCode = expect(run(router, ['select-route', root, 'run-b', 'session-b', '直接代码', 'direct-code-before-demo', 'user-selected-direct-code-while-demo-is-being-generated']), 'a direct-code utterance during the automatic Demo chain must be retained as a route intent');
   if (queuedDirectCode.disposition !== 'queued-until-runtime-demo-registration' || queuedDirectCode.nextRequiredAction !== 'generate_visual' || queuedDirectCode.userInteraction?.mode !== 'no-user-input') throw new Error('a direct-code route intent before Demo registration must not replace the automatic Demo chain or become a visual confirmation');
-  const demoOutputHashes = Object.fromEntries(['runtime-demo.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json'].map(file => [file, `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(root, '.apex', 'runs', 'run-b', file))).digest('hex')}`]));
+  const demoOutputHashes = Object.fromEntries(['runtime-demo.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json', 'visual-sandbox-runtime.json', 'visual-sandbox-files.json'].filter(file => fs.existsSync(path.join(root, '.apex', 'runs', 'run-b', file))).map(file => [file, `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(root, '.apex', 'runs', 'run-b', file))).digest('hex')}`]));
   fs.mkdirSync(path.join(root, '.apex', 'runs', 'run-b', 'operations'), { recursive: true });
   fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-b', 'operations', 'generated-demo.json'), JSON.stringify({ status: 'succeeded', action: 'generate_visual', finishedAt: '2026-08-05T00:00:00.000Z', outputFileHashes: demoOutputHashes }));
   reject(run(router, ['register-runtime-demo', root, 'run-b', 'session-b']), 'usage: register-runtime-demo', 'runtime Demo registration must require a current Router authorization');
-  const repairState = JSON.parse(fs.readFileSync(runBStateFile, 'utf8')); repairState.artifacts.runtimeDemo = 'runtime-demo.json'; fs.writeFileSync(runBStateFile, `${JSON.stringify(repairState, null, 2)}\n`);
+  const repairState = JSON.parse(fs.readFileSync(runBStateFile, 'utf8')); repairState.artifacts.runtimeDemo = 'runtime-demo.json'; repairState.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; repairState.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; fs.mkdirSync(path.join(root, '.apex', 'runs', 'run-b', 'visual-sandbox'), { recursive: true }); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-b', 'visual-sandbox', 'index.html'), '<main>run-b Demo</main>'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-b', 'visual-sandbox-files.json'), JSON.stringify({ entrypoint: 'visual-sandbox/index.html' })); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-b', 'visual-sandbox-runtime.json'), JSON.stringify({ runId: 'run-b', runtimeRoot: 'visual-sandbox', url: 'http://127.0.0.1:4173/', status: 'running' })); Object.assign(demoOutputHashes, Object.fromEntries(['visual-sandbox-runtime.json', 'visual-sandbox-files.json'].map(file => [file, `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(root, '.apex', 'runs', 'run-b', file))).digest('hex')}`]))); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-b', 'operations', 'generated-demo.json'), JSON.stringify({ status: 'succeeded', action: 'generate_visual', finishedAt: '2026-08-05T00:00:00.000Z', outputFileHashes: demoOutputHashes })); fs.writeFileSync(runBStateFile, `${JSON.stringify(repairState, null, 2)}\n`);
+  const interactiveRunDir = path.join(root, '.apex', 'runs', 'run-b');
+  const interactiveEvidence = { status: 'passed', interactiveDemo: seedInteractionFixture(interactiveRunDir, 'http://127.0.0.1:4173/', true) };
+  const interactiveCapture = path.join(interactiveRunDir, 'evidence/runtime-browser-capture.json');
+  fs.writeFileSync(interactiveCapture, JSON.stringify(interactiveEvidence));
+  const chatPreview = readChatPreview(interactiveRunDir, JSON.parse(fs.readFileSync(path.join(interactiveRunDir, 'visual-sandbox-files.json'))));
+  const interactiveHash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+  fs.writeFileSync(path.join(interactiveRunDir, 'runtime-demo.json'), JSON.stringify({ url: 'http://127.0.0.1:4173/', chatPreview, kind: 'interactive-ui-prototype', interactionEvidence: { path: 'evidence/runtime-browser-capture.json', sha256: interactiveHash(interactiveCapture) } }));
+  for (const file of ['runtime-demo.json', 'visual-sandbox-files.json']) demoOutputHashes[file] = interactiveHash(path.join(interactiveRunDir, file));
+  fs.writeFileSync(path.join(interactiveRunDir, 'operations/generated-demo.json'), JSON.stringify({ status: 'succeeded', action: 'generate_visual', finishedAt: '2026-08-05T00:00:00.000Z', outputFileHashes: demoOutputHashes }));
   const readyToRegister = expect(run(router, ['status', root, 'run-b', 'session-b']), 'a completed generate_visual output must expose only automatic registration');
   if (readyToRegister.nextRequiredAction !== 'register_runtime_demo' || !readyToRegister.allowedActions.includes('register_runtime_demo') || readyToRegister.executionDirective?.action !== 'register_runtime_demo' || readyToRegister.executionDirective?.currentStep?.id !== 'register-runtime-demo' || readyToRegister.responsePolicy !== 'complete-required-action-before-user-response') throw new Error('completed Demo outputs must force a concrete registration step before any user-visible route decision');
   const runtimeDemoAuthorization = expect(run(router, ['authorize', root, 'run-b', 'session-b', 'register_runtime_demo']), 'completed Demo outputs must receive a current registration authorization');
   const registeredDemo = expect(run(router, ['register-runtime-demo', root, 'run-b', 'session-b', runtimeDemoAuthorization.authorizationRef]), 'controlled runtime Demo outputs must become a registered baseline');
-  if (registeredDemo.phase !== 'G-07 COMPILE' || registeredDemo.nextRequiredAction !== 'compile_visual_bundle' || registeredDemo.nextRequiredDecision || !registeredDemo.allowedActions.includes('compile_visual_bundle')) throw new Error('a retained direct-code route must be applied after registering the same Demo and must continue directly to implementation freeze');
+  if (registeredDemo.nextRequiredAction !== 'present_runtime_demo' || registeredDemo.nextRequiredDecision || !registeredDemo.allowedActions.includes('present_runtime_demo') || registeredDemo.allowedActions.includes('compile_visual_bundle')) throw new Error('runtime Demo registration must force a bound run-local Demo presentation before a queued direct-code route can touch implementation');
+  reject(run(router, ['select-route', root, 'run-b', 'session-b', 'direct-code', 'bypass-demo', 'attempted-bypass']), 'presentation is recorded', 'delivery route selection must be rejected before the current runtime Demo is presented');
+  const presentAuthorization = expect(run(router, ['authorize', root, 'run-b', 'session-b', 'present_runtime_demo']), 'the registered runtime Demo must receive a current presentation authorization');
+  reject(run(router, ['present-runtime-demo', root, 'run-b', 'session-b', presentAuthorization.authorizationRef, 'no-reason', 'browser-panel']), 'fallback requires', 'chat-capable Demo must explain browser fallback');
+  const presentedDemo = expect(run(router, ['present-runtime-demo', root, 'run-b', 'session-b', presentAuthorization.authorizationRef, 'run-b-demo']), 'the current Run sandbox Demo must be recorded as presented before routing');
+  if (presentedDemo.presentation?.surface !== 'chat-inline' || !presentedDemo.presentation?.contentReference?.includes('preview.html')) throw new Error('Router must return the exact chat fragment reference');
+  if (presentedDemo.phase !== 'G-07 COMPILE' || presentedDemo.nextRequiredAction !== 'compile_visual_bundle' || presentedDemo.nextRequiredDecision || !presentedDemo.allowedActions.includes('compile_visual_bundle')) throw new Error('a queued direct-code route must apply only after the same Run Demo presentation receipt exists');
   // Simulate an interruption after a valid registration receipt was written
   // but before the controller state was durably committed. Status must replay
   // the same-session receipt, never regenerate the Demo or ask again.
@@ -184,11 +260,14 @@ try {
   interruptedRegistrationState.locks.effectApproved = false; interruptedRegistrationState.locks.visualApproved = false;
   interruptedRegistrationState.locks.stitchSkipped = false; interruptedRegistrationState.locks.stitchCurrent = false;
   interruptedRegistrationState.deliveryRoute = null; interruptedRegistrationState.pendingDeliveryRoute = 'direct-code';
-  interruptedRegistrationState.pendingDeliveryRouteReceipt = queuedDirectCode.receipt; interruptedRegistrationState.phase = 'G-05 VISUAL';
+  interruptedRegistrationState.pendingDeliveryRouteReceipt = queuedDirectCode.receipt; interruptedRegistrationState.artifacts.runtimeDemoPresentation = null; interruptedRegistrationState.phase = 'G-05 VISUAL';
   fs.writeFileSync(runBStateFile, `${JSON.stringify(interruptedRegistrationState, null, 2)}\n`);
-  const skippedStitchStage = expect(run(router, ['status', root, 'run-b', 'session-b']), 'an interrupted runtime Demo registration must recover from its durable receipt');
+  let skippedStitchStage = expect(run(router, ['status', root, 'run-b', 'session-b']), 'an interrupted runtime Demo registration must recover from its durable receipt');
   if (skippedStitchStage.registrationRecovery?.type !== 'runtime-demo-registration') throw new Error('runtime Demo registration recovery must identify the replayed receipt instead of silently regenerating a Demo');
-  if (registeredDemo.phase !== 'G-07 COMPILE' || !skippedStitchStage.allowedActions.includes('compile_visual_bundle') || skippedStitchStage.allowedActions.includes('sync_stitch') || skippedStitchStage.allowedActions.includes('implement') || skippedStitchStage.nextRequiredAction !== 'compile_visual_bundle' || skippedStitchStage.executionDirective?.currentStep?.id !== 'derive-site-contract' || skippedStitchStage.executionDirective?.automatic !== true || skippedStitchStage.terminalResponseContract?.allowed !== false) throw new Error('direct-code selection must automatically compile the implementation freeze with a concrete next step instead of stopping in an unprompted no-input state');
+  if (skippedStitchStage.nextRequiredAction !== 'present_runtime_demo' || !skippedStitchStage.allowedActions.includes('present_runtime_demo') || skippedStitchStage.allowedActions.includes('compile_visual_bundle') || skippedStitchStage.executionDirective?.currentStep?.id !== 'present-run-local-runtime-demo' || skippedStitchStage.executionDirective?.automatic !== true || skippedStitchStage.terminalResponseContract?.allowed !== false) throw new Error('recovered registration must still require a fresh current-Run Demo presentation instead of silently applying direct code');
+  const recoveredPresentationAuthorization = expect(run(router, ['authorize', root, 'run-b', 'session-b', 'present_runtime_demo']), 'a recovered Demo registration must allow only its current Run presentation');
+  skippedStitchStage = expect(run(router, ['present-runtime-demo', root, 'run-b', 'session-b', recoveredPresentationAuthorization.authorizationRef, 'run-b-recovered-demo']), 'a recovered Demo must apply the queued direct-code route only after a fresh presentation receipt');
+  if (skippedStitchStage.nextRequiredAction !== 'compile_visual_bundle' || !skippedStitchStage.allowedActions.includes('compile_visual_bundle')) throw new Error('a queued direct-code intent must resume implementation only after recovered Demo presentation');
   const skippedState = JSON.parse(fs.readFileSync(path.join(root, '.apex', 'runs', 'run-b', 'state.json'), 'utf8'));
   if (skippedState.locks.stitchSkipped !== true || skippedState.locks.stitchCurrent !== false || skippedState.artifacts.stitchFreeze) throw new Error('explicit Stitch stage skip must record a real stage skip without manufacturing a Stitch artifact');
   const skippedReceiptFile = fs.readdirSync(path.join(root, '.apex', 'runs', 'run-b', 'decisions')).find(file => file.startsWith('skip-stage-stitch-pending-direct-code-route'));
@@ -238,6 +317,18 @@ try {
   fs.writeFileSync(path.join(root, 'src', 'App.tsx'), '<main data-apex-source="apex-source-contract-marker" data-testid="metric-card" />\n');
   const verificationPending = expect(run(router, ['status', root, 'run-b', 'session-b']), 'post-implementation verification must expose a concrete automatic current step');
   if (verificationPending.nextRequiredAction !== 'verify' || verificationPending.executionDirective?.currentStep?.id !== 'capture-formal-runtime-source-provenance' || verificationPending.userInteraction?.mode !== 'no-user-input' || verificationPending.terminalResponseContract?.allowed !== false) throw new Error('verification must capture browser-bound formal source provenance before it can expose proof or a generic continue prompt');
+  const formalRun = path.join(root, '.apex', 'runs', 'run-b');
+  const formalCaptureFile = path.join(formalRun, 'evidence', 'runtime-browser-capture.json');
+  const priorFormalCapture = fs.existsSync(formalCaptureFile) ? fs.readFileSync(formalCaptureFile) : null;
+  fs.mkdirSync(path.dirname(formalCaptureFile), { recursive: true });
+  const formalBinding = { visualNode: 'metric-card', selector: '[data-testid=metric-card]', sourceMarker: 'apex-source-contract-marker', sourceSelectionIds: ['layout-source'] };
+  fs.writeFileSync(formalCaptureFile, JSON.stringify({ kind: 'runtime', status: 'passed', sourceBindings: [formalBinding], sourceSelectionIds: ['layout-source'], evidence: [{ status: 'captured', sourceBindings: [{ ...formalBinding, rendered: true }], sourceSelections: ['layout-source'] }] }));
+  const formalReceiptFile = path.join(formalRun, 'operations', 'matrix-dispatch-test.json'); fs.mkdirSync(path.dirname(formalReceiptFile), { recursive: true });
+  fs.writeFileSync(formalReceiptFile, JSON.stringify({ action: 'verify', status: 'succeeded', script: 'browser-capture.mjs', outputFileHashes: { 'evidence/runtime-browser-capture.json': `sha256:${crypto.createHash('sha256').update(fs.readFileSync(formalCaptureFile)).digest('hex')}` } }));
+  const matrixPending = expect(run(router, ['status', root, 'run-b', 'session-b']), 'formal capture must advance to matrix validation');
+  if (matrixPending.executionDirective?.currentStep?.id !== 'capture-runtime-state-matrix' || matrixPending.executionDirective.currentStep.execution?.executor?.script !== 'stability-evidence.mjs') throw new Error('a successful formal capture must dispatch the actual state matrix verifier, not repeat browser capture');
+  fs.rmSync(formalReceiptFile); if (priorFormalCapture) fs.writeFileSync(formalCaptureFile, priorFormalCapture); else fs.rmSync(formalCaptureFile);
+
   fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-b', 'verification-bundle.json'), '{"status":"passed"}\n');
   retainedGate2.artifacts.verificationBundle = 'verification-bundle.json';
   fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-b', 'runtime-state-matrix.json'), JSON.stringify({ sourceProvenance: { ready: true, evidence: 'evidence/runtime-browser-capture.json', sourceSelectionIds: ['layout-source'], bindings: [{ visualNode: 'metric-card', selector: '[data-testid=metric-card]', sourceMarker: 'apex-source-contract-marker', sourceSelectionIds: ['layout-source'] }] } }));
@@ -256,12 +347,217 @@ try {
   const visualState = JSON.parse(fs.readFileSync(path.join(root, '.apex', 'runs', 'run-a', 'state.json'), 'utf8'));
   visualState.gates.gate1 = { status: 'passed', at: '2026-07-23T00:00:00.000Z', evidence: ['test-gate1'] }; visualState.locks.requirementsApproved = true; visualState.locks.visualPlanApproved = true; visualState.phase = 'G-05 VISUAL';
   visualState.artifacts.runtimeDemo = 'runtime-demo.json'; visualState.artifacts.visualReference = 'visual-reference.json'; visualState.artifacts.gate1VisualOutput = 'gate1-visual-output.json'; visualState.artifacts.designCandidates = 'design-candidates.json'; visualState.artifacts.visualExecutionPlan = 'visual-execution-plan.json';
+  const testDesign = 'fixture design contract'; const testDesignHash = `sha256:${crypto.createHash('sha256').update(testDesign).digest('hex')}`; fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'DESIGN.md'), testDesign);
   const runASelections = ['layout', 'component', 'style', 'font', 'content'].map(kind => ({ id: `reports-${kind}`, kind, visualNodes: ['reports-card'], ...(kind === 'content' ? { parameters: { origin: 'formal-project', fields: ['report-summary'], implementation: 'renderReports' } } : { parameters: {} }) }));
-  fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'runtime-demo.json'), '{"url":"http://127.0.0.1:4173/"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-reference.json'), '{"effect":"candidate"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'gate1-visual-output.json'), '{"source":"gate1-visual"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'design-candidates.json'), '{"selectedCandidateId":"candidate-a"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-execution-plan.json'), `${JSON.stringify({ sourceSelections: runASelections })}\n`); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'state.json'), `${JSON.stringify(visualState, null, 2)}\n`);
+  fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'runtime-demo.json'), '{"url":"http://127.0.0.1:4173/"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-reference.json'), '{"effect":"candidate"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'gate1-visual-output.json'), '{"source":"gate1-visual"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'design-candidates.json'), '{"selectedCandidateId":"candidate-a"}\n'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-execution-plan.json'), `${JSON.stringify({ sourceSelections: runASelections, selectionAnalysis: { designContract: { path: 'DESIGN.md', sha256: testDesignHash } } })}\n`); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'state.json'), `${JSON.stringify(visualState, null, 2)}\n`);
   reject(run(router, ['authorize', root, 'run-a', 'session-a', 'sync_stitch']), 'not allowed in phase', 'Stitch must be denied before the generated effect artifacts are registered');
   reject(run(router, ['approve', root, 'run-a', 'session-a', 'visual', 'effect-approved', 'design-candidates.json', 'visual-reference.json', 'gate1-visual-output.json']), 'approval requires gate1|visual-plan|stitch|implementation', 'visual approval must remain unavailable after the single visual-plan confirmation');
-  visualState.locks.effectApproved = true; visualState.locks.visualApproved = true; visualState.deliveryRoute = 'stitch'; visualState.phase = 'G-06 SYNC_FREEZE';
+  visualState.locks.effectApproved = true; visualState.locks.visualApproved = true; visualState.deliveryRoute = null; visualState.phase = 'G-06 SYNC_FREEZE'; visualState.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; visualState.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; fs.mkdirSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-sandbox'), { recursive: true }); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-sandbox', 'index.html'), '<main>run-a Demo</main>'); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-sandbox-files.json'), JSON.stringify({ entrypoint: 'visual-sandbox/index.html', files: [{ path: 'visual-sandbox/index.html', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-sandbox', 'index.html'))).digest('hex')}` }] })); fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-sandbox-runtime.json'), JSON.stringify({ runId: 'run-a', runtimeRoot: 'visual-sandbox', url: 'http://127.0.0.1:4173/', status: 'running' }));
   fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'state.json'), `${JSON.stringify(visualState, null, 2)}\n`);
+  const runAPresentationAuthorization = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'present_runtime_demo']), 'Stitch setup must first present the current run-local Demo');
+  expect(run(router, ['present-runtime-demo', root, 'run-a', 'session-a', runAPresentationAuthorization.authorizationRef, 'run-a-demo']), 'Stitch setup must record the real Demo presentation');
+  // Exercise the new model against an actually registered presentation. A route
+  // choice is not itself evidence that the user accepted the Demo.
+  const combinedDemoStateFile = path.join(root, '.apex', 'runs', 'run-a', 'state.json');
+  const restoreFixtureState = serialized => {
+    const dir = path.dirname(combinedDemoStateFile);
+    const restored = JSON.parse(serialized);
+    restored.revision = Number(readRunState(dir).revision || 0) + 1;
+    restored.updatedAt = new Date().toISOString();
+    commitRunState(dir, restored, { reason: 'isolated-router-test-fixture-restore' });
+  };
+  const combinedDemoState = JSON.parse(fs.readFileSync(combinedDemoStateFile, 'utf8'));
+  combinedDemoState.roleChain.confirmationModel = 'two-confirmations';
+  fs.writeFileSync(combinedDemoStateFile, `${JSON.stringify(combinedDemoState, null, 2)}\n`);
+  const differenceReferenceImage = path.join(root, '.apex', 'runs', 'run-a', 'reference-image.png');
+  const referencePng = fs.existsSync('/usr/bin/python3') ? spawnSync('/usr/bin/python3', ['-c', "from PIL import Image; import sys; Image.new('RGB',(8,8),'white').save(sys.argv[1])", differenceReferenceImage], { encoding: 'utf8' }) : { status: 1 };
+  const realParityAvailable = referencePng.status === 0;
+  if (!realParityAvailable) fs.writeFileSync(differenceReferenceImage, 'reference-image-bytes');
+  const differenceReferenceHash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(differenceReferenceImage)).digest('hex')}`;
+  const positiveChart = { id: 'chart', marker: 'chart-marker', type: 'bar', metric: 'value', dimension: 'period', encoding: 'height' };
+  const positiveVisual = { schemaVersion: '3.0', source: 'gate1-visual', referenceImage: { path: 'reference-image.png', sha256: differenceReferenceHash, viewport: 'desktop' }, contentLock: { locale: 'zh-CN', hash: 'content-hash', protectedText: ['expected text'], protectedTableHeaders: [] }, layoutLock: { mode: 'strict', hash: 'layout-hash', protectedStructures: ['main'], nodes: [{ id: 'main', marker: 'main-node', kind: 'main', order: 1 }] }, analyticsLock: { hash: 'analytics-hash', charts: [positiveChart] }, designTokens: {}, componentContracts: [{ id: 'main-component', marker: 'main-component', kind: 'panel' }] };
+  fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-reference.json'), JSON.stringify(positiveVisual));
+  const awaitingDemo = expect(run(router, ['status', root, 'run-a', 'session-a']), 'the new model must expose Demo confirmation first');
+  if (awaitingDemo.confirmationModel !== 'two-confirmations' || !awaitingDemo.operatingConstraints.strictFlow.includes('interactive Demo')) throw new Error('Router must expose the effective confirmation model and its correct flow contract');
+  if (awaitingDemo.nextRequiredDecision?.id !== 'demo-confirmation' || !awaitingDemo.allowedActions.includes('confirm_runtime_demo') || awaitingDemo.allowedActions.includes('select_delivery_route') || awaitingDemo.terminalResponseContract?.allowedKinds?.[0] !== 'demo-confirmation') throw new Error('the new model must require an explicit Demo confirmation before route selection');
+  reject(run(router, ['select-route', root, 'run-a', 'session-a', 'stitch', 'early-route', 'user-selected-stitch']), 'explicitly confirmed', 'a route cannot substitute for Demo confirmation');
+  reject(run(router, ['skip-stage', root, 'run-a', 'session-a', 'stitch', 'early-skip', 'user-skipped-stitch']), 'explicitly confirmed', 'direct Stitch skipping cannot bypass Demo confirmation');
+  reject(run(router, ['confirm-demo', root, 'run-a', 'session-a', 'unclear', '继续']), 'explicit confirmation', 'ambiguous input cannot confirm the Demo');
+  const confirmedDemo = expect(run(router, ['confirm-demo', root, 'run-a', 'session-a', 'confirmed-demo', '确认交互式 Demo']), 'explicit Demo confirmation must produce a durable source-bound receipt');
+  if (confirmedDemo.nextRequiredDecision?.noSeparateDemoConfirmation !== false) throw new Error('the new route decision must acknowledge the already completed separate Demo confirmation');
+  if (confirmedDemo.nextRequiredDecision?.id !== 'delivery-route' || !confirmedDemo.allowedActions.includes('select_delivery_route')) throw new Error('route selection must follow Demo confirmation: ' + JSON.stringify({decision: confirmedDemo.nextRequiredDecision, actions: confirmedDemo.allowedActions, integrity: confirmedDemo.integrity}));
+  expect(run(router, ['confirm-demo', root, 'run-a', 'session-a', 'confirmed-demo', '确认交互式 Demo']), 'replaying an identical confirmation must be idempotent');
+  expect(run(router, ['confirm-demo', root, 'run-a', 'session-a', 'demo-no-issues', 'Demo 无问题']), 'an explicit statement that the Demo has no issues must be accepted');
+  const beforeEpochChange = fs.readFileSync(combinedDemoStateFile, 'utf8');
+  const epochChanged = JSON.parse(beforeEpochChange); epochChanged.confirmationEpochs = { demo: 1 };
+  fs.writeFileSync(combinedDemoStateFile, `${JSON.stringify(epochChanged, null, 2)}\n`);
+  const expiredDecision = expect(run(router, ['status', root, 'run-a', 'session-a']), 'a superseded confirmation must not be replayed even if all files are unchanged');
+  if (expiredDecision.nextRequiredDecision?.id !== 'demo-confirmation' || expiredDecision.allowedActions.includes('select_delivery_route')) throw new Error('a previous Demo confirmation must not survive its revision epoch');
+  reject(run(router, ['confirm-demo', root, 'run-a', 'session-a', 'confirmed-demo', '确认交互式 Demo']), 'different decision or baseline', 'a superseded confirmation id cannot be silently reused');
+  restoreFixtureState(beforeEpochChange);
+  const visualRefFile = path.join(root, '.apex', 'runs', 'run-a', 'visual-reference.json');
+  const priorVisualRef = fs.readFileSync(visualRefFile, 'utf8');
+  fs.writeFileSync(visualRefFile, '{"effect":"changed"}\n');
+  reject(run(router, ['select-route', root, 'run-a', 'session-a', 'stitch', 'changed-demo-route', 'user-selected-stitch']), 'explicitly confirmed', 'a changed Demo baseline must invalidate confirmation');
+  fs.writeFileSync(visualRefFile, priorVisualRef);
+  const servedDemoFile = path.join(root, '.apex', 'runs', 'run-a', 'visual-sandbox', 'index.html');
+  const priorServedDemo = fs.readFileSync(servedDemoFile, 'utf8');
+  fs.writeFileSync(servedDemoFile, '<main>changed served Demo</main>');
+  reject(run(router, ['select-route', root, 'run-a', 'session-a', 'stitch', 'changed-served-demo', 'user-selected-stitch']), 'explicitly confirmed', 'changed served Demo code must invalidate the old confirmation even when its manifest is unchanged');
+  const staleServedDemo = expect(run(router, ['status', root, 'run-a', 'session-a']), 'a changed served Demo must route to rebuilding instead of offering an unusable confirmation');
+  if (staleServedDemo.nextRequiredAction !== 'revoke_visual' || staleServedDemo.allowedActions.includes('confirm_runtime_demo') || !staleServedDemo.allowedActions.includes('revoke_visual')) throw new Error('stale Demo bytes must not expose a confirmation that cannot succeed');
+  fs.writeFileSync(servedDemoFile, priorServedDemo);
+  expect(run(router, ['select-route', root, 'run-a', 'session-a', 'stitch', 'run-a-stitch', 'user-selected-stitch']), 'Stitch setup must select its route after Demo confirmation');
+  fs.writeFileSync(visualRefFile, '{"effect":"changed-after-route"}\n');
+  const staleAfterRoute = expect(run(router, ['status', root, 'run-a', 'session-a']), 'a changed baseline after route selection must stop downstream work');
+  if (staleAfterRoute.nextRequiredAction !== 'revoke_visual' || staleAfterRoute.allowedActions.includes('sync_stitch') || !staleAfterRoute.allowedActions.includes('revoke_visual')) throw new Error('a changed confirmed Demo must prevent Stitch execution after route selection');
+  fs.writeFileSync(visualRefFile, priorVisualRef);
+  const differenceRunDir = path.join(root, '.apex', 'runs', 'run-a');
+  let runPositiveStitchTest = null;
+  if (realParityAvailable) {
+  const beforeRealDifference = fs.readFileSync(combinedDemoStateFile, 'utf8');
+  const realCandidate = path.join(differenceRunDir, 'real-candidate.png');
+  const realPng = spawnSync('/usr/bin/python3', ['-c', "from PIL import Image; import sys; Image.new('RGB',(8,8),'black').save(sys.argv[1])", realCandidate], { encoding: 'utf8' });
+  if (realPng.status !== 0) throw new Error('test candidate PNG could not be created: ' + realPng.stderr);
+  const realHtml = path.join(differenceRunDir, 'real-candidate.html'); fs.writeFileSync(realHtml, '<main>changed content</main>');
+  const realHash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+  fs.writeFileSync(path.join(differenceRunDir, 'stitch-freeze.json'), JSON.stringify({ approvedScreens: [{ screenId: 'real', imageHash: realHash(realCandidate), imagePath: 'real-candidate.png', htmlPath: 'real-candidate.html', htmlHash: realHash(realHtml) }] }));
+  const realDifferenceState = JSON.parse(beforeRealDifference); realDifferenceState.artifacts.stitchFreeze = 'stitch-freeze.json';
+  fs.writeFileSync(combinedDemoStateFile, `${JSON.stringify(realDifferenceState, null, 2)}\n`);
+  const realOps = path.join(differenceRunDir, 'operations'); const beforeRealOps = new Set(fs.readdirSync(realOps));
+  const realDifferenceAuth = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'sync_stitch']), 'real Stitch difference must use the authorized action gateway');
+  const realDifferenceResult = run(action, ['run', root, 'run-a', 'session-a', realDifferenceAuth.authorizationRef, 'sync_stitch', 'strict-replica.mjs', 'stitch', differenceRunDir, 'real']);
+  if (realDifferenceResult.status === 0) throw new Error('a real structural and pixel mismatch must remain a failed verification');
+  const screenEvidenceFile = id => path.join(differenceRunDir, 'evidence', 'parity', `stitch-result-${crypto.createHash('sha256').update(id).digest('hex')}.json`);
+  const failedScreenEvidence = JSON.parse(fs.readFileSync(screenEvidenceFile('real'), 'utf8'));
+  if (failedScreenEvidence.screenId !== 'real' || failedScreenEvidence.status !== 'failed' || failedScreenEvidence.referenceScope !== 'single-visual-reference') throw new Error('failed parity must be retained under its own screen identity');
+  const realDifferenceStatus = expect(run(router, ['status', root, 'run-a', 'session-a']), 'a real extracted Stitch difference must reach the user decision');
+  if (realDifferenceStatus.nextRequiredDecision?.id !== 'stitch-difference' || !realDifferenceStatus.nextRequiredDecision.presentation.differences.some(item => item.kind === 'structure-difference')) throw new Error('real Stitch extraction and failed operation receipt must expose its bound structural difference');
+  const newRealReceipts = fs.readdirSync(realOps).filter(name => !beforeRealOps.has(name));
+  const realIndexFile = path.join(differenceRunDir, 'operations-index.json');
+  if (fs.existsSync(realIndexFile)) { const index = JSON.parse(fs.readFileSync(realIndexFile)); for (const name of newRealReceipts) delete index.receipts[`operations/${name}`]; fs.writeFileSync(realIndexFile, JSON.stringify(index)); }
+  for (const name of newRealReceipts) fs.rmSync(path.join(realOps, name));
+  restoreFixtureState(beforeRealDifference);
+  // Defer the positive seal until other fixture cases finish: its successful
+  // output is tracked by the ledger and must not then be overwritten.
+  runPositiveStitchTest = () => {
+  const positiveState = JSON.parse(beforeRealDifference);
+  const positiveImage = path.join(differenceRunDir, 'positive.png'); fs.copyFileSync(differenceReferenceImage, positiveImage);
+  const tokenHash = `sha256:${crypto.createHash('sha256').update('{}').digest('hex')}`;
+  const positiveHtml = path.join(differenceRunDir, 'positive.html');
+  fs.writeFileSync(positiveHtml, `<main data-apex-node="main-node" data-apex-component="main-component" data-apex-component-kind="panel" data-apex-token-hash="${tokenHash}"><span>expected text</span><div data-apex-chart="chart-marker" data-apex-chart-type="bar" data-apex-metric="value" data-apex-dimension="period" data-apex-encoding="height"></div></main>`);
+  const positiveFreeze = { schemaVersion: '3.0', projectId: 'fixture-project', canvasUrl: 'https://stitch.example/fixture', approval: { id: 'fixture-selection', scope: 'screen', approvedAt: '2026-01-01T00:00:00Z' }, approvedScreens: [{ screenId: 'positive', route: '/', viewport: 'desktop', state: 'default', imagePath: 'positive.png', imageHash: realHash(positiveImage), htmlPath: 'positive.html', htmlHash: realHash(positiveHtml) }], excludedScreens: [], fingerprints: { screenSetHash: 'screen-hash', designSystemHash: 'design-hash' }, syncedAt: '2026-01-01T00:00:00Z', generationInput: { mode: 'text', promptHash: 'prompt-hash', origin: 'apex-visual', references: [{ id: 'demo', sha256: differenceReferenceHash, role: 'layout', fidelity: 'high' }], contentLock: { locale: 'zh-CN', sourceHash: 'content-hash', protectedText: ['expected text'] }, layoutLock: { mode: 'strict', sourceHash: 'layout-hash', protectedStructures: ['main'] }, analyticsLock: { sourceHash: 'analytics-hash', charts: [positiveChart] } } };
+  fs.writeFileSync(path.join(differenceRunDir, 'stitch-freeze.json'), JSON.stringify(positiveFreeze)); positiveState.artifacts.stitchFreeze = 'stitch-freeze.json';
+  restoreFixtureState(JSON.stringify(positiveState));
+  const beforePositiveOps = new Set(fs.readdirSync(realOps));
+  const positiveParityAuth = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'sync_stitch']), 'matching Stitch parity must receive controlled authorization');
+  expect(run(action, ['run', root, 'run-a', 'session-a', positiveParityAuth.authorizationRef, 'sync_stitch', 'strict-replica.mjs', 'stitch', differenceRunDir, 'positive']), 'matching Stitch candidate must pass real structure and pixel checks');
+  const positiveScreenEvidence = JSON.parse(fs.readFileSync(screenEvidenceFile('positive'), 'utf8'));
+  if (positiveScreenEvidence.screenId !== 'positive' || positiveScreenEvidence.status !== 'passed' || JSON.parse(fs.readFileSync(screenEvidenceFile('real'), 'utf8')).status !== 'failed') throw new Error('each Stitch comparison must preserve its own result across subsequent screens');
+  const positiveStatus = expect(run(router, ['status', root, 'run-a', 'session-a']), 'matching Stitch candidate must continue to automatic seal');
+  if (positiveStatus.executionDirective?.currentStep?.id !== 'seal-unchanged-stitch-candidate') throw new Error('matching Stitch candidate must be sealed automatically');
+  if (positiveStatus.executionDirective?.afterSuccess !== 'seal_unchanged_candidate_or_request_difference_decision') throw new Error('two-confirmation Stitch guidance must not request a separate approval');
+  const positiveSealAuth = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'sync_stitch']), 'matching Stitch seal must receive controlled authorization');
+  const positiveSeal = expect(run(action, ['run', root, 'run-a', 'session-a', positiveSealAuth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'seal', differenceRunDir]), 'matching Stitch candidate must pass machine-seal validation');
+  const sealedState = JSON.parse(fs.readFileSync(combinedDemoStateFile));
+  if (!positiveSeal.sealed || !positiveSeal.machineSeal || !sealedState.locks.stitchCurrent || !sealedState.locks.stitchApproved) throw new Error('successful machine seal must record its receipt and make Stitch current');
+  const positiveNewOps = fs.readdirSync(realOps).filter(name => !beforePositiveOps.has(name));
+  if (fs.existsSync(realIndexFile)) { const index = JSON.parse(fs.readFileSync(realIndexFile)); for (const name of positiveNewOps) delete index.receipts[`operations/${name}`]; fs.writeFileSync(realIndexFile, JSON.stringify(index)); }
+  for (const name of positiveNewOps) fs.rmSync(path.join(realOps, name));
+  restoreFixtureState(beforeRealDifference);
+  };
+  } else console.error('APEX router contract: real image-parity test skipped; /usr/bin/python3 with Pillow unavailable');
+  if (process.env.APEX_STITCH_POSITIVE_ONLY === '1') {
+    if (runPositiveStitchTest) runPositiveStitchTest();
+    for (const fixtureRoot of roots) fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    console.log(JSON.stringify({ status: realParityAvailable ? 'passed' : 'skipped', check: 'real-stitch-machine-seal' }));
+    process.exit(0);
+  }
+  const beforeDifferenceTest = fs.readFileSync(combinedDemoStateFile, 'utf8');
+  const differenceState = JSON.parse(beforeDifferenceTest);
+  const candidateImage = path.join(differenceRunDir, 'candidate-image.png'); fs.writeFileSync(candidateImage, 'candidate-image-bytes');
+  const candidateHash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(candidateImage)).digest('hex')}`;
+  const structureFile = path.join(differenceRunDir, 'candidate-structure.json');
+  const differenceHtml = path.join(differenceRunDir, 'candidate.html'); fs.writeFileSync(differenceHtml, '<main>changed content</main>');
+  const differenceHtmlHash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(differenceHtml)).digest('hex')}`;
+  fs.writeFileSync(structureFile, JSON.stringify({ source: 'stitch-screen-export', sourceImageHash: candidateHash, verification: { status: 'failed', inputs: { screenId: 'candidate', htmlHash: differenceHtmlHash }, evidence: { protectedText: { missing: ['expected text'] } } } }));
+  const structureHash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(structureFile)).digest('hex')}`;
+  fs.writeFileSync(path.join(differenceRunDir, 'stitch-freeze.json'), JSON.stringify({ approvedScreens: [{ screenId: 'candidate', imageHash: candidateHash, imagePath: 'candidate-image.png', htmlPath: 'candidate.html', htmlHash: differenceHtmlHash }] }));
+  const differenceFile = path.join(differenceRunDir, 'stitch-parity-evidence.json');
+  fs.writeFileSync(differenceFile, JSON.stringify({ status: 'failed', referenceImageHash: differenceReferenceHash, stitchImageHash: candidateHash, unmatched: [{ kind: 'structure-difference', details: { protectedText: { missing: ['expected text'] } } }, { kind: 'pixel-diff', diff: { changedRatio: 0.25 } }], structuralVerification: { contractPath: 'candidate-structure.json', contractHash: structureHash } }));
+  differenceState.artifacts.stitchFreeze = 'stitch-freeze.json'; differenceState.artifacts.stitchParityEvidence = 'stitch-parity-evidence.json';
+  fs.writeFileSync(combinedDemoStateFile, `${JSON.stringify(differenceState, null, 2)}\n`);
+  const differenceReceipt = path.join(differenceRunDir, 'operations', 'difference-test.json'); fs.mkdirSync(path.dirname(differenceReceipt), { recursive: true });
+  fs.writeFileSync(differenceReceipt, JSON.stringify({ action: 'sync_stitch', script: 'strict-replica.mjs', status: 'failed', finishedAt: '9999-01-01T00:00:00.000Z', outputFileHashes: { 'stitch-parity-evidence.json': `sha256:${crypto.createHash('sha256').update(fs.readFileSync(differenceFile)).digest('hex')}` } }));
+  const differenceDecision = expect(run(router, ['status', root, 'run-a', 'session-a']), 'current source-bound differences must be exposed for a user decision');
+  if (differenceDecision.userInteraction?.renderPolicy !== 'show-evidence-bound-differences-and-confirmed-demo-with-both-options') throw new Error('Stitch difference interaction must explicitly show the actual differences');
+  if (differenceDecision.nextRequiredDecision?.id !== 'stitch-difference' || differenceDecision.nextRequiredDecision.presentation.differences[0].kind !== 'structure-difference' || !differenceDecision.allowedActions.includes('select_delivery_route') || differenceDecision.terminalResponseContract?.allowedKinds?.[0] !== 'stitch-difference-choice') throw new Error('a current verified Stitch difference must be presented with a decision rather than auto-sealed');
+  fs.writeFileSync(candidateImage, 'changed-candidate-bytes');
+  const changedDifference = expect(run(router, ['status', root, 'run-a', 'session-a']), 'changed candidate bytes must withdraw the old difference decision');
+  if (changedDifference.nextRequiredDecision?.id === 'stitch-difference') throw new Error('stale candidate evidence must never be presented as a current difference');
+  fs.writeFileSync(candidateImage, 'candidate-image-bytes');
+  fs.writeFileSync(differenceHtml, '<main>changed again</main>');
+  const changedDifferenceHtml = expect(run(router, ['status', root, 'run-a', 'session-a']), 'changed Stitch HTML must withdraw a structural difference decision');
+  if (changedDifferenceHtml.nextRequiredDecision?.id === 'stitch-difference') throw new Error('a structural difference must bind the frozen Stitch HTML bytes');
+  fs.writeFileSync(differenceHtml, '<main>changed content</main>');
+  const retainDemo = expect(run(router, ['select-route', root, 'run-a', 'session-a', 'direct-code', 'retain-confirmed-demo', 'user-keeps-confirmed-demo']), 'the user must be able to retain the confirmed Demo and skip changed Stitch');
+  if (!retainDemo.allowedActions.includes('compile_visual_bundle')) throw new Error('retaining the Demo must continue to implementation preparation');
+  fs.rmSync(differenceReceipt); restoreFixtureState(beforeDifferenceTest);
+  const beforeStitchMachineTest = fs.readFileSync(combinedDemoStateFile, 'utf8');
+  const stitchMachineTestState = JSON.parse(beforeStitchMachineTest);
+  stitchMachineTestState.artifacts.stitchFreeze = 'stitch-freeze.json';
+  stitchMachineTestState.artifacts.stitchParityEvidence = 'stitch-parity-evidence.json';
+  fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'stitch-freeze.json'), JSON.stringify({ canvasUrl: 'https://stitch.example/current-run', approvedScreens: [{ screenId: 'reports' }] }));
+  fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'stitch-parity-evidence.json'), JSON.stringify({ status: 'passed', strictPixelMatch: true, unmatched: [] }));
+  fs.writeFileSync(combinedDemoStateFile, `${JSON.stringify(stitchMachineTestState, null, 2)}\n`);
+  const stitchMachinePending = expect(run(router, ['status', root, 'run-a', 'session-a']), 'Stitch machine validation must follow candidate generation');
+  if (stitchMachinePending.executionDirective?.currentStep?.id !== 'seal-unchanged-stitch-candidate' || stitchMachinePending.terminalResponseContract?.allowed !== false) throw new Error('the new Stitch route must validate and seal internally before continuing');
+  const invalidStitchSeal = run(path.join(apexRoot, 'scripts', 'apex-validate.mjs'), ['pre-stitch-machine-seal', path.join(root, '.apex', 'runs', 'run-a')]);
+  reject(invalidStitchSeal, 'APEX validation failed:', 'incomplete Stitch parity evidence must not qualify for machine sealing');
+  const unsealedStitchState = JSON.parse(fs.readFileSync(combinedDemoStateFile, 'utf8'));
+  if (unsealedStitchState.locks.stitchApproved || unsealedStitchState.locks.stitchCurrent) throw new Error('failed Stitch validation must not seal the candidate');
+  restoreFixtureState(beforeStitchMachineTest);
+  // Even if a host has assembled an apparently ready implementation body,
+  // malformed Gate 2 inputs must never set implementation permission.
+  const beforeMachineCheck = fs.readFileSync(combinedDemoStateFile, 'utf8');
+  const machineCheckState = JSON.parse(beforeMachineCheck);
+  machineCheckState.deliveryRoute = null; machineCheckState.locks.stitchSkipped = true;
+  machineCheckState.locks.stitchApproved = true; machineCheckState.locks.stitchCurrent = false;
+  machineCheckState.locks.implementationApproved = false;
+  for (const [key, file] of Object.entries({ siteContract: 'site-contract.json', visualBundle: 'visual-bundle.json', implementationMap: 'implementation-map.json' })) {
+    machineCheckState.artifacts[key] = file;
+    fs.copyFileSync(path.join(root, '.apex', 'runs', 'run-b', file), path.join(root, '.apex', 'runs', 'run-a', file));
+  }
+  fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'visual-bundle.json'), JSON.stringify({ visualSourceManifest: { path: 'visual-source-manifest.json' }, implementationBaseline: { kind: 'existing-formal-code' }, assets: [{ package: 'echarts@6.1.0' }] }));
+  fs.writeFileSync(path.join(root, '.apex', 'runs', 'run-a', 'implementation-map.json'), JSON.stringify({ scopeControl: { allowedRuntimeTargets: ['src/reports.js'], implementationPolicy: 'affected-only' }, entries: [{ visualNode: 'growth-trend', runtimeTarget: ['src/reports.js'], acceptance: ['renders current subject trend', 'preserves mobile single-column order'], data: ['report summary'], events: ['subject-change'], responsive: true }] }));
+  fs.writeFileSync(combinedDemoStateFile, `${JSON.stringify(machineCheckState, null, 2)}\n`);
+  const machinePresentationAuth = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'compile_visual_bundle']), 'machine flow must compile the current implementation artifacts');
+  expect(run(action, ['run', root, 'run-a', 'session-a', machinePresentationAuth.authorizationRef, 'compile_visual_bundle', 'confirmation-presentation.mjs', 'compile', path.join(root, '.apex', 'runs', 'run-a'), 'implementation']), 'machine flow must retain a source-bound implementation record');
+  const machineReady = expect(run(router, ['status', root, 'run-a', 'session-a']), 'machine flow must automatically move to Gate 2');
+  if (machineReady.nextRequiredAction !== 'open_gate2' || !machineReady.allowedActions.includes('open_gate2') || machineReady.userInteraction?.confirmation || machineReady.terminalResponseContract?.allowed !== false) throw new Error('machine implementation preparation must continue to Gate 2 without another user confirmation');
+  const machineGateAuth = expect(run(router, ['authorize', root, 'run-a', 'session-a', 'open_gate2']), 'machine Gate 2 validation must receive an authorization');
+  const invalidGate = run(router, ['transition', root, 'run-a', 'session-a', machineGateAuth.authorizationRef, 'open-gate2']);
+  reject(invalidGate, 'APEX validation failed:', 'invalid Gate 2 inputs must reach full validation and reject machine sealing');
+  const rejectedMachineState = JSON.parse(fs.readFileSync(combinedDemoStateFile, 'utf8'));
+  if (rejectedMachineState.gates.gate2.status === 'passed' || rejectedMachineState.locks.implementationAllowed || rejectedMachineState.locks.implementationApproved) throw new Error('failed machine validation must not open Gate 2 or record an implementation seal');
+  // Candidate validation reads the proposed state without committing it, and
+  // malformed implementation evidence must still block the proposed opening.
+  const candidateState = structuredClone(rejectedMachineState);
+  candidateState.gates.gate2 = { status: 'passed', at: new Date().toISOString(), evidence: ['test-candidate'] };
+  candidateState.locks.implementationAllowed = true; candidateState.locks.implementationApproved = true;
+  const candidateFile = path.join(root, '.apex', 'runs', 'run-a', 'test-gate2-candidate.json');
+  const stateBeforeCandidate = fs.readFileSync(combinedDemoStateFile, 'utf8');
+  fs.writeFileSync(candidateFile, JSON.stringify(candidateState));
+  const invalidCandidate = run(path.join(apexRoot, 'scripts', 'apex-validate.mjs'), ['gate2-candidate', path.dirname(candidateFile), candidateFile]);
+  reject(invalidCandidate, 'APEX validation failed:', 'candidate must run full Gate 2 validation');
+  if (fs.readFileSync(combinedDemoStateFile, 'utf8') !== stateBeforeCandidate) throw new Error('candidate validation changed the authoritative run state');
+  fs.rmSync(candidateFile);
+
+  restoreFixtureState(beforeMachineCheck);
+  const restoreLegacyState = JSON.parse(fs.readFileSync(combinedDemoStateFile, 'utf8'));
+  restoreLegacyState.roleChain.confirmationModel = 'gate-summary-only';
+  fs.writeFileSync(combinedDemoStateFile, `${JSON.stringify(restoreLegacyState, null, 2)}\n`);
+  Object.assign(visualState, JSON.parse(fs.readFileSync(path.join(root, '.apex', 'runs', 'run-a', 'state.json'), 'utf8')));
   const stitchPending = expect(run(router, ['status', root, 'run-a', 'session-a']), 'a selected Stitch route must expose a concrete candidate-generation step');
   if (stitchPending.nextRequiredAction !== 'sync_stitch' || stitchPending.executionDirective?.currentStep?.id !== 'create-stitch-candidate' || stitchPending.terminalResponseContract?.allowed !== false) throw new Error('a selected Stitch route must continue with a concrete candidate-generation step, never a silent automatic state');
   visualState.artifacts.stitchFreeze = 'stitch-freeze.json'; visualState.artifacts.stitchParityEvidence = 'stitch-parity-evidence.json';
@@ -329,6 +625,8 @@ try {
   expect(run(action, ['run', existing, 'run-existing', 'session-existing', authorization.authorizationRef, 'collect_existing_baseline', 'project-intake.mjs', 'scan', path.join(existing, '.apex', 'runs', 'run-existing'), existing]), 'authorized baseline collection must run');
   const intakeReceipt = JSON.parse(fs.readFileSync(path.join(existing, '.apex', 'runs', 'run-existing', 'operations', path.basename(authorization.authorizationRef)), 'utf8'));
   if (!/^sha256:[a-f0-9]{64}$/.test(intakeReceipt.outputFileHashes?.['project-inventory.json'] || '')) throw new Error('action gateway must record a hash for its emitted project-inventory output');
+  const capturedInventory = JSON.parse(fs.readFileSync(path.join(existing, '.apex', 'runs', 'run-existing', 'project-inventory.json'), 'utf8'));
+  if (!capturedInventory.entrypoints?.includes('src/App.tsx')) throw new Error('Existing intake must recognize conventional PascalCase App.tsx entrypoints without any manual inventory rewrite');
   const afterInventory = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'Existing baseline collection must publish its next concrete automatic step after inventory capture');
   if (afterInventory.executionDirective?.currentStep?.id !== 'freeze-code-reference' || afterInventory.executionDirective?.currentStep?.authorizationAction !== 'collect_existing_baseline' || afterInventory.executionDirective?.continuationProtocol?.terminalRule?.includes('do not end on a completed substep') !== true) throw new Error('a completed baseline substep must expose the next concrete automatic step instead of allowing a stage-summary stop');
   reject(run(router, ['verify-authorization', existing, 'run-existing', 'session-existing', authorization.authorizationRef, 'collect_existing_baseline']), 'stale because the run state changed', 'state mutation must invalidate an old authorization');
@@ -345,8 +643,10 @@ try {
   if (reusedReference.reused !== true) throw new Error('unchanged Existing code reference must reuse the cached immutable closure instead of rereading and copying every source file');
   if (!fs.existsSync(path.join(existing, '.apex', 'runs', 'run-existing', 'operations-index.json'))) throw new Error('controlled actions must maintain an operation index for fast Router status checks');
   const existingRunDir = path.join(existing, '.apex', 'runs', 'run-existing');
-  const inventoryFile = path.join(existingRunDir, 'project-inventory.json');
-  const inventory = JSON.parse(fs.readFileSync(inventoryFile, 'utf8')); inventory.entrypoints = ['src/App.tsx']; fs.writeFileSync(inventoryFile, `${JSON.stringify(inventory, null, 2)}\n`);
+  // Keep the inventory emitted by the controlled action byte-identical. A
+  // test fixture must not silently mutate a ledger-registered artifact just
+  // to restate the same entrypoint; that is production drift and Router now
+  // correctly requires recovery before allowing any visual action.
   const skeleton = JSON.parse(fs.readFileSync(path.join(existingRunDir, 'page-skeleton.json'), 'utf8'));
   const displayFile = path.join(existingRunDir, 'evidence', 'existing-browser-capture.json');
   fs.mkdirSync(path.dirname(displayFile), { recursive: true });
@@ -403,12 +703,48 @@ try {
   if (registeredGate1.userInteraction?.confirmation?.label !== '确认需求与交付方案' || !registeredGate1.receipt?.startsWith('registrations/gate1-presentation-') || registeredGate1.userInteraction?.confirmation?.presentation?.streaming?.mode !== 'progressive-section-render' || registeredGate1.userInteraction?.confirmation?.presentation?.streaming?.sections?.length !== 8 || registeredGate1.userInteraction?.confirmation?.approvalStatus !== 'pending-user-confirmation' || registeredGate1.terminalResponseContract?.confirmationPending !== true || registeredGate1.terminalResponseContract?.presentationMustAppearInChat !== true || !registeredGate1.terminalResponseContract?.prohibitedOutcomeClaims?.includes('不重复请求确认')) throw new Error('Gate 1 registration must expose a complete pending named confirmation whose chat body cannot be replaced by a recovery claim');
   const gate1Ready = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'a current Existing baseline may expose a complete Gate 1 proposal');
   if (gate1Ready.userInteraction?.confirmation?.label !== '确认需求与交付方案') throw new Error('current Existing baseline must permit its complete Gate 1 confirmation');
+  // New confirmation model: a completed product plan authorizes design work without a separate user decision.
+  const legacyStateBytes = fs.readFileSync(visualReadyStateFile, 'utf8');
+  const combinedState = JSON.parse(legacyStateBytes); combinedState.roleChain.confirmationModel = 'two-confirmations';
+  fs.writeFileSync(visualReadyStateFile, `${JSON.stringify(combinedState, null, 2)}\n`);
+  const combinedPlan = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'the combined model must continue into visual planning');
+  if (combinedPlan.nextRequiredAction !== 'plan_visual' || !combinedPlan.allowedActions.includes('plan_visual') || combinedPlan.userInteraction?.confirmation || combinedPlan.terminalResponseContract?.allowed !== false || combinedPlan.gates.gate1 === 'passed') throw new Error('a ready product plan must remain unapproved and automatically continue to visual planning');
+  expect(run(router, ['authorize', existing, 'run-existing', 'session-existing', 'plan_visual']), 'combined product/visual planning must receive a real authorization');
+  reject(run(router, ['approve', existing, 'run-existing', 'session-existing', 'gate1', 'forbidden-separate-product-confirmation', 'gate1-presentation.md']), 'confirmation is unavailable', 'the combined model must not expose a separate product approval');
+  reject(run(router, ['approve', existing, 'run-existing', 'session-existing', 'visual-plan', 'premature-combined-confirmation', 'gate1-presentation.md']), 'confirmation is unavailable', 'the combined model must not approve before the visual plan exists');
+  // The displayed localized summary is reconstructed from concrete sources;
+  // the approval receipt must bind that exact body even if validation fails.
+  const priorCombinedPlan = fs.readFileSync(path.join(existingRunDir, 'visual-execution-plan.json'));
+  const combinedSelections = ['layout', 'component', 'style', 'font', 'content'].map(kind => ({ id: `${kind}-source`, kind, visualNodes: ['app-shell'], sourceId: 'existing-design', resourceId: kind, version: '1', ...(kind === 'content' ? { parameters: { origin: 'project', fields: ['content'], implementation: 'render' } } : { parameters: {} }) }));
+  fs.writeFileSync(path.join(existingRunDir, 'DESIGN.md'), testDesign);
+  fs.writeFileSync(path.join(existingRunDir, 'visual-execution-plan.json'), JSON.stringify({ selectionAnalysis: { designContract: { path: 'DESIGN.md', sha256: testDesignHash } }, sourceSelections: combinedSelections, deliveryNarrative: { changes: [{ scope: 'app-shell', currentIssue: '信息层级不清', change: '调整布局层级', why: '让任务更易识别', sourceSelectionIds: ['style-source'] }] } }));
+  const sections = ['目标与范围', '信息架构与布局', '视觉 Token', '组件与交互', '图标、图表与素材', '动效与可访问性', '响应式与状态', '真实来源与物化', '候选比较与取舍', '实施影响与验收'];
+  const visualBody = sections.map((title, index) => `## ${index + 1}. ${title}\n\n本节关于${title}，针对 app-shell 说明受影响范围、实施约束、设计依据、使用场景与具体验收方式，并提供足够完整的可审阅内容及必要决策事实。`).join('\n\n') + '\n';
+  const visualFile = path.join(existingRunDir, 'visual-plan-presentation.md'); fs.writeFileSync(visualFile, visualBody);
+  const planFile = path.join(existingRunDir, 'visual-execution-plan.json'); const scopeForPlan = path.join(existingRunDir, 'change-scope.json');
+  fs.writeFileSync(path.join(existingRunDir, 'visual-plan-presentation-manifest.json'), JSON.stringify({ status: 'ready-for-user-confirmation', visualExecutionPlan: 'visual-execution-plan.json', visualExecutionPlanSha256: sourceHash(planFile), presentation: 'visual-plan-presentation.md', presentationSha256: sourceHash(visualFile), changeScope: 'change-scope.json', changeScopeSha256: sourceHash(scopeForPlan), presentationScopeValidation: { status: 'passed', policy: 'affected-closure-only' } }));
+  combinedState.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; combinedState.artifacts.visualPlanPresentation = 'visual-plan-presentation.md'; combinedState.artifacts.visualPlanPresentationManifest = 'visual-plan-presentation-manifest.json';
+  fs.writeFileSync(visualReadyStateFile, `${JSON.stringify(combinedState, null, 2)}\n`);
+  const displayedCombined = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'localized combined plan must expose the real concise presentation');
+  const shown = displayedCombined.userInteraction?.confirmation;
+  if (shown?.label !== '确认视觉改造方案' || !shown.presentation?.content?.includes('信息层级不清') || !shown.presentation.content.includes('调整布局层级') || !shown.presentation.content.includes('existing-design / style / 1') || shown.presentation.content.includes('## 1. 需求方向与成功标准')) throw new Error('localized combined confirmation mismatch: ' + JSON.stringify({ action: displayedCombined.nextRequiredAction, interaction: displayedCombined.userInteraction, integrity: displayedCombined.integrity }));
+  const failedCombinedApproval = run(router, ['approve', existing, 'run-existing', 'session-existing', 'visual-plan', 'combined-render-test', 'visual-execution-plan.json', 'visual-plan-presentation.md']);
+  reject(failedCombinedApproval, 'APEX validation failed:', 'schema-incomplete fixture must not pass the real product validation');
+  const combinedReceiptFile = path.join(existingRunDir, 'approvals', 'visual-plan-combined-render-test.json');
+  const combinedReceipt = JSON.parse(fs.readFileSync(combinedReceiptFile, 'utf8'));
+  const expectedShownHash = `sha256:${crypto.createHash('sha256').update(shown.presentation.content).digest('hex')}`;
+  if (combinedReceipt.presentation?.sha256 !== expectedShownHash || combinedReceipt.presentation?.renderPolicy !== 'concise-issues-changes-and-style-sources' || combinedReceipt.scope !== 'requirements-and-visual-plan') throw new Error('combined approval receipt must freeze the exact presentation shown to the user');
+  const unapprovedCombinedState = JSON.parse(fs.readFileSync(visualReadyStateFile));
+  if (unapprovedCombinedState.gates.gate1.status === 'passed' || unapprovedCombinedState.locks.visualPlanApproved) throw new Error('failed product validation must not approve the combined plan');
+  fs.rmSync(combinedReceiptFile); fs.writeFileSync(planFile, priorCombinedPlan);
+  fs.writeFileSync(visualReadyStateFile, legacyStateBytes);
   const scopeFile = path.join(existingRunDir, 'change-scope.json'); const originalScope = fs.readFileSync(scopeFile, 'utf8'); const staleScope = JSON.parse(originalScope);
   staleScope.protected.files = [{ path: 'src/not-in-reference.ts', sha256: 'sha256:stale-protected-complement' }];
   fs.writeFileSync(scopeFile, `${JSON.stringify(staleScope, null, 2)}\n`);
   const staleScopeStatus = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'a stale protected complement must be detected before Gate 1');
   if (staleScopeStatus.existingVisualBaseline?.ready !== false || !staleScopeStatus.existingVisualBaseline?.reason?.includes('change scope') || staleScopeStatus.userInteraction?.confirmation || staleScopeStatus.nextRequiredAction !== 'collect_existing_baseline' || staleScopeStatus.terminalResponseContract?.mustContinueAction !== 'collect_existing_baseline') throw new Error('a stale change scope must automatically return to Existing baseline recollection instead of exposing or silently withholding Gate 1 confirmation');
-  fs.writeFileSync(scopeFile, originalScope);
+  // contract-recorder has restored the frozen scope through the authorized
+  // path above. Do not overwrite its ledger-registered bytes from a fixture.
   // The same invalidation may happen after Gate 1 when a visual-plan recovery
   // discovers that its protected complement is stale.  The next automatic
   // action must remain one of allowedActions.  Previously this state emitted
@@ -433,11 +769,13 @@ try {
   expect(run(action, ['run', existing, 'run-existing', 'session-existing', postGate1ScopeAuthorization.authorizationRef, 'record_context', 'contract-recorder.mjs', 'scope', existingRunDir, postGate1ScopeInput]), 'an authorized Existing protected-complement recovery must remain executable after Gate 1');
   const postGate1Recovered = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'a recovered Existing scope must leave the blocked substep');
   if (postGate1Recovered.executionDirective?.currentStep?.id === 'freeze-change-scope') throw new Error('a successful authorized scope recovery must advance the Router instead of repeating the same blocked step');
-  fs.writeFileSync(scopeFile, originalScope);
+  // The authorized recovery has written the canonical frozen scope. Keep its
+  // byte identity intact so the next source-drift case starts consistent.
   postGate1State.gates.gate1 = { status: 'pending', at: null, evidence: [] };
   postGate1State.locks.requirementsApproved = false;
   postGate1State.phase = 'E-01 BASELINE';
-  fs.writeFileSync(visualReadyStateFile, `${JSON.stringify(postGate1State, null, 2)}\n`);
+  postGate1State.revision = Number(readRunState(existingRunDir).revision || 0) + 1;
+  commitRunState(existingRunDir, postGate1State, { reason: 'isolated-existing-test-fixture-restore' });
   const changedCodeAuthorization = expect(run(router, ['authorize', existing, 'run-existing', 'session-existing', 'collect_existing_baseline']), 'changed code detection authorization must be issued');
   fs.writeFileSync(path.join(existing, 'src', 'App.tsx'), 'export function App() { return <main>Changed before Gate 2</main>; }\n');
   const driftedGate1 = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'code drift must withdraw a stale Gate 1 confirmation');
@@ -446,6 +784,10 @@ try {
   reject(driftFailure, 'project code changed after complete reference capture', 'Existing code changes before Gate 2 must be detected by the baseline collector');
   const driftRecovery = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'source drift must re-enter the immutable reference chain');
   if (driftRecovery.executionDirective?.currentStep?.id !== 'freeze-code-reference' || driftRecovery.terminalResponseContract?.allowed !== false || driftRecovery.terminalResponseContract?.blockingOperation) throw new Error('a one-time source drift must rebuild code reference, browser evidence, and baseline instead of becoming a generic failure loop');
+  if (realParityAvailable) {
+    const isolatedSeal = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { encoding: 'utf8', timeout: 180000, env: { ...process.env, APEX_STITCH_POSITIVE_ONLY: '1' } });
+    if (isolatedSeal.status !== 0 || !isolatedSeal.stdout.includes('real-stitch-machine-seal')) throw new Error(`isolated real Stitch machine seal failed: ${isolatedSeal.stderr || isolatedSeal.stdout}`);
+  }
   console.log(JSON.stringify({ status: 'passed', checks: 52 }));
 } catch (error) {
   console.error(`APEX router contract test failed: ${error.message}`);

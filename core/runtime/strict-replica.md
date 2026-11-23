@@ -2,17 +2,16 @@
 
 ## 目标
 
-严格模式将效果图、Stitch 画布与运行时代码视为同一份参数化视觉合同的三个物化结果。任何一段未同时满足零像素差异、中文内容一致和语义结构一致，均不得进入下一阶段。
+新 Run 以用户确认的可交互 Demo 为视觉和交互基线。所选路线必须保留内容、结构、组件和设计 token，并以实际浏览器截图、DOM 与操作证据验证正式实现；仅有静态图片不能证明交互可用。选择 Stitch 时，还要验证候选与已确认 Demo 的一致性。旧 Run 保持原确认模型。
 
 ## 权威链路
 
-1. Gate 1 Visual 同次产出效果图和 gate1-visual-output.json。
-2. visual-reference-compiler.mjs emit 固化效果图 SHA-256、中文内容锁、布局节点、图表、组件和 token 合同。
-3. Stitch 使用效果图与同一 Prompt 生成候选；用户确认候选后，stitch-sync.mjs freeze 只写入暂存 HTML、完整截图及内容哈希。
-4. strict-replica.mjs stitch 自动导出 Stitch 结构合同，执行效果图到 Stitch 的严格 Gate；通过后自动 seal。
-5. browser-capture.mjs 采集运行时截图和真实 DOM HTML。
-6. strict-replica.mjs runtime 自动导出运行时合同，执行 Stitch 到代码的严格 Gate。
-7. Gate 2 与 Gate 3 会重新校验结构合同文件、SHA-256、来源、截图哈希与零差异证据。
+1. 用户确认视觉方案后，生成、运行并验证可交互 Demo；用户确认 Demo。
+2. `visual-reference-compiler.mjs` 固化 Demo 截图、内容、布局、图表、组件和 token 合同。
+3. 用户选择直接代码，或选择 Stitch 并校验候选与 Demo；差异须按用户选择处理。
+4. 机器冻结来源、Implementation Map 和依赖，通过 Gate 2 后实施。
+5. `browser-capture.mjs` 采集正式运行时截图、DOM 与实际任务交互；严格复刻校验对应已确认基线。
+6. Gate 3 校验证据、来源、截图及结构合同；缺失或失效证据不能证明交付完成。
 
 ## Gate 1 语义合同
 
@@ -43,10 +42,10 @@ Stitch 导出 HTML 与实现代码运行时 DOM 必须保留：
 
 ```text
 compile_visual_bundle -> visual-reference-compiler.mjs emit <run-dir> <gate1-visual-output.json>
-sync_stitch           -> stitch-sync.mjs freeze <run-dir> <canvas-selection.json>
+sync_stitch           -> stitch-sync.mjs freeze <run-dir> <canvas-selection.json>  # 仅 Stitch 路线
 sync_stitch           -> strict-replica.mjs stitch <run-dir> <screen-id>
 verify                -> browser-capture.mjs capture <run-dir> <base-url> <browser-spec.json>
-verify                -> strict-replica.mjs runtime <run-dir> <capture-id> <frozen-stitch-screen-id>
+verify                -> strict-replica.mjs runtime <run-dir> <capture-id> [<frozen-stitch-screen-id>]
 ```
 
 统一命令形态为：

@@ -3,7 +3,7 @@
 ## 文档登记
 
 - 文档名称：APEX 技术架构文档
-- 当前版本：4.37.5
+- 当前版本：4.45.0
 - 文档类型：系统级技术架构主文档
 - 适用对象：架构、研发、平台治理、交付负责人
 
@@ -15,7 +15,7 @@
 
 ## 3.0 架构范围
 
-本架构在双轨状态机基础上引入**用户调用确认 → Router-first Codex 调用**、项目级 Run/session 隔离、结构化审批与状态哈希授权、项目 mutation lease、需求拆解与视觉描述、视觉实施方案确认后直接生成并登记效果图、效果图登记后选择 Stitch 或直接代码、Stitch 的独立确认及其暂存 Freeze 与 Seal、自动结构合同导出、结构化 Visual Bundle 编译、实现权限锁、Checkpoint 增量恢复与 Gate 3 真实验收。四个命名确认门均在展示前校验其来源工件的 schema、完整性与模板占位符；批准回执是可恢复的用户决策，若进程在回执持久化与状态推进之间中断，Router 必须自动提交同一回执而不得再次索要相同确认。批准恢复失败、同一自动节点连续三次无回执结束、或同一自动动作重复出现源码漂移时，均必须转为带实际记录的一次性阻断报告，禁止重复确认或无限续跑。以下架构图与运行链路均以这些约束为准。
+本架构采用 Router-first 调用、项目级 Run/session 隔离、状态哈希授权、项目 mutation lease、角色作业与可恢复回执。新 Run 先由产品角色形成需求、范围和验收，再由设计师结合现状与已调用的 taste-skill 制定视觉方案；用户确认方案后生成可交互 Demo，并在展示实际交互结果后进行第二次确认。用户随后选择 Stitch 或直接代码：Stitch 结果与已确认 Demo 一致时自动封存；出现差异时由用户选择保留 Demo 直接落地或调整并重新确认。编译 Visual Bundle 与 Implementation Map、机器 Gate 2、前端实现、浏览器验证及 Gate 3 随后依次执行。用户确认、选择、机器 Gate 与测试验证是不同的状态；旧 Run 按原确认模型恢复。批准回执持久化后的中断恢复不得重复索要同一确认。
 
 ## 一、系统分层架构图
 
@@ -64,20 +64,21 @@ flowchart TD
     B --> C{"Greenfield / Existing"}
     C -->|Greenfield| D["产品、架构、Site Contract"]
     C -->|Existing| E["真实基线、Change Scope、保护补集"]
-    D --> F["Gate 1"]
+    D --> F["产品角色：需求与验收"]
     E --> F
-    F --> V["需求拆解、视觉方案确认"]
-    V --> G["直接生成严格运行时 Demo"]
-    G --> R{"Demo 登记后选择路线"}
-    R -->|Stitch| S["Stitch生成与独立确认"]
-    R -->|直接代码| H["Demo 基线 + 直接代码实施方案确认"]
-    S --> I["Visual Bundle与Implementation Map编译"]
-    H --> I
-    I --> J["机器Gate 2与实现权限锁"]
-    J --> K["受控实现"]
-    K --> L["Proof、变更闭包与保护补集回归"]
-    L --> M["Gate 3真实验收"]
-    M --> N["Checkpoint与经验沉淀"]
+    F --> V["设计师：视觉方案与设计规范"]
+    V --> C1{"用户确认视觉方案"}
+    C1 --> G["生成并验证可交互 Demo"]
+    G --> C2{"用户确认交互式 Demo"}
+    C2 --> R{"用户选择交付路线"}
+    R -->|Stitch| S["Stitch 候选与 Demo 一致性验证"]
+    R -->|直接代码| I["Visual Bundle 与 Implementation Map"]
+    S --> I
+    I --> J["机器 Gate 2 与实现权限锁"]
+    J --> K["前端工程师受控实现"]
+    K --> L["Proof、功能和保护补集回归"]
+    L --> M["机器 Gate 3 交付验收"]
+    M --> N["Checkpoint 与经验沉淀"]
 ```
 
 ### Existing 局部变更边界
@@ -381,3 +382,8 @@ Adapter 不能把整套 Core 复制一遍，否则后续会失去统一升级能
 - [../core/framework/APEX.md](../core/framework/APEX.md)
 - [../core/framework/state-machine.md](../core/framework/state-machine.md)
 - [../core/framework/gates.md](../core/framework/gates.md)
+
+
+## 聊天内可交互 Demo
+
+`scripts/chat-demo.mjs` 为源码编译、沙箱物化、运行时基线和 Router 共享的聊天预览适配层。单份 HTML 片段生成 HTTP 验收入口，现有交互证据绑定两份文件哈希；展示回执额外绑定片段，Router 输出实际聊天引用。它不增加流程节点，不改变来源锁与路线决策。完整字段、输出规则和验证边界见 `core/runtime/interactive-demo-contract.md`。

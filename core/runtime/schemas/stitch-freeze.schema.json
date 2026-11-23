@@ -99,6 +99,25 @@
           "imagePath": {
             "type": "string",
             "minLength": 1
+          },
+          "demoCapture": {
+            "type": "object",
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "screen",
+                  "journey"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       }
@@ -212,7 +231,6 @@
             },
             "charts": {
               "type": "array",
-              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": [
@@ -339,6 +357,19 @@
           "type": "string",
           "minLength": 1
         }
+      }
+    },
+    "skillAdaptation": {
+      "type": "object",
+      "required": ["name", "sha256", "demoBaselineHash", "loadReceipt", "appliedRules", "excludedRules", "rationale"],
+      "properties": {
+        "name": { "const": "stitch-design-taste" },
+        "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "demoBaselineHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "loadReceipt": { "type": "string", "minLength": 1 },
+        "appliedRules": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 500 } },
+        "excludedRules": { "type": "array", "maxItems": 8, "items": { "type": "object", "required": ["rule", "reason"], "properties": { "rule": { "type": "string", "minLength": 1, "maxLength": 500 }, "reason": { "type": "string", "minLength": 1, "maxLength": 500 } } } },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 1000 }
       }
     },
     "syncedAt": {

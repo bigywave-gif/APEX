@@ -45,10 +45,10 @@ worktree。运行状态、确认、证据和交付契约仍只保存在原项目
 
 ## 取消、排队与人工复核
 
-- 用户终止时，`cancel` 只接受明确指向当前 APEX 执行、任务、Run 或工作流的用户原话；含“修改、调整、重新分析、重新设计、方案有问题、优化”等修订语义的输入必须被拒绝为取消并走 `revise`。通过该意图校验后，`cancel` 只针对当前 session 绑定的当前 Run：先终止并验证该 Run 登记的本地
-  Demo 服务/端口，再递归回收该 Run 的所有临时工件、候选、缓存、截图、证据、审批与 Checkpoint，
-  并清空 `state.artifacts`。它只保留 `state.json`、`events.ndjson` 与最小
-  `cancellation-receipt.json`，以说明已回收的条目和已停止服务；绝不删除其他 session/Run、项目
+- 用户终止时，`cancel` 只接受明确指向当前 APEX 执行、任务、Run 或工作流的用户原话；含“修改、调整、重新分析、重新设计、方案有问题、优化”等修订语义的输入必须被拒绝为取消并走 `revise`。通过该意图校验后，`cancel` 只针对当前 session 绑定的当前 Run：先在账本中持久化取消状态、隔离排队与运行中的 Agent 任务并撤销租约；再终止并验证该 Run 登记的本地
+  Demo 服务，递归回收该 Run 的临时工件、候选、缓存、截图、证据和审批文件，并清空 `state.artifacts`。
+  它保留 `state.json`、`events.ndjson`、持久账本及 `cancellation-receipt.json`，账本中的历史 Checkpoint、任务与用量不删除。
+  回执列出已回收条目、已停止服务和被隔离任务。受控本地工具检测到取消后在 Unix 终止自身进程组；Windows 只请求终止直接子进程，后代进程停止情况须另行确认。迟到结果写入账本且不视为成功；外部宿主 Agent 和远程服务是否实际中断仍须单独确认。清理失败时取消栅栏仍有效，可排除原因后重试。绝不删除其他 session/Run、项目
   正式代码、正式服务或已落地交付物。取消同时释放当前 Run 的 mutation lease，并令旧授权因 state
   hash 变化而失效。恢复工作必须使用显式 `restart` 或新任务，而非将已取消 run 静默重新打开。
 - Gate 2 后可通过 `queue-mutation` 进入项目级 FIFO mutation 队列，并由队首使用

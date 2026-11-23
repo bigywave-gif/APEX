@@ -2,16 +2,265 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "APEX Role Advisory",
   "type": "object",
-  "required": ["schemaVersion", "roleId", "stage", "adapterVersion", "inputBindings", "findings", "recommendations", "status"],
+  "required": [
+    "schemaVersion",
+    "roleId",
+    "stage",
+    "adapterVersion",
+    "inputBindings",
+    "findings",
+    "recommendations",
+    "execution",
+    "status"
+  ],
   "properties": {
-    "schemaVersion": { "const": "1.0" },
-    "roleId": { "type": "string", "minLength": 1 },
-    "stage": { "enum": ["baseline", "gate1", "visual", "implementation", "verify"] },
-    "adapterVersion": { "type": "string", "minLength": 1 },
-    "inputBindings": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["artifact", "path", "sha256"], "properties": { "artifact": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "minLength": 8 } }, "additionalProperties": false } },
-    "findings": { "type": "array", "items": { "type": "object", "required": ["id", "classification", "statement", "evidence"], "properties": { "id": { "type": "string", "minLength": 1 }, "classification": { "enum": ["fact", "inference", "unverified"] }, "statement": { "type": "string", "minLength": 1 }, "evidence": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }, "additionalProperties": false } },
-    "recommendations": { "type": "array", "items": { "type": "object", "required": ["id", "choice", "rationale", "acceptance"], "properties": { "id": { "type": "string", "minLength": 1 }, "choice": { "type": "string", "minLength": 1 }, "rationale": { "type": "string", "minLength": 1 }, "alternatives": { "type": "array", "items": { "type": "string" } }, "acceptance": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }, "additionalProperties": false } },
-    "status": { "const": "ready" }
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "roleId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stage": {
+      "enum": [
+        "baseline",
+        "gate1",
+        "visual",
+        "implementation",
+        "verify"
+      ]
+    },
+    "adapterVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputBindings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "artifact",
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "artifact": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "minLength": 8
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "classification",
+          "statement",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "classification": {
+            "enum": [
+              "fact",
+              "inference",
+              "unverified"
+            ]
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "choice",
+          "rationale",
+          "acceptance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "choice": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "acceptance": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "sessionId",
+        "skillBindings"
+      ],
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "skillBindings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tasteSkillUsage": {
+          "type": "object",
+          "required": [
+            "sha256",
+            "appliedRules",
+            "notApplicableRules"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "minLength": 1
+            },
+            "appliedRules": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "notApplicableRules": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "leaseToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "usageSource": {
+          "enum": [
+            "provider-reported",
+            "estimated",
+            "unknown"
+          ]
+        },
+        "optionalSkillUsage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "sha256",
+              "decision",
+              "rationale",
+              "appliedRules"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              },
+              "decision": {
+                "enum": [
+                  "applied",
+                  "not-applicable"
+                ]
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "appliedRules": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "const": "ready"
+    }
   },
   "additionalProperties": false
 }

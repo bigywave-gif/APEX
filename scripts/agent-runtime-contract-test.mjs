@@ -1,0 +1,108 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, recordTokenUsage, recoverAgentJobs, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-agent-runtime-'));
+try {
+  registerAgent(root, { agentId: 'backend-engineer', vocation: 'backend', stage: 'gate1' });
+  const first = enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:input', payload: { contract: 'api' }, maxAttempts: 2 });
+  assert.equal(enqueueAgentJob(root, { jobId: first.jobId, agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:input', payload: { contract: 'api' }, maxAttempts: 2 }).idempotent, true, 'replaying the same durable job must not create a duplicate');
+  const timingDb = new DatabaseSync(path.join(root, 'run-ledger.sqlite'));
+  const originalAvailable = timingDb.prepare('SELECT available_at FROM agent_jobs WHERE job_id = ?').get(first.jobId).available_at;
+  timingDb.prepare('UPDATE agent_jobs SET available_at = ? WHERE job_id = ?').run('invalid-timestamp', first.jobId);
+  assert.throws(() => claimAgentJob(root, first.jobId), /invalid Agent job backoff timestamp/);
+  assert.equal(agentRuntimeStatus(root, first.jobId).jobs[0].status, 'queued');
+  timingDb.prepare('UPDATE agent_jobs SET available_at = ? WHERE job_id = ?').run(originalAvailable, first.jobId); timingDb.close();
+  const firstClaim = claimAgentJob(root, first.jobId); assert.equal(firstClaim.status, 'running');
+  registerAgent(root, { agentId: 'backend-engineer', vocation: 'backend', stage: 'gate1' });
+  assert.equal(agentRuntimeStatus(root).sessions[0].status, 'working');
+  assert.equal(enqueueAgentJob(root, { jobId: first.jobId, agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:input', payload: { contract: 'api' }, maxAttempts: 2 }).idempotent, true);
+  assert.throws(() => registerAgent(root, { agentId: 'backend-engineer', vocation: 'backend', stage: 'visual' }), /cannot change an Agent registration/);
+  assert.throws(() => enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'new' }), /session is not ready/);
+  assert.equal(agentRuntimeStatus(root).sessions[0].status, 'working');
+  assert.equal(settleAgentJob(root, first.jobId, { status: 'failed', leaseToken: firstClaim.leaseToken, error: 'network unavailable', retryDelayMs: 0 }).jobs[0].status, 'queued');
+  const retry = claimAgentJob(root, first.jobId); assert.equal(retry.attempt, 2);
+  assert.equal(settleAgentJob(root, first.jobId, { status: 'failed', leaseToken: retry.leaseToken, error: 'network unavailable' }).jobs[0].status, 'dead-letter');
+  // A dead-lettered profession is blocked until an explicit controlled
+  // re-registration acknowledges the observed recovery condition.
+  registerAgent(root, { agentId: 'backend-engineer', vocation: 'backend', stage: 'gate1' });
+  const second = enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:next' }); const secondClaim = claimAgentJob(root, second.jobId);
+  assert.equal(settleAgentJob(root, second.jobId, { status: 'succeeded', leaseToken: secondClaim.leaseToken, result: { artifact: 'api-contract.json' } }).jobs[0].status, 'succeeded');
+  assert.equal(recordTokenUsage(root, { stage: 'gate1', inputTokens: 10, outputTokens: 20, limit: 50 }).used, 30);
+  recordTokenUsage(root, { stage: 'coverage', inputTokens: 0, outputTokens: 0, metadata: { usageSource: 'unknown' } });
+  recordTokenUsage(root, { stage: 'coverage', inputTokens: 4, outputTokens: 2, metadata: { usageSource: 'provider-reported' } });
+  assert.deepEqual(agentRuntimeStatus(root).tokenUsageCoverage.coverage, { providerReported: 1, estimated: 0, unknown: 1, unverified: 0 });
+  assert.throws(() => recordTokenUsage(root, { stage: 'gate1', inputTokens: 21, outputTokens: 0, limit: 50 }), /budget exceeded/);
+  const span = startTraceSpan(root, { name: 'backend-contract', kind: 'agent' }); endTraceSpan(root, span.spanId, { status: 'passed' });
+  const interrupted = enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:interrupted' });
+  const firstKey = 'claim_key_first_0001', secondKey = 'claim_key_second_002', thirdKey = 'claim_key_third_0003';
+  const oldClaim = claimAgentJob(root, interrupted.jobId, { claimKey: firstKey });
+  const replayed = claimAgentJob(root, interrupted.jobId, { claimKey: firstKey });
+  assert.equal(replayed.leaseToken, oldClaim.leaseToken); assert.equal(replayed.attempt, oldClaim.attempt); assert.equal(replayed.idempotent, true);
+  assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: secondKey }), /not queued/);
+  assert.ok(renewAgentJobLease(root, interrupted.jobId, oldClaim.leaseToken).leaseExpiresAt);
+  assert.equal(recoverAgentJobs(root, { force: true }).find(item => item.jobId === interrupted.jobId)?.status, 'queued');
+  assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: firstKey }), /prior agent attempt/);
+  const intermediate = claimAgentJob(root, interrupted.jobId, { claimKey: secondKey });
+  assert.equal(recoverAgentJobs(root, { force: true }).find(item => item.jobId === interrupted.jobId)?.status, 'queued');
+  assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: firstKey }), /prior agent attempt/);
+  assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: secondKey }), /prior agent attempt/);
+  const replacement = claimAgentJob(root, interrupted.jobId, { claimKey: thirdKey });
+  assert.notEqual(replacement.leaseToken, intermediate.leaseToken);
+  assert.notEqual(replacement.leaseToken, oldClaim.leaseToken);
+  assert.throws(() => settleAgentJob(root, interrupted.jobId, { status: 'succeeded', leaseToken: oldClaim.leaseToken }), /stale or missing/);
+  assert.throws(() => renewAgentJobLease(root, interrupted.jobId, oldClaim.leaseToken), /stale or missing/);
+  const output = path.join(root, 'advisories', 'gate1', 'backend-engineer.json');
+  fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, 'existing-output');
+  const publication = { output, content: 'replacement-output', inputTokens: 0, outputTokens: 0, limit: 50 };
+  assert.throws(() => completeAgentAdvisory(root, interrupted.jobId, { ...publication, leaseToken: oldClaim.leaseToken }), /stale or missing/);
+  assert.equal(fs.readFileSync(output, 'utf8'), 'existing-output', 'stale attempt must not replace the active artifact');
+  completeAgentAdvisory(root, interrupted.jobId, { ...publication, leaseToken: replacement.leaseToken });
+  assert.equal(fs.readFileSync(output, 'utf8'), 'replacement-output');
+  assert.equal(agentRuntimeStatus(root, interrupted.jobId).jobs[0].status, 'succeeded');
+  const expiring = enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:expires' });
+  const expiredKey = 'expired_claim_key_0001';
+  const expiredClaim = claimAgentJob(root, expiring.jobId, { claimKey: expiredKey });
+  const db = new DatabaseSync(path.join(root, 'run-ledger.sqlite'));
+  db.prepare('UPDATE agent_jobs SET lease_expires_at = ? WHERE job_id = ?').run('invalid-timestamp', expiring.jobId);
+  assert.throws(() => recoverAgentJobs(root), /invalid Agent lease timestamp requires investigation/);
+  assert.equal(agentRuntimeStatus(root, expiring.jobId).jobs[0].status, 'running');
+  db.prepare('UPDATE agent_jobs SET lease_expires_at = NULL WHERE job_id = ?').run(expiring.jobId);
+  assert.throws(() => recoverAgentJobs(root), /missing Agent lease timestamp requires investigation/);
+  assert.throws(() => renewAgentJobLease(root, expiring.jobId, expiredClaim.leaseToken), /lease expiry is missing/);
+  assert.equal(agentRuntimeStatus(root, expiring.jobId).jobs[0].status, 'running');
+  db.prepare('UPDATE agent_jobs SET started_at = NULL, lease_token = NULL WHERE job_id = ?').run(expiring.jobId);
+  assert.throws(() => recoverAgentJobs(root), /missing Agent lease timestamp requires investigation/);
+  db.prepare('UPDATE agent_jobs SET lease_token = ? WHERE job_id = ?').run(expiredClaim.leaseToken, expiring.jobId);
+  db.prepare('UPDATE agent_jobs SET lease_expires_at = ? WHERE job_id = ?').run('2000-01-01T00:00:00.000Z', expiring.jobId); db.close();
+  assert.throws(() => claimAgentJob(root, expiring.jobId, { claimKey: expiredKey }), /lease has expired/);
+  assert.throws(() => renewAgentJobLease(root, expiring.jobId, expiredClaim.leaseToken), /lease has expired/);
+  assert.throws(() => settleAgentJob(root, expiring.jobId, { status: 'succeeded', leaseToken: expiredClaim.leaseToken }), /lease has expired/);
+  assert.equal(recoverAgentJobs(root).find(item => item.jobId === expiring.jobId)?.status, 'queued');
+  assert.throws(() => claimAgentJob(root, expiring.jobId, { claimKey: expiredKey }), /prior agent attempt/);
+  const resumedClaim = claimAgentJob(root, expiring.jobId, { claimKey: 'resumed_claim_key_0002' });
+  settleAgentJob(root, expiring.jobId, { status: 'succeeded', leaseToken: resumedClaim.leaseToken });
+  const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-legacy-agent-ledger-'));
+  try {
+    const legacyDb = new DatabaseSync(path.join(legacyRoot, 'run-ledger.sqlite'));
+    legacyDb.exec('CREATE TABLE agent_jobs (job_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, stage TEXT NOT NULL, status TEXT NOT NULL, attempt INTEGER NOT NULL, max_attempts INTEGER NOT NULL, available_at TEXT NOT NULL, input_hash TEXT NOT NULL, payload_json TEXT NOT NULL, result_json TEXT, last_error TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT)'); legacyDb.close();
+    registerAgent(legacyRoot, { agentId: 'legacy-agent', vocation: 'legacy', stage: 'gate1' });
+    const migrated = new DatabaseSync(path.join(legacyRoot, 'run-ledger.sqlite')); const columns = migrated.prepare('PRAGMA table_info(agent_jobs)').all().map(item => item.name); migrated.close();
+    assert.ok(columns.includes('lease_token') && columns.includes('lease_expires_at') && columns.includes('claim_key'));
+  } finally { fs.rmSync(legacyRoot, { recursive: true, force: true }); }
+  const status = agentRuntimeStatus(root); assert.equal(status.counts['dead-letter'], 1); assert.equal(status.counts.succeeded, 3); assert.equal(status.tokenUsage.gate1, 30); assert.equal(status.sessions.length, 1); assert.equal(status.sessions[0].agentId, 'backend-engineer'); assert.equal(status.jobs.find(job => job.jobId === second.jobId).payload.agentSessionId, status.sessions[0].sessionId);
+  // Real processes race the same ledger; no pair may both consume the last allowance.
+  const moduleUrl = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-ledger.mjs')).href;
+  const worker = `import { recordTokenUsage } from ${JSON.stringify(moduleUrl)}; try { recordTokenUsage(process.argv[1], { stage: 'concurrent', inputTokens: 20, limit: 50 }); } catch (error) { if (!/budget exceeded/.test(error.message)) throw error; process.exitCode = 2; }`;
+  const attempts = await Promise.all(Array.from({ length: 8 }, () => new Promise((resolve, reject) => { const child = spawn(process.execPath, ['--input-type=module', '-e', worker, root], { stdio: ['ignore', 'ignore', 'pipe'] }); let errorOutput = ''; child.stderr.on('data', data => { errorOutput += data; }); child.on('error', reject); child.on('close', code => resolve({ code, errorOutput })); })));
+  assert.equal(attempts.filter(item => item.code === 0).length, 2, JSON.stringify(attempts));
+  assert.equal(attempts.filter(item => item.code === 2).length, 6, JSON.stringify(attempts));
+  assert.equal(agentRuntimeStatus(root).tokenUsage.concurrent, 40);
+  console.log(JSON.stringify({ status: 'passed', checks: 53 }));
+} finally { fs.rmSync(root, { recursive: true, force: true }); }

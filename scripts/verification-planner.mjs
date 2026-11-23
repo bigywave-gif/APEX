@@ -22,8 +22,8 @@ const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
-const inventoryRef = state.artifacts.projectInventory;
-if (!inventoryRef) die('projectInventory has not been registered; run project-intake first');
+const inventoryRef = state.roleChain?.confirmationModel === 'two-confirmations' ? state.artifacts.verificationInventory : state.artifacts.projectInventory;
+if (!inventoryRef) die('current verification inventory has not been registered; run the controlled project scan first');
 const inventory = read(path.join(runDir, inventoryRef));
 const contract = read(path.join(runDir, state.artifacts.deliveryContract || 'delivery-contract.json'));
 const plan = { schemaVersion: '3.0', categories: emptyCategories(), generatedFrom: { inventory: inventoryRef, deliveryContract: state.artifacts.deliveryContract || 'delivery-contract.json' }, warnings: [] };
@@ -31,6 +31,9 @@ const required = new Set((contract.verificationRequirements || []).map(category)
 for (const check of inventory.testCommands || []) {
   const target = check.purpose === 'test' ? 'code' : 'runtime';
   plan.categories[target].push({ id: check.id, type: 'command', command: check.command, timeoutMs: 120000 });
+}
+if (required.has('functional') && state.roleChain?.confirmationModel === 'two-confirmations' && state.artifacts.runtimeStateMatrix) {
+  plan.categories.functional.push({ id: 'confirmed-formal-interactions', type: 'formal-interactions' });
 }
 for (const requirement of required) {
   if (!plan.categories[requirement]?.length) {

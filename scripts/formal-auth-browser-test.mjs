@@ -1,0 +1,65 @@
+/** Real-browser authentication acceptance against an isolated local fixture. */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+const apex = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-formal-auth-'));
+const runId = 'auth', session = 'auth-session', runDir = path.join(project, '.apex/runs', runId);
+const user = 'apex-fixture-user-9281', password = 'apex-fixture-password-7634';
+const env = { ...process.env, APEX_AUTH_FIXTURE_USER: user, APEX_AUTH_FIXTURE_PASSWORD: password, APEX_AUTH_WRONG_PASSWORD: 'apex-incorrect-password-5247' };
+const run = (script, args) => { const result = spawnSync(process.execPath, [path.join(apex, 'scripts', script), ...args], { encoding: 'utf8', env, timeout: 180000, maxBuffer: 4 * 1024 * 1024 }); if (result.status !== 0) throw new Error(`${script}: ${result.stderr || result.stdout}`); return JSON.parse(result.stdout); };
+const serverCode = `
+const http=require('http'),fs=require('fs');let logins=0;
+const html=\`<!doctype html><html><body><form id="login"><input id="user"><input id="pass" type="password"><button id="submit">登录</button></form><main id="ready" hidden><span id="count">0</span><button id="increment">添加</button></main><script>
+const login=document.querySelector('#login'),ready=document.querySelector('#ready');
+if(document.cookie.includes('session=ok')){login.hidden=true;ready.hidden=false}
+login.addEventListener('submit',async e=>{e.preventDefault();const r=await fetch('/login',{method:'POST',body:JSON.stringify({username:document.querySelector('#user').value,password:document.querySelector('#pass').value})});document.querySelector('#user').value='';document.querySelector('#pass').value='';if(r.ok){login.hidden=true;ready.hidden=false}});
+document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=String(Number(document.querySelector('#count').textContent)+1);
+</script></body></html>\`;
+const handler=(req,res)=>{if(req.url==='/count'){res.end(String(logins));return}if(req.url==='/redirect'){res.writeHead(302,{location:'http://127.0.0.1:'+other.address().port+'/'});res.end();return}if(req.url==='/login'){let b='';req.on('data',c=>b+=c);req.on('end',()=>{const d=JSON.parse(b);if(d.username===process.env.APEX_AUTH_FIXTURE_USER&&d.password===process.env.APEX_AUTH_FIXTURE_PASSWORD){logins++;res.writeHead(200,{'Set-Cookie':'session=ok; Path=/; SameSite=Lax'});res.end('ok')}else{res.writeHead(401);res.end('bad')}});return}res.writeHead(200,{'content-type':'text/html'});res.end(html)};const server=http.createServer(handler),other=http.createServer(handler);other.listen(0,'127.0.0.1',()=>server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port))));`;
+let server;
+try {
+  const portFile = path.join(project, 'port'); server = spawn(process.execPath, ['-e', serverCode, portFile], { env, stdio: 'ignore' });
+  for (let i = 0; i < 100 && !fs.existsSync(portFile); i++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(fs.existsSync(portFile), 'isolated auth server did not start');
+  const url = `http://127.0.0.1:${fs.readFileSync(portFile, 'utf8')}/`;
+  run('apex-router.mjs', ['intake', project, runId, 'greenfield', 'standard', 'interactive', session, '确认调用 APEX']);
+  const stateFile = path.join(runDir, 'state.json'), state = JSON.parse(fs.readFileSync(stateFile));
+  state.roleChain.confirmationModel = 'gate-summary-only';
+  state.gates.gate1 = { status: 'passed', evidence: ['fixture'] }; state.gates.gate2 = { status: 'passed', evidence: ['fixture'] }; state.locks.implementationAllowed = true; state.locks.implementationApproved = true; state.artifacts.pageDelta = 'page-delta.json'; state.phase = 'G-09 PROOF_IMPLEMENT';
+  fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{}'); fs.writeFileSync(stateFile, JSON.stringify(state));
+  const step = { action: 'click', selector: '#increment', before: { selector: '#count', property: 'text', equals: '0' }, after: { selector: '#count', property: 'text', equals: '1' } };
+  const spec = { authentication: { usernameEnv: 'APEX_AUTH_FIXTURE_USER', passwordEnv: 'APEX_AUTH_FIXTURE_PASSWORD', usernameSelector: '#user', passwordSelector: '#pass', submitSelector: '#submit', successSelector: '#ready' }, screens: [{ id: 'desktop', route: '/', width: 1280, height: 800 }], formalJourneys: [{ id: 'add', task: '添加项目', route: '/', steps: [step] }] };
+  const specFile = path.join(runDir, 'auth-spec.json'); fs.writeFileSync(specFile, JSON.stringify(spec));
+  const auth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
+  run('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'verify', 'browser-capture.mjs', 'capture', runDir, url, specFile]);
+  const capture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
+  assert.equal(capture.status, 'passed'); assert.equal(capture.evidence[0].sessionClosed, true); assert.equal(capture.formalInteractions?.journeys?.[0]?.steps?.[0]?.after, '1');
+  assert.ok(Number(await (await fetch(new URL('/count', url), { headers: { connection: 'close' } })).text()) >= 2, 'screen and formal journey must authenticate independently');
+  const visit = dir => { if (!fs.existsSync(dir)) return; for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) visit(file); else if (/\.(?:json|html|ndjson)$/.test(file)) { const content = fs.readFileSync(file, 'utf8'); assert.ok(!content.includes(user) && !content.includes(password) && !content.includes(env.APEX_AUTH_WRONG_PASSWORD), `fixture credential leaked into ${path.relative(runDir, file)}`); } } };
+  visit(path.join(runDir, 'evidence')); visit(path.join(runDir, 'operations'));
+  spec.authentication.passwordEnv = 'APEX_AUTH_WRONG_PASSWORD';
+  const failedSpecFile = path.join(runDir, 'auth-failure-spec.json'); fs.writeFileSync(failedSpecFile, JSON.stringify(spec));
+  const failedAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
+  const failed = spawnSync(process.execPath, [path.join(apex, 'scripts/apex-action.mjs'), 'run', project, runId, session, failedAuth.authorizationRef, 'verify', 'browser-capture.mjs', 'capture', runDir, url, failedSpecFile], { encoding: 'utf8', env, timeout: 180000, maxBuffer: 4 * 1024 * 1024 });
+  assert.notEqual(failed.status, 0, 'wrong credentials must fail capture');
+  const failedCapture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
+  assert.equal(failedCapture.status, 'failed'); assert.equal(failedCapture.evidence[0].sessionClosed, true);
+  assert.equal(failedCapture.evidence[0].logs.authentication, 'authentication failed');
+  assert.ok(!(failed.stdout + failed.stderr).includes(env.APEX_AUTH_WRONG_PASSWORD), 'failure output leaked the password');
+  visit(path.join(runDir, 'evidence')); visit(path.join(runDir, 'operations'));
+  const loginCount = Number(await (await fetch(new URL('/count', url), { headers: { connection: 'close' } })).text());
+  spec.authentication.passwordEnv = 'APEX_AUTH_FIXTURE_PASSWORD'; spec.screens[0].route = '/redirect'; delete spec.formalJourneys;
+  const redirectSpecFile = path.join(runDir, 'auth-redirect-spec.json'); fs.writeFileSync(redirectSpecFile, JSON.stringify(spec));
+  const redirectAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
+  const redirect = spawnSync(process.execPath, [path.join(apex, 'scripts/apex-action.mjs'), 'run', project, runId, session, redirectAuth.authorizationRef, 'verify', 'browser-capture.mjs', 'capture', runDir, url, redirectSpecFile], { encoding: 'utf8', env, timeout: 180000, maxBuffer: 4 * 1024 * 1024 });
+  assert.notEqual(redirect.status, 0, 'cross-origin redirect must fail capture');
+  const redirectCapture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
+  assert.equal(redirectCapture.evidence[0].sessionClosed, true); assert.equal(redirectCapture.evidence[0].logs.authentication, 'authentication failed');
+  assert.equal(Number(await (await fetch(new URL('/count', url), { headers: { connection: 'close' } })).text()), loginCount, 'cross-origin redirect must not submit credentials');
+  visit(path.join(runDir, 'evidence')); visit(path.join(runDir, 'operations'));
+  console.log(JSON.stringify({ status: 'passed', checks: 11, scope: 'real-browser-isolated-local-auth-fixture' }));
+} finally { if (server) server.kill('SIGTERM'); fs.rmSync(project, { recursive: true, force: true }); }

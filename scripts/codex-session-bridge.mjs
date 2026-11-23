@@ -34,7 +34,7 @@ function invocation(input) {
     if (['intake', 'restart'].includes(action)) { projectRoot = args[1]; sessionId = args[6]; }
     else if (action === 'reinvoke') { projectRoot = args[1]; sessionId = args[2]; }
     else if (['resume', 'status', 'inspect_run'].includes(action)) { projectRoot = args[1]; sessionId = args.at(-1); }
-    else if (['authorize', 'approve', 'revise', 'cancel', 'register-gate1-presentation', 'register-runtime-demo', 'select-route', 'transition', 'lease'].includes(action)) { projectRoot = args[1]; sessionId = args[3]; }
+    else if (['authorize', 'approve', 'revise', 'cancel', 'register-gate1-presentation', 'register-runtime-demo', 'present-runtime-demo', 'select-route', 'transition', 'lease'].includes(action)) { projectRoot = args[1]; sessionId = args[3]; }
     if (projectRoot && sessionId) return { projectRoot, sessionId };
   }
   return null;

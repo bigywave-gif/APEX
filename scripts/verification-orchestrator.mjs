@@ -5,15 +5,27 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { validateFormalInteractionEvidence } from './formal-interaction-evidence.mjs';
+import { controlledOutput, declaredVerificationCommand } from './verification-policy.mjs';
+import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
+import { visualQualityEvidence } from './visual-quality-evidence.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function die(message) { console.error(`Verification failed: ${message}`); process.exit(1); }
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { throw new Error(`${file}: ${error.message}`); } }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
-async function execute(check, projectRoot, runDir) {
+async function execute(check, projectRoot, runDir, policy) {
   try {
+    if (check.type === 'formal-interactions') {
+      const state = read(path.join(runDir, 'state.json'));
+      if (state.roleChain?.confirmationModel !== 'two-confirmations' || !state.artifacts?.runtimeStateMatrix) return { id: check.id, status: 'unverified', reason: 'current formal interaction matrix is missing' };
+      const matrix = read(path.join(runDir, state.artifacts.runtimeStateMatrix));
+      const verified = validateFormalInteractionEvidence(runDir, state, matrix.interactions);
+      return { id: check.id, status: 'passed', evidence: verified.tasks };
+    }
     if (check.type === 'command') {
+      if (policy && !declaredVerificationCommand(check, policy.inventory, policy.manifest)) return { id: check.id, status: 'unverified', reason: 'command is not an unchanged project-declared verification script' };
       const result = spawnSync('/bin/zsh', ['-lc', check.command], { cwd: projectRoot, encoding: 'utf8', timeout: check.timeoutMs || 120000 });
       return { id: check.id, status: result.status === 0 ? 'passed' : 'failed', exitCode: result.status, output: `${result.stdout || ''}${result.stderr || ''}`.slice(-4000) };
     }
@@ -25,7 +37,13 @@ async function execute(check, projectRoot, runDir) {
     if (check.type === 'file') return { id: check.id, status: fs.existsSync(file) ? 'passed' : 'failed', path: check.path };
     if (check.type === 'evidence') {
       if (!fs.existsSync(file)) return { id: check.id, status: 'unverified', path: check.path, reason: 'evidence-missing' };
+      if (policy && !controlledOutput(runDir, check.path, ['quality-evidence.mjs', 'contract-verifier.mjs'])) return { id: check.id, status: 'unverified', path: check.path, reason: 'evidence is not an unchanged controlled verification output' };
       const evidence = read(file);
+      if (policy && check.path === 'evidence/visual-verification.json' && (evidence.scope !== 'design-fidelity-only' || visualQualityEvidence(runDir, policy.state).status !== 'passed')) return { id: check.id, status: 'unverified', path: check.path, reason: 'current confirmed design parity is missing or stale' };
+      if (policy && ['evidence/accessibility-verification.json', 'evidence/performance-verification.json'].includes(check.path)) {
+        const measurementRef = evidence.measurementPath;
+        if (!measurementRef || !qualityEvidenceCurrent(runDir, policy.state, evidence, check.path.includes('accessibility') ? 'accessibility' : 'performance', policy.contract, projectRoot)) return { id: check.id, status: 'unverified', path: check.path, reason: 'quality measurement is missing or stale for the current implementation' };
+      }
       return { id: check.id, status: evidence.status === 'passed' && Array.isArray(evidence.evidence) && evidence.evidence.length ? 'passed' : 'failed', path: check.path, evidence };
     }
     return { id: check.id, status: 'failed', reason: 'unsupported-check' };
@@ -38,10 +56,22 @@ if (command !== 'run' || !runArg || !planArg) die('usage: run <run-dir> <verific
 const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
 const projectRoot = path.resolve(projectArg || path.join(runDir, '..', '..', '..'));
-const plan = read(path.resolve(planArg));
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
+let policy = null;
+if (state.roleChain?.confirmationModel === 'two-confirmations') {
+  const expectedPlan = state.artifacts?.verificationPlan;
+  if (fs.realpathSync(projectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('verification must use the Router-authorized project');
+  if (!expectedPlan || fs.realpathSync(path.resolve(planArg)) !== fs.realpathSync(path.resolve(runDir, expectedPlan)) || !controlledOutput(runDir, expectedPlan, ['verification-planner.mjs'])) die('verification plan must be the unchanged controlled current Run plan');
+  const inventoryRef = state.artifacts?.verificationInventory;
+  if (!inventoryRef || !controlledOutput(runDir, inventoryRef, ['project-intake.mjs'])) die('verification inventory must be an unchanged controlled current Run output');
+  const inventory = read(path.join(runDir, inventoryRef));
+  const manifestPath = path.join(projectRoot, 'package.json');
+  policy = { state, inventory, manifest: fs.existsSync(manifestPath) ? read(manifestPath) : null };
+}
+const plan = read(path.resolve(planArg));
 const deliveryContract = read(path.join(runDir, state.artifacts.deliveryContract || 'delivery-contract.json'));
+if (policy) policy.contract = deliveryContract;
 const categoryForRequirement = {
   unit: 'code',
   integration: 'runtime',
@@ -60,7 +90,7 @@ for (const category of required) {
   const checks = plan.categories?.[category] || [];
   if (!checks.length) bundle.unverified.push({ category, reason: 'no-checks' });
   for (const check of checks) {
-    const result = await execute(check, projectRoot, runDir);
+    const result = await execute(check, projectRoot, runDir, policy);
     bundle[category].push(result);
     if (result.status !== 'passed') bundle.unverified.push({ category, id: check.id, status: result.status, reason: result.reason || result.error || 'check-failed' });
   }
@@ -71,5 +101,5 @@ state.artifacts.verificationBundle = 'verification-bundle.json';
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
 write(stateFile, state);
-console.log(JSON.stringify({ gate3: bundle.gate3, unverified: bundle.unverified.length, verificationBundle: path.join(runDir, 'verification-bundle.json') }));
+console.log(JSON.stringify({ verificationStatus: bundle.gate3, gate3: state.roleChain?.confirmationModel === 'two-confirmations' ? state.gates?.gate3?.status || 'pending' : bundle.gate3, unverified: bundle.unverified.length, verificationBundle: path.join(runDir, 'verification-bundle.json') }));
 if (bundle.gate3 !== 'passed') process.exitCode = 2;

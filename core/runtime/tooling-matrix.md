@@ -56,6 +56,6 @@
 
 - 如果浏览器控制不可用，必须明确说明缺口
 - 如果截图不可用，必须寻找同等强度的页面验证方式
-- 如果 `Product Design` 类插件不可用，必须回退到本地 adopted design rules、`google-design-md` 与本地 skill 组合，不得中断主工作流
+- 如果 `Product Design` 类插件不可用，新 Run 使用已安装的 `taste-skill`、本地 adopted design rules 和按场景适用的其他技能，保留设计契约与验证；必选技能无法加载时记录原因并修复。旧 Run 保持原确认模型的技能要求。
 - 如果 Stitch MCP / SDK 不可用，回退为人工导入事实包与 DESIGN.md、人工导出截图和设计说明；不得省略输出映射与 Gate 2
 - 不允许因为某个工具不可用就跳过真实验收

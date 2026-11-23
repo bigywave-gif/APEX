@@ -5,8 +5,9 @@
     {
       "name": "google-design-md",
       "role": "design-contract-baseline",
-      "required": true,
+      "required": false,
       "source": "apex-bundled-bridge",
+      "contentHash": "sha256:1d838925746b17da58f30c598c79c5fda3c5c265f73f01b3c08c13701523f7ad",
       "installFrom": "skills/google-design-md",
       "license": "APEX-project-license",
       "upstreamReference": "https://github.com/google-labs-code/design.md"
@@ -14,21 +15,25 @@
     {
       "name": "impeccable",
       "role": "structure-and-product-grade-baseline",
-      "required": true,
+      "required": false,
       "source": "github",
       "repository": "pbakaus/impeccable",
       "minimumVersion": "3.8.0",
+      "contentHash": "sha256:4ff55c665ec610d7e20a15abe9483e4f8b41ff22b72ef1ab5a0d5e5e6a09f3f5",
       "license": "Apache-2.0",
       "installCommand": "npx skills add pbakaus/impeccable --all -g -y"
     },
     {
       "name": "ui-ux-pro-max-skill",
-      "aliases": ["ui-ux-pro-max"],
+      "aliases": [
+        "ui-ux-pro-max"
+      ],
       "role": "page-level-visual-organization",
-      "required": true,
+      "required": false,
       "source": "github",
       "repository": "nextlevelbuilder/ui-ux-pro-max-skill",
       "minimumVersion": "2.5.0",
+      "contentHash": "sha256:528904ce552fc2cdd3f5b57f4b6fdecdedb2e28486f35797757a1f30cac36057",
       "license": "MIT",
       "installCommand": "npx skills add nextlevelbuilder/ui-ux-pro-max-skill --all -g -y"
     },
@@ -39,7 +44,21 @@
       "source": "github",
       "repository": "anthropics/skills",
       "license": "upstream-terms-apply",
+      "contentHash": "sha256:2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4",
       "installCommand": "npx skills add anthropics/skills --skill doc-coauthoring -g -y"
+    },
+    {
+      "name": "taste-skill",
+      "aliases": [
+        "design-taste-frontend"
+      ],
+      "role": "anti-template-taste",
+      "required": true,
+      "source": "github",
+      "repository": "Leonxlnx/taste-skill",
+      "contentHash": "sha256:aa194351b246b8b4799099d4ed7b033d29eab6e6e3d58d8d2172978be7b3ec89",
+      "license": "MIT",
+      "installCommand": "npx skills add Leonxlnx/taste-skill --skill design-taste-frontend -g -y"
     }
   ]
 }

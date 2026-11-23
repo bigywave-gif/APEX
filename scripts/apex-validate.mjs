@@ -5,6 +5,18 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
+import { validateMultiStitch } from './stitch-screen-progress.mjs';
+import { validateRuntimeMotionSamples, validateVisualOutputSource } from './runtime-baseline-contract.mjs';
+import { validateImplementationCoverage } from './implementation-coverage.mjs';
+import { formalRouteCoverage } from './formal-route-coverage.mjs';
+import { formalStitchProgress } from './formal-stitch-progress.mjs';
+import { formalDirectProgress } from './formal-direct-progress.mjs';
+import { validateFormalInteractionEvidence } from './formal-interaction-evidence.mjs';
+import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
+import { implementationRegistrationCurrent } from './implementation-registration.mjs';
+import { agentRuntimeStatus } from './run-ledger.mjs';
+import { controlledOutput } from './verification-policy.mjs';
+import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schemas = path.join(root, 'core/runtime/schemas');
@@ -74,6 +86,23 @@ function resolveArtifact(runDir, reference, fallback) {
 }
 function hashFile(file) {
   return 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+function visualRevisionBindingCurrent(file, expectedHash) {
+  if (hashFile(file) === expectedHash) return true;
+  const chunks = fs.readFileSync(file, 'utf8').match(/[^\n]*\n|[^\n]+/g) || [];
+  let prefix = '';
+  for (let index = 0; index < chunks.length; index += 1) {
+    prefix += chunks[index];
+    const prefixHash = 'sha256:' + crypto.createHash('sha256').update(prefix).digest('hex');
+    if (prefixHash !== expectedHash) continue;
+    return chunks.slice(index + 1).every(chunk => {
+      try {
+        const revision = JSON.parse(chunk);
+        return revision.checkpoint === 'implementation' && revision.impact === 'implementation-only';
+      } catch { return false; }
+    });
+  }
+  return false;
 }
 function validateStructuralContract(runDir, parity, expectedSource, expectedImageHash) {
   const verification = parity.structuralVerification || {};
@@ -154,6 +183,36 @@ function validateRoleStage(runDir, state, stage) {
   if (manifest.registry?.sha256 !== hashFile(registryFile) || !entry || entry.status !== 'ready' || entry.selectedRoles.length !== entry.advisories.length) throw new Error(`controlled role advisory stage is incomplete or stale: ${stage}`);
   const summary = resolveArtifact(runDir, entry.summary, '');
   if (!summary.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(summary) || entry.summarySha256 !== hashFile(summary)) throw new Error(`controlled role decision summary is missing or stale: ${stage}`);
+  if (state.artifacts?.roleDecisionSummaries?.[stage] !== entry.summary) throw new Error(`controlled role decision summary reference is stale: ${stage}`);
+  const selectionFile = path.join(runDir, 'advisories', stage, 'selection.json');
+  if (!fs.existsSync(selectionFile)) throw new Error(`controlled role selection is missing or stale: ${stage}`);
+  const selection = readJson(selectionFile);
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) throw new Error('implementation role inputs must bind the current source, dependency lock, visual bundle, and implementation map');
+  if (!Array.isArray(selection.inputBindings) || selection.inputBindings.some(binding => {
+    // The append-only visual-revision log is intentionally a role input
+    // without becoming a mutable state.artifacts entry.  Keep this validator
+    // aligned with Router roleStageReady so an audited visual revision cannot
+    // make a completed stage falsely stale at Gate 2.
+    const current = state.artifacts?.[binding.artifact];
+    const file = binding.artifact === 'visualRevision'
+      ? path.resolve(runDir, binding.path)
+      : current && resolveArtifact(runDir, current, '');
+    return (binding.artifact !== 'visualRevision' && current !== binding.path)
+      || !file.startsWith(`${path.resolve(runDir)}${path.sep}`)
+      || !fs.existsSync(file)
+      || (binding.artifact === 'visualRevision'
+        ? !visualRevisionBindingCurrent(file, binding.sha256)
+        : hashFile(file) !== binding.sha256);
+  })) throw new Error(`controlled role advisory inputs are stale: ${stage}`);
+  if (!Array.isArray(selection.selectedRoles) || selection.selectedRoles.length !== entry.selectedRoles.length || selection.selectedRoles.some(role => !entry.selectedRoles.includes(role)) || entry.selectedRoles.some(role => !entry.advisories.some(item => item.roleId === role))) throw new Error(`controlled role advisory selection is incomplete or stale: ${stage}`);
+  if (Number.parseFloat(state.roleChain.version || '1.0') >= 1.1) {
+    if (selection.schemaVersion !== '1.1' || JSON.stringify(selection.selectedRoles) !== JSON.stringify(entry.selectedRoles) || !selection.agentJobs || Object.keys(selection.agentJobs).length !== entry.selectedRoles.length || new Set(entry.selectedRoles).size !== entry.selectedRoles.length) throw new Error(`controlled role job selection is incomplete or stale: ${stage}`);
+    const jobs = new Map(agentRuntimeStatus(runDir).jobs.map(job => [job.jobId, job]));
+    if (entry.selectedRoles.some(roleId => {
+      const job = jobs.get(selection.agentJobs[roleId]);
+      return job?.agentId !== roleId || job.stage !== stage || job.status !== 'succeeded';
+    })) throw new Error(`controlled role jobs are incomplete or stale: ${stage}`);
+  }
   const operationIndex = fs.existsSync(path.join(runDir, 'operations-index.json')) ? readJson(path.join(runDir, 'operations-index.json')).receipts || {} : {};
   for (const item of entry.advisories) {
     const file = resolveArtifact(runDir, item.path, '');
@@ -210,8 +269,8 @@ function assertExistingCodeReferenceUnchanged(runDir, state) {
   return reference;
 }
 
-function validateGate1(runDir) {
-  const state = validateFile('run-state.schema.json', path.join(runDir, 'state.json'));
+function validateGate1(runDir, stateFile = path.join(runDir, 'state.json')) {
+  const state = validateFile('run-state.schema.json', stateFile);
   const intent = validateFile('intent-brief.schema.json', requireArtifact(runDir, state, 'intentBrief', 'intent-brief.json'));
   const contract = validateFile('delivery-contract.schema.json', requireArtifact(runDir, state, 'deliveryContract', 'delivery-contract.json'));
   rejectPlaceholders(intent, 'Intent Brief');
@@ -231,7 +290,12 @@ function validateGate1(runDir) {
     rejectPlaceholders(freeze, 'Functional Freeze');
     assertStyleBaseline(baseline.styleBaseline, 'existing-platform');
     assertStyleBaseline(plannedStyle, 'existing-platform');
-    if (plannedStyle.sourceHash !== hashJson(baseline.styleBaseline)) throw new Error('Existing visual strategy must reuse the captured platform style baseline without token drift');
+    // `sourceHash` in the Experience Strategy is the immutable style-source
+    // file hash (for example src/styles.css), not a hash of the serialized
+    // baseline object.  Comparing the two made every valid Existing strategy
+    // look drifted and deferred that deterministic Core defect until Gate 1.
+    const baselineStyleHashes = new Set((baseline.styleBaseline.sources || []).map(source => source.sha256));
+    if (!baselineStyleHashes.has(plannedStyle.sourceHash)) throw new Error('Existing visual strategy must bind one captured platform style source hash');
     const codeReference = assertExistingCodeReferenceUnchanged(runDir, state);
     const changeScope = validateFile('change-scope.schema.json', requireArtifact(runDir, state, 'changeScope', 'change-scope.json'));
     rejectPlaceholders(changeScope, 'Change Scope');
@@ -242,7 +306,12 @@ function validateGate1(runDir) {
     const pageSkeleton = validateFile('page-skeleton.schema.json', requireArtifact(runDir, state, 'pageSkeleton', 'page-skeleton.json'));
     const displayFile = resolveArtifact(runDir, baseline.displayEvidence?.path, '');
     if (!baseline.displayEvidence?.hash || !fs.existsSync(displayFile) || hashFile(displayFile) !== baseline.displayEvidence.hash) throw new Error('Existing Baseline does not bind real frontend display evidence');
-    if (pageSkeleton.sourceTreeHash !== codeReference.sourceTreeHash || baseline.codeReference?.complete !== true || baseline.codeReference.sourceTreeHash !== codeReference.sourceTreeHash || baseline.codeReference.sourceFileCount !== codeReference.sourceFileCount || baseline.codeReference.pageSkeletonHash !== pageSkeleton.skeletonHash || strategy.sourceBindings?.codeReferenceHash !== codeReference.sourceTreeHash || strategy.sourceBindings?.pageSkeletonHash !== pageSkeleton.skeletonHash || strategy.sourceBindings?.displayEvidenceHash !== baseline.displayEvidence.hash) throw new Error('Existing Baseline strategy does not bind complete scoped code, real display, and page skeleton evidence');
+    // Source bindings are file/content hashes. `pageSkeletonHash` therefore
+    // binds the immutable page-skeleton artifact, while the baseline's
+    // `pageSkeletonHash` binds the skeleton's internal structural hash.
+    // Comparing one to the other falsely rejected an otherwise source-bound
+    // Existing strategy at Gate 1.
+    if (pageSkeleton.sourceTreeHash !== codeReference.sourceTreeHash || baseline.codeReference?.complete !== true || baseline.codeReference.sourceTreeHash !== codeReference.sourceTreeHash || baseline.codeReference.sourceFileCount !== codeReference.sourceFileCount || baseline.codeReference.pageSkeletonHash !== pageSkeleton.skeletonHash || strategy.sourceBindings?.codeReferenceHash !== codeReference.sourceTreeHash || strategy.sourceBindings?.pageSkeletonHash !== hashFile(requireArtifact(runDir, state, 'pageSkeleton', 'page-skeleton.json')) || strategy.sourceBindings?.displayEvidenceHash !== baseline.displayEvidence.hash) throw new Error('Existing Baseline strategy does not bind complete scoped code, real display, and page skeleton evidence');
     if (!capabilities(contract).has('existing-baseline')) throw new Error('Existing runs must require existing-baseline capability');
   } else {
     assertStyleBaseline(plannedStyle, 'greenfield-standard');
@@ -284,12 +353,13 @@ function validateConfirmationCheckpoint(runDir, checkpoint) {
   for (const [artifact, schema, label] of artifacts) {
     const value = validateFile(schema, requireArtifact(runDir, state, artifact, `${artifact}.json`));
     rejectPlaceholders(value, label);
+    if (checkpoint === 'visual-plan' && state.roleChain?.confirmationModel === 'two-confirmations') assertDesignContractCurrent(runDir, path.dirname(path.dirname(path.dirname(runDir))), value.selectionAnalysis?.designContract);
   }
   return state;
 }
 
-function validateGate2(runDir) {
-  const { state, contract } = validateGate1(runDir);
+function validateGate2(runDir, { machineSealPending = false, stateFile } = {}) {
+  const { state, contract } = validateGate1(runDir, stateFile);
   if (state.gates.gate1.status !== 'passed') throw new Error('Gate 1 has not passed');
   const site = validateFile('site-contract.schema.json', resolveArtifact(runDir, state.artifacts.siteContract, 'site-contract.json'));
   if (state.track === 'existing') validateFile('functional-freeze.schema.json', resolveArtifact(runDir, state.artifacts.functionalFreeze, 'functional-freeze.json'));
@@ -305,6 +375,10 @@ function validateGate2(runDir) {
   const runtimeBaseline = validateFile('runtime-visual-baseline.schema.json', runtimeBaselineFile);
   const dependency = validateFile('dependency-lock.schema.json', resolveArtifact(runDir, state.artifacts.dependencyLock, 'dependency-lock.json'));
   const visualPlan = validateFile('visual-execution-plan.schema.json', requireArtifact(runDir, state, 'visualExecutionPlan', 'visual-execution-plan.json'));
+  if (state.roleChain?.confirmationModel === 'two-confirmations') assertDesignContractCurrent(runDir, path.dirname(path.dirname(path.dirname(runDir))), visualPlan.selectionAnalysis?.designContract);
+  if (state.roleChain?.confirmationModel === 'two-confirmations') validateImplementationCoverage({ baseline: runtimeBaseline, stitch, entries: implementation.entries });
+  if (state.roleChain?.confirmationModel === 'two-confirmations') validateRuntimeMotionSamples(runDir, runtimeBaseline, visualPlan);
+  else if ((runtimeBaseline.motionSamples || []).length < 2) throw new Error('legacy runtime visual baseline requires at least two motion samples');
   validateRoleStage(runDir, state, 'visual');
   validateRoleStage(runDir, state, 'implementation');
   if (state.track === 'existing') {
@@ -394,13 +468,13 @@ function validateGate2(runDir) {
       const pageSkeleton = validateFile('page-skeleton.schema.json', requireArtifact(runDir, state, 'pageSkeleton', 'page-skeleton.json'));
       if (reference.existingCodeReference?.sourceTreeHash !== codeReference.sourceTreeHash || reference.existingCodeReference?.sourceFileCount !== codeReference.sourceFileCount || reference.existingCodeReference?.complete !== true || reference.existingPageSkeleton?.sourceTreeHash !== codeReference.sourceTreeHash || reference.existingPageSkeleton?.skeletonHash !== pageSkeleton.skeletonHash) throw new Error('Existing Visual Reference is not bound to the complete scoped code reference and page skeleton');
       const skeletonNodes = new Set(pageSkeleton.nodes.map(item => `${item.sourcePath}\u0000${item.marker}`)); const mappings = reference.existingPageSkeleton.mappings || [];
-      if (new Set(mappings.map(item => item.visualNode)).size !== reference.layoutLock.nodes.length || !reference.layoutLock.nodes.every(node => mappings.some(item => item.visualNode === node.id)) || mappings.some(item => !skeletonNodes.has(`${item.sourcePath}\u0000${item.sourceMarker}`))) throw new Error('Existing Visual Reference does not strictly map every visual node to the real page skeleton');
+      if (new Set(mappings.map(item => item.visualNode)).size !== reference.layoutLock.nodes.length || !reference.layoutLock.nodes.every(node => mappings.some(item => item.visualNode === node.id)) || mappings.some(item => !skeletonNodes.has(`${item.sourcePath}\u0000${item.sourceMarker || item.marker}`))) throw new Error('Existing Visual Reference does not strictly map every visual node to the real page skeleton');
     }
     const gate1VisualOutput = requireArtifact(runDir, state, 'gate1VisualOutput', 'gate1-visual-output.json');
     const gate1Visual = readJson(gate1VisualOutput);
-    if (gate1Visual.source !== 'gate1-visual') throw new Error('Gate 1 visual output is not marked as gate1-visual');
-    if (path.resolve(runDir, gate1Visual.referenceImage?.path || '') !== path.resolve(runDir, reference.referenceImage.path)) throw new Error('Gate 1 effect image does not match Visual Reference');
+    validateVisualOutputSource(runDir, state, gate1Visual, reference, runtimeBaseline);
     const candidates = validateFile('design-candidates.schema.json', requireArtifact(runDir, state, 'designCandidates', 'design-candidates.json'));
+    if (state.roleChain?.confirmationModel !== 'two-confirmations' && candidates.candidates.length < 2) throw new Error('legacy visual candidates require at least two alternatives');
     const strategyFile = resolveArtifact(runDir, state.artifacts.experienceStrategy, 'experience-strategy.json');
     if (candidates.strategyHash !== hashFile(strategyFile)) throw new Error('Design candidates do not bind the current experience strategy');
     const selected = candidates.candidates.find(item => item.id === candidates.selectedCandidateId);
@@ -409,10 +483,13 @@ function validateGate2(runDir) {
       if (bundle.implementationBaseline.path !== state.artifacts.visualReference || bundle.implementationBaseline.hash !== reference.referenceImage.sha256) throw new Error('Stitch-skipped implementation baseline does not bind the approved effect image');
     } else {
       const parity = validateFile('stitch-parity-evidence.schema.json', requireArtifact(runDir, state, 'stitchParityEvidence', 'stitch-parity-evidence.json'));
-      if (parity.referenceImageHash !== reference.referenceImage.sha256) throw new Error('Stitch parity reference hash does not match Visual Reference');
-      validateStructuralContract(runDir, parity, 'stitch-screen-export', parity.stitchImageHash);
-      if (parity.unmatched.length) throw new Error('Stitch parity evidence has unmatched visual differences');
-      if (!stitch.approvedScreens.some(screen => screen.imageHash === parity.stitchImageHash)) throw new Error('Stitch parity does not reference a frozen Stitch screen');
+      if (stitch.approvedScreens.length > 1 && state.roleChain?.confirmationModel === 'two-confirmations') validateMultiStitch(runDir, state, stitch, reference);
+      else {
+        if (parity.referenceImageHash !== reference.referenceImage.sha256) throw new Error('Stitch parity reference hash does not match Visual Reference');
+        validateStructuralContract(runDir, parity, 'stitch-screen-export', parity.stitchImageHash);
+        if (parity.unmatched.length) throw new Error('Stitch parity evidence has unmatched visual differences');
+        if (!stitch.approvedScreens.some(screen => screen.imageHash === parity.stitchImageHash)) throw new Error('Stitch parity does not reference a frozen Stitch screen');
+      }
       if (!stitch.generationInput || stitch.generationInput.origin !== 'apex-visual') throw new Error('Stitch Freeze is not parameterized from the APEX Visual Reference');
       if (!stitch.generationInput.references?.some(item => item.sha256 === reference.referenceImage.sha256)) throw new Error('Stitch Freeze does not reference the APEX effect image');
       if (stitch.generationInput.contentLock?.sourceHash !== reference.contentLock.hash || stitch.generationInput.layoutLock?.sourceHash !== reference.layoutLock.hash || stitch.generationInput.analyticsLock?.sourceHash !== reference.analyticsLock.hash) throw new Error('Stitch Freeze parameter locks do not match Visual Reference');
@@ -420,7 +497,7 @@ function validateGate2(runDir) {
   }
   if (!state.locks.effectApproved || !state.locks.visualApproved) throw new Error('effect image approval is missing');
   if (!state.locks.stitchApproved) throw new Error('Stitch user approval is missing');
-  if (!state.locks.implementationApproved) throw new Error('pre-implementation approval is missing');
+  if (!state.locks.implementationApproved && !(machineSealPending && state.roleChain?.confirmationModel === 'two-confirmations')) throw new Error('pre-implementation approval or eligible machine seal is missing');
   if (!state.locks.stitchCurrent && !stitchSkipped) throw new Error('stitchCurrent is false');
   return state;
 }
@@ -428,6 +505,7 @@ function validateGate2(runDir) {
 function validateGate3(runDir) {
   const { state, contract } = validateGate1(runDir);
   if (state.gates.gate2.status !== 'passed' || !state.locks.implementationAllowed) throw new Error('Gate 2 has not passed or implementation is not allowed');
+  if (!implementationRegistrationCurrent(runDir, state, path.dirname(path.dirname(path.dirname(runDir))))) throw new Error('formal implementation registration is missing or stale');
   if (!['passed', 'not-required'].includes(state.gates.proof.status)) throw new Error('Proof Gate has not passed');
   validateRoleStage(runDir, state, 'verify');
   {
@@ -437,12 +515,27 @@ function validateGate3(runDir) {
     validateStructuralContract(runDir, parity, 'runtime-dom-export', parity.runtimeImageHash);
     const reference = validateFile('visual-reference.schema.json', requireArtifact(runDir, state, 'visualReference', 'visual-reference.json'));
     const expectedBaseline = stitchSkipped ? { kind: 'effect-image', imageHash: reference.referenceImage.sha256 } : { kind: 'stitch', imageHash: parity.stitchImageHash };
-    if (parity.baseline?.kind !== expectedBaseline.kind || parity.baseline?.imageHash !== expectedBaseline.imageHash) throw new Error('Implementation parity does not reference the approved implementation baseline');
+    const directMulti = stitchSkipped && state.roleChain?.confirmationModel === 'two-confirmations' && parity.baseline?.screenId;
+    if (parity.baseline?.kind !== expectedBaseline.kind || (!directMulti && parity.baseline?.imageHash !== expectedBaseline.imageHash)) throw new Error('Implementation parity does not reference the approved implementation baseline');
     if (!stitchSkipped && !stitch.approvedScreens.some(screen => screen.imageHash === parity.stitchImageHash)) throw new Error('Implementation parity does not reference the frozen Stitch screen');
     if (parity.unmatched.length) throw new Error('Implementation parity evidence has unmatched visual differences');
     const bundle = validateFile('visual-bundle.schema.json', requireArtifact(runDir, state, 'visualBundle', 'visual-bundle.json'));
     const stateMatrix = validateFile('runtime-state-matrix.schema.json', requireArtifact(runDir, state, 'runtimeStateMatrix', 'runtime-state-matrix.json'));
+    if (state.roleChain?.confirmationModel === 'two-confirmations') {
+      const baseline = validateFile('runtime-visual-baseline.schema.json', requireArtifact(runDir, state, 'runtimeVisualBaseline', 'runtime-visual-baseline.json'));
+      const captureFile = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
+      const operations = path.join(runDir, 'operations');
+      const receipts = fs.existsSync(operations) ? fs.readdirSync(operations).filter(name => name.endsWith('.json')).flatMap(name => { try { return [readJson(path.join(operations, name))]; } catch { return []; } }) : [];
+      const coverage = formalRouteCoverage(runDir, baseline, fs.existsSync(captureFile) ? readJson(captureFile) : null, receipts);
+      if (coverage.status === 'incomplete') throw new Error(`formal page coverage is incomplete: ${coverage.reason}`);
+      const formalParity = formalStitchProgress(runDir, state, receipts);
+      if (!['ready', 'not-required'].includes(formalParity.status)) throw new Error(`formal Stitch page comparison is incomplete: ${formalParity.screenId || ''} ${formalParity.reason || formalParity.status}`);
+      const directParity = formalDirectProgress(runDir, state, receipts);
+      if (!['ready', 'not-required'].includes(directParity.status) || (directMulti && directParity.status !== 'ready')) throw new Error(`formal Demo page comparison is incomplete: ${directParity.demoCaptureId || ''} ${directParity.reason || directParity.status}`);
+    }
+
     validateRuntimeStateMatrix(runDir, stateMatrix, expectedBaseline, bundle.responsive);
+    if (state.roleChain?.confirmationModel === 'two-confirmations') validateFormalInteractionEvidence(runDir, state, stateMatrix.interactions);
     if (state.track === 'existing') {
       const scopeFile = requireArtifact(runDir, state, 'changeScope', 'change-scope.json');
       const scope = validateFile('change-scope.schema.json', scopeFile), scopeHash = hashFile(scopeFile);
@@ -493,6 +586,7 @@ function validateGate3(runDir) {
       if (motionImplementation.bindings.length !== bundle.motion.length) throw new Error('Runtime motion evidence has no complete frozen implementation map');
     }
   }
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && (!state.artifacts?.verificationPlan || !controlledOutput(runDir, state.artifacts?.verificationBundle, ['verification-orchestrator.mjs'], [state.artifacts.verificationPlan]))) throw new Error('Gate 3 verification bundle must be an unchanged controlled verification output');
   const verification = validateFile('verification-bundle.schema.json', resolveArtifact(runDir, state.artifacts.verificationBundle, 'verification-bundle.json'));
   const provenanceFile = requireArtifact(runDir, state, 'evidenceProvenance', 'evidence-provenance.json');
   const provenance = validateFile('evidence-provenance.schema.json', provenanceFile);
@@ -503,12 +597,18 @@ function validateGate3(runDir) {
   }
   const industryFile = requireArtifact(runDir, state, 'industryBenchmarkEvidence', 'industry-benchmark-evidence.json');
   const industry = validateFile('industry-benchmark-evidence.schema.json', industryFile);
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && (!industry.reviewPath || !controlledOutput(runDir, state.artifacts.industryBenchmarkEvidence, ['industry-benchmark.mjs'], [industry.reviewPath]))) throw new Error('Gate 3 industry benchmark must be an unchanged controlled verification output');
   const currentPlan = requireArtifact(runDir, state, 'visualExecutionPlan', 'visual-execution-plan.json');
   const reviewFile = resolveArtifact(runDir, industry.reviewPath, ''); const reviewReceipt = resolveArtifact(runDir, industry.reviewReceipt, '');
   if (!reviewFile.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(reviewFile) || !reviewReceipt.startsWith(`${path.resolve(runDir)}${path.sep}operations${path.sep}`) || !fs.existsSync(reviewReceipt)) throw new Error('Gate 3 industry benchmark review or controlled-operation receipt is missing');
   const review = validateFile('industry-benchmark-review.schema.json', reviewFile); const receipt = readJson(reviewReceipt);
   if (industry.status !== 'passed' || industry.assessmentMode !== 'evidence-bound-review' || industry.visualPlanHash !== hashFile(currentPlan) || industry.provenanceHash !== hashFile(provenanceFile) || industry.reviewHash !== hashFile(reviewFile) || review.visualPlanHash !== hashFile(currentPlan) || receipt.status !== 'succeeded' || receipt.action !== 'verify' || receipt.script !== 'industry-benchmark.mjs' || receipt.inputFileHashes?.[industry.reviewPath] !== industry.reviewHash || industry.average < 4 || industry.scores.some(item => item.result !== 'passed')) throw new Error('Gate 3 industry benchmark is not evidence-bound to the current plan, runtime evidence, and controlled review');
   if (verification.gate3 !== 'passed' || verification.unverified?.length) throw new Error('Verification Bundle has failures or unverified checks');
+  if (state.roleChain?.confirmationModel === 'two-confirmations') for (const kind of ['accessibility', 'performance']) {
+    if (!(contract.verificationRequirements || []).includes(kind)) continue;
+    const checks = verification[kind] || [];
+    if (!checks.length || checks.some(item => !item.path || !controlledOutput(runDir, item.path, ['quality-evidence.mjs']) || !qualityEvidenceCurrent(runDir, state, readJson(resolveArtifact(runDir, item.path, '')), kind, contract))) throw new Error(`Gate 3 ${kind} evidence is missing, stale, or not bound to a real controlled measurement`);
+  }
   const requirements = new Set(contract.verificationRequirements || []);
   const evidence = {
     unit: verification.code,
@@ -547,9 +647,54 @@ try {
     const state = validateGate2(runDir);
     if (!state.locks.implementationAllowed || state.gates.gate2.status !== 'passed') throw new Error('Gate 2 artifacts are valid but implementation permission has not been explicitly opened');
     console.log('APEX Gate 2 passed: implementation is allowed');
+  } else if (command === 'gate2-candidate') {
+    const runDir = path.resolve(args[0] || '.');
+    const candidate = path.resolve(args[1] || '');
+    if (!fs.existsSync(candidate) || !fs.realpathSync(candidate).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)) throw new Error('Gate 2 candidate must be inside the current run');
+    const state = validateGate2(runDir, { stateFile: candidate });
+    if (!state.locks.implementationAllowed || state.gates.gate2.status !== 'passed') throw new Error('Gate 2 candidate does not open implementation permission');
+    console.log('APEX Gate 2 candidate validation passed');
   } else if (command === 'pre-gate2') {
     validateGate2(path.resolve(args[0] || '.'));
     console.log('APEX pre-Gate 2 validation passed');
+  } else if (command === 'pre-stitch-machine-seal') {
+    const dir = path.resolve(args[0] || '.');
+    const state = validateFile('run-state.schema.json', path.join(dir, 'state.json'));
+    if (state.roleChain?.confirmationModel !== 'two-confirmations' || state.deliveryRoute !== 'stitch' || !state.locks.effectApproved) throw new Error('machine Stitch seal requires the two-confirmation model and current Stitch route');
+    const freeze = validateFile('stitch-freeze.schema.json', requireArtifact(dir, state, 'stitchFreeze', 'stitch-freeze.json'));
+    const parity = validateFile('stitch-parity-evidence.schema.json', requireArtifact(dir, state, 'stitchParityEvidence', 'stitch-parity-evidence.json'));
+    const reference = validateFile('visual-reference.schema.json', requireArtifact(dir, state, 'visualReference', 'visual-reference.json'));
+    if (freeze.approvedScreens.length > 1) {
+      validateMultiStitch(dir, state, freeze, reference);
+      console.log('APEX multi-screen machine Stitch seal validation passed');
+    } else {
+    if (parity.referenceImageHash !== reference.referenceImage.sha256 || parity.unmatched.length || !parity.strictPixelMatch) throw new Error('Stitch differs from the confirmed Demo baseline');
+    const inRun = file => fs.existsSync(file) && fs.realpathSync(file).startsWith(`${fs.realpathSync(dir)}${path.sep}`);
+    const referenceImage = resolveArtifact(dir, reference.referenceImage.path, '');
+    if (!inRun(referenceImage) || hashFile(referenceImage) !== reference.referenceImage.sha256) throw new Error('confirmed Demo reference image is missing, changed, or outside this run');
+    const structureFile = resolveArtifact(dir, parity.structuralVerification.contractPath, '');
+    if (!inRun(structureFile)) throw new Error('Stitch structure evidence must be inside this run');
+    validateStructuralContract(dir, parity, 'stitch-screen-export', parity.stitchImageHash);
+    const screen = freeze.approvedScreens.find(item => item.imageHash === parity.stitchImageHash);
+    if (!screen) throw new Error('Stitch parity is not bound to a frozen screen');
+    const screenImage = resolveArtifact(dir, screen.imagePath, '');
+    const screenHtml = resolveArtifact(dir, screen.htmlPath, '');
+    if (!inRun(screenImage) || hashFile(screenImage) !== screen.imageHash) throw new Error('frozen Stitch screen image is missing, changed, or outside this run');
+    if (!inRun(screenHtml) || hashFile(screenHtml) !== screen.htmlHash) throw new Error('frozen Stitch screen HTML is missing, changed, or outside this run');
+    const input = freeze.generationInput;
+    if (input?.origin !== 'apex-visual' || !input.references?.some(item => item.sha256 === reference.referenceImage.sha256) || input.contentLock?.sourceHash !== reference.contentLock.hash || input.layoutLock?.sourceHash !== reference.layoutLock.hash || input.analyticsLock?.sourceHash !== reference.analyticsLock.hash) throw new Error('Stitch input is not bound to the confirmed Demo content and layout');
+    console.log('APEX machine Stitch seal validation passed');
+    }
+  } else if (command === 'pre-gate2-machine-seal') {
+    const state = validateGate2(path.resolve(args[0] || '.'), { machineSealPending: true });
+    if (state.roleChain?.confirmationModel !== 'two-confirmations') throw new Error('machine seal is only available in the two-confirmation model');
+    console.log('APEX machine-seal Gate 2 validation passed');
+  } else if (command === 'visual-role-stage') {
+    const dir = path.resolve(args[0] || '.');
+    const state = validateFile('run-state.schema.json', path.join(dir, 'state.json'));
+    if (!state.roleChain?.enabled) throw new Error('visual role chain must be enabled');
+    validateRoleStage(dir, state, 'visual');
+    console.log('APEX visual role stage validation passed');
   } else if (command === 'pre-gate1') {
     validateGate1(path.resolve(args[0] || '.'));
     console.log('APEX pre-Gate 1 validation passed');

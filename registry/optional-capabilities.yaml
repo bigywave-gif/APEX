@@ -14,8 +14,6 @@ optional_capabilities:
       role: component-documentation-and-testing
     - name: stitch-design
       role: controlled-visual-generation
-    - name: taste-skill
-      role: anti-template-taste
     - name: better-icons
       role: icon-system-unification
     - name: react-bits

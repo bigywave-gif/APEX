@@ -36,6 +36,9 @@
 - `scripts/project-intake.mjs`
 - `scripts/contract-recorder.mjs`
 - `scripts/role-advisory.mjs`
+- `scripts/required-visual-skill.mjs`
+- `scripts/required-visual-skill-contract-test.mjs`
+- `scripts/visual-role-skill-integration-test.mjs`
 - `scripts/role-advisory-contract-test.mjs`
 - `scripts/contract-verifier.mjs`
 - `scripts/verification-planner.mjs`

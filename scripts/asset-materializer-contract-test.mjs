@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -18,8 +19,11 @@ try {
   const runDir = path.join(root, '.apex', 'runs', 'run-assets');
   const stateFile = path.join(runDir, 'state.json');
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  fs.mkdirSync(path.join(runDir, 'visual-sandbox'), { recursive: true }); fs.mkdirSync(path.join(runDir, 'presentations'), { recursive: true }); fs.writeFileSync(path.join(runDir, 'visual-sandbox', 'index.html'), '<main>asset demo</main>'); fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ entrypoint: 'visual-sandbox/index.html' })); fs.writeFileSync(path.join(runDir, 'visual-sandbox-runtime.json'), JSON.stringify({ runId: 'run-assets', runtimeRoot: 'visual-sandbox', url: 'http://127.0.0.1:4173/', status: 'running' })); fs.writeFileSync(path.join(runDir, 'runtime-demo.json'), JSON.stringify({ url: 'http://127.0.0.1:4173/' })); const sha = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`; fs.writeFileSync(path.join(runDir, 'presentations', 'runtime-demo.json'), JSON.stringify({ schemaVersion: '3.0', type: 'runtime-demo-presentation', projectId: `project_${crypto.createHash('sha256').update(root).digest('hex').slice(0, 24)}`, runId: 'run-assets', sessionId: 'asset-session', url: 'http://127.0.0.1:4173/', runtimeDemo: { sha256: sha(path.join(runDir, 'runtime-demo.json')) }, visualSandboxRuntime: { sha256: sha(path.join(runDir, 'visual-sandbox-runtime.json')) }, visualSandboxFiles: { sha256: sha(path.join(runDir, 'visual-sandbox-files.json')) } }));
+  // This isolated materialization fixture seeds historical pre-confirmation gates.
+  state.roleChain.confirmationModel = 'gate-summary-only';
   state.gates.gate1 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] };
-  state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.locks.effectApproved = true; state.locks.visualApproved = true; state.locks.stitchSkipped = true; state.phase = 'G-07 COMPILE'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; state.artifacts.visualSourceManifest = 'visual-source-manifest.json'; state.artifacts.runtimeSourceLock = 'runtime-source-lock.json';
+  state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.locks.effectApproved = true; state.locks.visualApproved = true; state.locks.stitchSkipped = true; state.phase = 'G-07 COMPILE'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; state.artifacts.visualSourceManifest = 'visual-source-manifest.json'; state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.runtimeDemo = 'runtime-demo.json'; state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; state.artifacts.runtimeDemoPresentation = 'presentations/runtime-demo.json';
   fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ sourceSelections: [
     { id: 'lucide-alert', visualNodes: ['alert-icon'], kind: 'icon', sourceType: 'approved-candidate', sourceId: 'lucide', resourceId: 'triangle-alert.svg', version: '0.468.0', materialization: 'inline-transfer', parameters: {} },
     { id: 'layout', kind: 'layout', visualNodes: ['alert-icon'] }, { id: 'component', kind: 'component', visualNodes: ['alert-icon'] }, { id: 'style', kind: 'style', visualNodes: ['alert-icon'] }, { id: 'font', kind: 'font', visualNodes: ['alert-icon'] },
@@ -31,7 +35,7 @@ try {
   const iconHash = `sha256:${(await import('node:crypto')).createHash('sha256').update(fs.readFileSync(icon)).digest('hex')}`;
   fs.writeFileSync(path.join(runDir, 'runtime-source-lock.json'), JSON.stringify({ schemaVersion: '3.0', projectRoot: root, runtimeRoot: 'visual-sandbox', sourceKind: 'visual-sandbox', patterns: [{ id: 'lucide-alert-pattern', sourceSelectionId: 'lucide-alert', visualNodes: ['alert-icon'], package: 'lucide', version: '0.468.0', componentPath: 'node_modules/lucide/icons/triangle-alert.svg', stylePaths: ['node_modules/lucide/icons/triangle-alert.svg'], props: {}, completeStyle: true, noCssPatch: true, files: [{ path: 'node_modules/lucide/icons/triangle-alert.svg', sha256: iconHash }] }] }));
   fs.writeFileSync(path.join(runDir, 'visual-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', sources: [{ id: 'lucide-alert-source', planSourceSelectionId: 'lucide-alert', materialization: 'inline-transfer', resolvedFiles: [{ path: 'node_modules/lucide/icons/triangle-alert.svg', sha256: iconHash }] }] }));
-  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  state.locks.stitchSkipped = false; fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`); const presentationAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'present_runtime_demo']), 'runtime Demo presentation authorization'); expect(run(router, ['present-runtime-demo', root, 'run-assets', 'asset-session', presentationAuth.authorizationRef, 'asset-demo']), 'runtime Demo presentation'); const presentedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); presentedState.locks.stitchSkipped = true; presentedState.locks.stitchApproved = true; presentedState.phase = 'G-07 COMPILE'; fs.writeFileSync(stateFile, `${JSON.stringify(presentedState, null, 2)}\n`);
   const selections = path.join(root, 'materialization-selection.json');
   fs.writeFileSync(selections, JSON.stringify({ items: [{ selectionId: 'lucide-alert', sourcePath: icon, projectPath: 'src/icons/triangle-alert.svg', license: 'ISC' }] }));
   const collectAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'compile_visual_bundle']), 'collect authorization');

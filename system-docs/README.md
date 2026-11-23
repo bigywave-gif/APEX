@@ -8,10 +8,6 @@
 
 ## 当前主文档清单
 
-### 规划中的改造方案
-
-- [APEX 4.45.0 综合改造方案](apex-4.45.0-improvement-proposal.md)：目标版本与实施计划，尚不代表当前运行行为或已发布版本。
-
 ### 独立 PDF 白皮书
 
 - [APEX-Product-Design-and-Technical-Architecture.pdf](../output/pdf/APEX-Product-Design-and-Technical-Architecture.pdf)
@@ -27,8 +23,14 @@
 
 说明：
 
-- 面向产品、设计、前后端与测试团队，统一说明规范接入、三次确认、效果图与 Stitch 的双视觉真相源、工程追踪、质量证据和发布边界。
-- 严格复刻采用 Gate 1 同源视觉合同、暂存 Freeze、自动结构合同、Seal 与效果图→Stitch→代码两段零差异 Gate；详细规范见 core/runtime/strict-replica.md。
+- 面向产品、设计、前后端与测试团队，统一说明规范接入、两次用户确认、可交互 Demo、可选 Stitch、工程追踪、质量证据和发布边界。
+- 实现必须绑定已确认 Demo；选择 Stitch 时还需验证 Stitch 与 Demo 的一致性，出现差异时提供明确处理选择；详细规范见 core/runtime/strict-replica.md。
+
+### 4.45.0 改造方案
+
+- [apex-4.45.0-improvement-proposal.md](apex-4.45.0-improvement-proposal.md)
+
+说明：记录改造目标与验收要求；方案状态和运行能力以实际代码及验证证据为准。
 
 ### 产品文档
 
@@ -47,14 +49,14 @@
 - 说明 APEX 的系统分层、调用链、状态机执行路径、更新边界、宿主关系和关键运行细节。
 - 本文档包含架构图、流程图和细节说明。
 
-### 专业角色链目标规范
+### 专业角色链治理
 
 - [受控专业角色链治理](../core/runtime/agency-role-chain-governance.md)
 
 说明：
 
 - 定义基于 agency-agents 的产品、设计、前端与测试角色如何在 APEX Router 内受控串联。
-- 本文是目标规范；在相关 Schema、受控脚本、评测与发布审计实现前，不改变当前 APEX 的运行行为。
+- 角色注册、受控任务、advisory 和就绪校验已由 Core 实现；具体能力与验收状态以当前代码和验证证据为准。
 
 ### 部署与接入文档
 

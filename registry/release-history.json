@@ -2036,6 +2036,402 @@
         "scripts/router-contract-test.mjs"
       ],
       "releasedAt": "2026-09-21T07:10:45.734Z"
+    },
+    {
+      "from": "4.37.5",
+      "to": "4.38.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/run-state.schema.json",
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/codex-session-bridge.mjs",
+        "scripts/router-contract-test.mjs",
+        "scripts/workflow-node-registry.mjs"
+      ],
+      "releasedAt": "2026-09-22T12:51:52.480Z"
+    },
+    {
+      "from": "4.38.0",
+      "to": "4.38.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/apex-router.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-22T12:55:53.851Z"
+    },
+    {
+      "from": "4.38.1",
+      "to": "4.38.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/asset-materializer-contract-test.mjs",
+        "scripts/visual-source-contract-test.mjs"
+      ],
+      "releasedAt": "2026-09-22T12:59:41.789Z"
+    },
+    {
+      "from": "4.38.2",
+      "to": "4.39.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "package.json",
+        "scripts/apex-action.mjs",
+        "scripts/apex-recover.mjs",
+        "scripts/apex-router.mjs",
+        "scripts/confirmation-presentation.mjs",
+        "scripts/contract-recorder.mjs",
+        "scripts/role-advisory.mjs",
+        "scripts/router-contract-test.mjs",
+        "scripts/run-migrate.mjs",
+        "scripts/visual-execution-plan.mjs",
+        "scripts/apex-reconcile.mjs",
+        "scripts/run-ledger-contract-test.mjs",
+        "scripts/run-ledger.mjs"
+      ],
+      "releasedAt": "2026-10-10T08:56:46.453Z"
+    },
+    {
+      "from": "4.39.0",
+      "to": "4.39.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/strict-replica.mjs",
+        "scripts/structure-contract.mjs",
+        "scripts/visual-parity.mjs"
+      ],
+      "releasedAt": "2026-10-10T08:59:12.276Z"
+    },
+    {
+      "from": "4.39.1",
+      "to": "4.40.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/role-advisory.schema.json",
+        "package.json",
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-action.mjs",
+        "scripts/apex-recover.mjs",
+        "scripts/apex-router.mjs",
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs",
+        "scripts/role-quality-evaluator.mjs",
+        "scripts/run-ledger-contract-test.mjs",
+        "scripts/run-ledger.mjs",
+        "scripts/agent-runtime-contract-test.mjs",
+        "scripts/agent-runtime.mjs"
+      ],
+      "releasedAt": "2026-10-10T10:22:01.298Z"
+    },
+    {
+      "from": "4.40.0",
+      "to": "4.40.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/agent-runtime-contract-test.mjs",
+        "scripts/role-advisory.mjs",
+        "scripts/run-ledger.mjs"
+      ],
+      "releasedAt": "2026-10-10T10:24:12.032Z"
+    },
+    {
+      "from": "4.40.1",
+      "to": "4.40.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/role-advisory-contract-test.mjs"
+      ],
+      "releasedAt": "2026-10-10T10:26:05.144Z"
+    },
+    {
+      "from": "4.40.2",
+      "to": "4.41.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/apex-router.mjs",
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs",
+        "scripts/router-contract-test.mjs"
+      ],
+      "releasedAt": "2026-10-10T10:30:58.856Z"
+    },
+    {
+      "from": "4.41.0",
+      "to": "4.42.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/role-advisory.schema.json",
+        "scripts/agent-runtime-contract-test.mjs",
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs",
+        "scripts/run-ledger.mjs"
+      ],
+      "releasedAt": "2026-10-10T10:34:04.090Z"
+    },
+    {
+      "from": "4.42.0",
+      "to": "4.42.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/role-quality-evaluator.mjs"
+      ],
+      "releasedAt": "2026-10-10T10:37:02.881Z"
+    },
+    {
+      "from": "4.42.1",
+      "to": "4.43.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/existing-baseline.schema.json",
+        "scripts/existing-code-reference.mjs"
+      ],
+      "releasedAt": "2026-10-10T10:58:33.391Z"
+    },
+    {
+      "from": "4.43.0",
+      "to": "4.43.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/preflight.mjs"
+      ],
+      "releasedAt": "2026-10-10T11:03:06.480Z"
+    },
+    {
+      "from": "4.43.1",
+      "to": "4.43.2",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "package.json",
+        "scripts/preflight-contract-test.mjs"
+      ],
+      "releasedAt": "2026-10-10T11:06:27.086Z"
+    },
+    {
+      "from": "4.43.2",
+      "to": "4.43.3",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs"
+      ],
+      "releasedAt": "2026-10-10T11:12:03.442Z"
+    },
+    {
+      "from": "4.43.3",
+      "to": "4.43.4",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/role-quality-evaluator.mjs"
+      ],
+      "releasedAt": "2026-10-10T11:14:05.888Z"
+    },
+    {
+      "from": "4.43.4",
+      "to": "4.43.5",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs"
+      ],
+      "releasedAt": "2026-10-10T11:16:13.004Z"
+    },
+    {
+      "from": "4.43.5",
+      "to": "4.44.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "scripts/apex-recover.mjs",
+        "scripts/apex-router.mjs",
+        "scripts/project-intake.mjs",
+        "scripts/router-contract-test.mjs",
+        "scripts/run-ledger.mjs",
+        "scripts/workflow-node-registry.mjs"
+      ],
+      "releasedAt": "2026-10-10T11:25:21.612Z"
+    },
+    {
+      "from": "4.44.0",
+      "to": "4.44.1",
+      "level": "patch",
+      "reason": "compatible APEX runtime implementation fix",
+      "changed": [
+        "scripts/agent-runtime-contract-test.mjs",
+        "scripts/run-ledger.mjs"
+      ],
+      "releasedAt": "2026-10-10T11:28:22.528Z"
+    },
+    {
+      "from": "4.44.1",
+      "to": "4.45.0",
+      "level": "minor",
+      "reason": "materially extended APEX runtime capability or contract",
+      "changed": [
+        "core/runtime/schemas/canvas-selection.schema.json",
+        "core/runtime/schemas/design-candidates.schema.json",
+        "core/runtime/schemas/role-advisory.schema.json",
+        "core/runtime/schemas/run-state.schema.json",
+        "core/runtime/schemas/runtime-source-lock.schema.json",
+        "core/runtime/schemas/runtime-visual-baseline.schema.json",
+        "core/runtime/schemas/stitch-freeze.schema.json",
+        "core/runtime/schemas/verification-plan.schema.json",
+        "core/runtime/schemas/visual-execution-plan.schema.json",
+        "core/runtime/schemas/visual-reference.schema.json",
+        "core/runtime/schemas/visual-source-manifest.schema.json",
+        "package.json",
+        "runtime/host-bridges/codex-skill/SKILL.md",
+        "scripts/agent-runtime-contract-test.mjs",
+        "scripts/agent-runtime.mjs",
+        "scripts/apex-action.mjs",
+        "scripts/apex-recover.mjs",
+        "scripts/apex-router.mjs",
+        "scripts/apex-validate.mjs",
+        "scripts/asset-materializer-contract-test.mjs",
+        "scripts/asset-resolver.mjs",
+        "scripts/baseline-collector.mjs",
+        "scripts/browser-capture.mjs",
+        "scripts/bundle-compiler.mjs",
+        "scripts/contract-recorder.mjs",
+        "scripts/demo-source-compiler-contract-test.mjs",
+        "scripts/demo-source-compiler.mjs",
+        "scripts/existing-code-reference.mjs",
+        "scripts/experience-evaluator.mjs",
+        "scripts/preflight-contract-test.mjs",
+        "scripts/preflight.mjs",
+        "scripts/project-intake.mjs",
+        "scripts/quality-evidence.mjs",
+        "scripts/role-advisory-contract-test.mjs",
+        "scripts/role-advisory.mjs",
+        "scripts/router-contract-test.mjs",
+        "scripts/run-ledger-contract-test.mjs",
+        "scripts/run-ledger.mjs",
+        "scripts/runtime-materializer-contract-test.mjs",
+        "scripts/runtime-visual-baseline-contract-test.mjs",
+        "scripts/runtime-visual-baseline.mjs",
+        "scripts/scope-boundary-contract-test.mjs",
+        "scripts/scope-boundary.mjs",
+        "scripts/stability-evidence.mjs",
+        "scripts/stitch-sync.mjs",
+        "scripts/stitch-ui-importer.mjs",
+        "scripts/strict-replica.mjs",
+        "scripts/structure-contract.mjs",
+        "scripts/trajectory-evaluator.mjs",
+        "scripts/verification-orchestrator.mjs",
+        "scripts/verification-planner.mjs",
+        "scripts/visual-execution-plan.mjs",
+        "scripts/visual-parity.mjs",
+        "scripts/visual-reference-compiler.mjs",
+        "scripts/visual-sandbox-dependency.mjs",
+        "scripts/visual-sandbox-runtime-contract-test.mjs",
+        "scripts/visual-sandbox-runtime.mjs",
+        "scripts/visual-sandbox-writer-contract-test.mjs",
+        "scripts/visual-sandbox-writer.mjs",
+        "scripts/visual-source-contract-test.mjs",
+        "scripts/visual-source.mjs",
+        "scripts/workflow-node-registry-contract-test.mjs",
+        "scripts/workflow-node-registry.mjs",
+        "scripts/agent-attempt-usage-test.mjs",
+        "scripts/agent-budget-reservation-test.mjs",
+        "scripts/agent-concurrency-contract-test.mjs",
+        "scripts/bridge-confirmation-contract-test.mjs",
+        "scripts/budget-recovery-router-test.mjs",
+        "scripts/cancelled-action-race-test.mjs",
+        "scripts/cancelled-operation-finalizer-test.mjs",
+        "scripts/cancelled-operation-finalizer.mjs",
+        "scripts/chat-demo-contract-test.mjs",
+        "scripts/chat-demo.mjs",
+        "scripts/combined-plan-contract-test.mjs",
+        "scripts/controlled-subprocess-test.mjs",
+        "scripts/controlled-subprocess.mjs",
+        "scripts/default-confirmation-contract-test.mjs",
+        "scripts/design-capability-contract.mjs",
+        "scripts/design-contract-evidence-test.mjs",
+        "scripts/design-contract-evidence.mjs",
+        "scripts/existing-baseline-browser-test.mjs",
+        "scripts/external-submission-concurrency-test.mjs",
+        "scripts/external-submission-intent-test.mjs",
+        "scripts/formal-auth-browser-test.mjs",
+        "scripts/formal-direct-progress.mjs",
+        "scripts/formal-interaction-evidence.mjs",
+        "scripts/formal-interaction.mjs",
+        "scripts/formal-route-coverage-test.mjs",
+        "scripts/formal-route-coverage.mjs",
+        "scripts/formal-stitch-progress.mjs",
+        "scripts/formal-task-coverage-test.mjs",
+        "scripts/functional-freeze-compiler.mjs",
+        "scripts/implementation-coverage-test.mjs",
+        "scripts/implementation-coverage.mjs",
+        "scripts/implementation-reference.mjs",
+        "scripts/implementation-registration-contract-test.mjs",
+        "scripts/implementation-registration.mjs",
+        "scripts/implementation-seal-test.mjs",
+        "scripts/implementation-seal.mjs",
+        "scripts/industry-review-progress-test.mjs",
+        "scripts/industry-review-progress.mjs",
+        "scripts/interactive-demo-browser-test.mjs",
+        "scripts/interactive-demo-contract-test.mjs",
+        "scripts/interactive-demo-test-fixture.mjs",
+        "scripts/interactive-demo.mjs",
+        "scripts/product-to-demo-browser-test.mjs",
+        "scripts/product-to-visual-handoff-test.mjs",
+        "scripts/project-external-inspect.mjs",
+        "scripts/project-external-registry-test.mjs",
+        "scripts/project-external-registry.mjs",
+        "scripts/quality-measurement-lib.mjs",
+        "scripts/quality-measurement-test.mjs",
+        "scripts/quality-measurement.mjs",
+        "scripts/quality-workflow-test.mjs",
+        "scripts/quality-workflow.mjs",
+        "scripts/release-version-cache-test.mjs",
+        "scripts/required-visual-skill-contract-test.mjs",
+        "scripts/required-visual-skill.mjs",
+        "scripts/responsive-evidence-test.mjs",
+        "scripts/responsive-evidence.mjs",
+        "scripts/role-summary-binding-test.mjs",
+        "scripts/role-summary-binding.mjs",
+        "scripts/run-ledger-init-race-test.mjs",
+        "scripts/run-metrics-test.mjs",
+        "scripts/run-metrics.mjs",
+        "scripts/runtime-baseline-contract-test.mjs",
+        "scripts/runtime-baseline-contract.mjs",
+        "scripts/sitewide-baseline-browser-test.mjs",
+        "scripts/sitewide-plan-browser-test.mjs",
+        "scripts/stitch-adaptation-test.mjs",
+        "scripts/stitch-adaptation.mjs",
+        "scripts/stitch-mock-server-fixture.mjs",
+        "scripts/stitch-screen-binding-test.mjs",
+        "scripts/stitch-screen-binding.mjs",
+        "scripts/stitch-screen-progress.mjs",
+        "scripts/stitch-submission-contract-test.mjs",
+        "scripts/stitch-upload-contract-test.mjs",
+        "scripts/structure-evidence.mjs",
+        "scripts/verification-policy-test.mjs",
+        "scripts/verification-policy.mjs",
+        "scripts/visual-quality-evidence-test.mjs",
+        "scripts/visual-quality-evidence.mjs",
+        "scripts/visual-reference-chart-contract-test.mjs",
+        "scripts/visual-role-skill-integration-test.mjs"
+      ],
+      "releasedAt": "2026-11-23T13:27:56.703Z"
     }
   ]
 }

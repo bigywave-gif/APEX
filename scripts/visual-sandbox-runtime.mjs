@@ -17,7 +17,13 @@ function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true
 function hash(file) { return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`; }
 function inside(root, candidate) { const resolved = path.resolve(root, candidate); return resolved.startsWith(`${path.resolve(root)}${path.sep}`) ? resolved : null; }
 function contentType(file) { return ({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.woff2': 'font/woff2' })[path.extname(file).toLowerCase()] || 'application/octet-stream'; }
-async function availablePort() { return await new Promise((resolve, reject) => { const probe = net.createServer(); probe.once('error', reject); probe.listen(0, '127.0.0.1', () => { const address = probe.address(); probe.close(error => error ? reject(error) : resolve(address.port)); }); }); }
+function bindHost(value) {
+  const host = value || '127.0.0.1';
+  if (!['127.0.0.1', '::1'].includes(host)) die('runtime may bind only to the loopback addresses 127.0.0.1 or ::1');
+  return host;
+}
+function loopbackUrl(host, port) { return `http://${host.includes(':') ? `[${host}]` : host}:${port}/`; }
+async function availablePort(host) { return await new Promise((resolve, reject) => { const probe = net.createServer(); probe.once('error', reject); probe.listen(0, host, () => { const address = probe.address(); probe.close(error => error ? reject(error) : resolve(address.port)); }); }); }
 async function reachable(url) { return await new Promise(resolve => { const request = http.get(url, response => { response.resume(); resolve(response.statusCode === 200); }); request.setTimeout(2500, () => { request.destroy(); resolve(false); }); request.on('error', () => resolve(false)); }); }
 function assertCurrentRun(runDir) {
   const projectRoot = path.resolve(process.env.APEX_ROUTER_PROJECT_ROOT || '');
@@ -27,11 +33,11 @@ function assertCurrentRun(runDir) {
   if (fs.realpathSync(runDir) !== expected) die('runtime may only start the current project-local run');
   return { projectRoot: fs.realpathSync(projectRoot), runId };
 }
-const [command, arg, portArg, serviceFlag, serviceRunId] = process.argv.slice(2);
+const [command, arg, portArg, serviceFlag, serviceRunId, bindFlag, requestedHost] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command === 'serve') {
-  const root = path.resolve(arg || ''); const port = Number(portArg);
-  if (!root || !fs.existsSync(root) || !Number.isInteger(port) || port < 1024 || port > 65535 || serviceFlag !== '--apex-run-id' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(serviceRunId || '')) die('serve requires an existing sandbox root, a valid port, and a run identity');
+  const root = path.resolve(arg || ''); const port = Number(portArg); const host = bindHost(bindFlag ? (bindFlag === '--bind-host' ? requestedHost : null) : null);
+  if (!root || !fs.existsSync(root) || !Number.isInteger(port) || port < 1024 || port > 65535 || serviceFlag !== '--apex-run-id' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(serviceRunId || '') || (bindFlag && bindFlag !== '--bind-host')) die('serve requires an existing sandbox root, a valid port, a run identity, and an optional loopback --bind-host');
   const realRoot = fs.realpathSync(root);
   const server = http.createServer((request, response) => {
     try {
@@ -43,11 +49,12 @@ if (command === 'serve') {
       fs.createReadStream(file).pipe(response);
     } catch { response.writeHead(400); response.end('Bad request'); }
   });
-  server.listen(port, '127.0.0.1');
+  server.listen(port, host);
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
   process.on('SIGINT', () => server.close(() => process.exit(0)));
 } else {
-  if (command !== 'start' || !arg) die('usage: start <run-dir>');
+  const host = bindHost(portArg ? (portArg === '--bind-host' ? serviceFlag : null) : null);
+  if (command !== 'start' || !arg || (portArg && portArg !== '--bind-host')) die('usage: start <run-dir> [--bind-host 127.0.0.1|::1]');
   const runDir = path.resolve(arg); try { requireRouterAction(runDir, 'generate_visual'); } catch (error) { die(error.message); }
   const { runId } = assertCurrentRun(runDir);
   const stateFile = path.join(runDir, 'state.json'), state = read(stateFile);
@@ -67,12 +74,12 @@ if (command === 'serve') {
       }
     } catch {}
   }
-  const port = await availablePort();
-  const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port), '--apex-run-id', runId], { detached: true, stdio: 'ignore' }); child.unref();
-  const url = `http://127.0.0.1:${port}/`;
+  const port = await availablePort(host);
+  const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port), '--apex-run-id', runId, '--bind-host', host], { detached: true, stdio: 'ignore' }); child.unref();
+  const url = loopbackUrl(host, port);
   let ready = false; for (let attempt = 0; attempt < 20 && !ready; attempt += 1) { await new Promise(resolve => setTimeout(resolve, 100)); ready = await reachable(url); }
   if (!ready) die('run-local Demo server did not become reachable');
-  const output = { schemaVersion: '3.0', runId, runtimeRoot: path.relative(runDir, sandboxRoot), entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), url, pid: child.pid, startedAt: new Date().toISOString(), status: 'running' };
+  const output = { schemaVersion: '3.0', runId, runtimeRoot: path.relative(fs.realpathSync(runDir), sandboxRoot), entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), url, pid: child.pid, startedAt: new Date().toISOString(), status: 'running' };
   write(runtimeFile, output);
   write(path.join(runDir, 'runtime-services.json'), { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: child.pid, url, runtimeRoot: output.runtimeRoot, startedAt: output.startedAt }] });
   state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);

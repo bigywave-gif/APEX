@@ -82,7 +82,7 @@
 
 其中：
 
-- `Product Design` 插件缺失时，必须退回 `google-design-md` + `impeccable` + `ui-ux-pro-max-skill` + `taste-skill` + 本地 adopted 规则继续执行
+- `Product Design` 插件缺失时，新 Run 仍须实际加载 `taste-skill`，结合本地 adopted 规则和任务适用的其他技能形成设计；不强制全部技能同时使用。设计契约、来源核验和真实验证仍需完成；必选技能缺失或加载失败时记录原因并修复。旧 Run 保持原模型要求。
 
 ## 当前判定
 

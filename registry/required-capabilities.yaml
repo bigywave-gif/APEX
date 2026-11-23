@@ -9,6 +9,9 @@ required_capabilities:
     - name: ui-ux-pro-max-skill
       role: page-level-visual-organization
       required: true
+    - name: taste-skill
+      role: anti-template-taste
+      required: true
     - name: doc-coauthoring
       role: open-source-freeform-feedback-preference-extraction
       required: true

@@ -89,8 +89,18 @@ if (command === 'evaluate') {
   if (frozenVerification && candidatesFile !== output) die('design candidates are frozen after visual approval; a different candidate file requires a visual revision');
   if (!fs.existsSync(strategyFile) || candidates.strategyHash !== hash(strategyFile)) die('design candidates must bind the current experience strategy');
   const ids = candidates.candidates?.map(item => item.id) || [];
-  if (ids.length < 2 || new Set(ids).size !== ids.length || !ids.includes(candidates.selectedCandidateId)) die('at least two uniquely identified candidates and a selectedCandidateId are required');
-  for (const item of candidates.candidates || []) { const image = path.resolve(runDir, item.image.path); if (!image.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(image) || hash(image) !== item.image.sha256) die(`candidate image is missing or hash-mismatched: ${item.id}`); }
+  const combined = state.roleChain?.confirmationModel === 'two-confirmations';
+  const minimum = combined ? 1 : 2;
+  if (ids.length < minimum || ids.some(id => !id) || new Set(ids).size !== ids.length || !ids.includes(candidates.selectedCandidateId)) die(`at least ${minimum} uniquely identified candidate(s) and a selectedCandidateId are required`);
+  if (combined) {
+    const baselineRef = state.artifacts?.runtimeVisualBaseline;
+    const baselineFile = baselineRef && path.resolve(runDir, baselineRef);
+    if (!state.locks?.visualPlanApproved || !baselineFile || !fs.existsSync(baselineFile) || !fs.realpathSync(baselineFile).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)) die('the confirmed visual plan and current runtime Demo baseline are required for candidate registration');
+    const reference = read(baselineFile).referenceImage;
+    const selected = candidates.candidates.find(item => item.id === candidates.selectedCandidateId);
+    if (!reference?.path || !reference.sha256 || !selected?.image?.path || selected.image.sha256 !== reference.sha256 || !fs.existsSync(path.resolve(runDir, reference.path)) || !fs.existsSync(path.resolve(runDir, selected.image.path)) || fs.realpathSync(path.resolve(runDir, selected.image.path)) !== fs.realpathSync(path.resolve(runDir, reference.path))) die('selected candidate must match the current confirmed-plan runtime Demo reference');
+  }
+  for (const item of candidates.candidates || []) { const image = path.resolve(runDir, item.image.path); if (!fs.existsSync(image) || !fs.realpathSync(image).startsWith(`${fs.realpathSync(runDir)}${path.sep}`) || hash(image) !== item.image.sha256) die(`candidate image is missing, outside the current run, or hash-mismatched: ${item.id}`); }
   if (!frozenVerification) {
     if (candidatesFile !== output) write(output, candidates);
     updateState(runDir, { designCandidates: 'design-candidates.json' });

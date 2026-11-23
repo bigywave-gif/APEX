@@ -9,13 +9,28 @@ const bridgeSync = path.join(apexRoot, 'scripts', 'sync-codex-bridge.mjs');
 const versionManager = path.join(apexRoot, 'scripts', 'apex-release-version.mjs');
 const pdfGenerator = path.join(apexRoot, 'scripts', 'generate-public-pdf.py');
 const python = process.env.APEX_PYTHON || 'python3';
+const results = [];
+const auditStartedAt = new Date().toISOString();
+const auditProgress = path.join(apexRoot, 'release-audit-progress.json');
 function hash(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function check(id, pass, detail) { return { id, status: pass ? 'passed' : 'failed', detail }; }
 function files(dir, filter, output = []) { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) files(file, filter, output); else if (filter(file)) output.push(file); } return output; }
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) { console.error(`Release audit must run from canonical root: ${canonicalApexRoot}`); process.exit(1); }
-const results = [];
-const versionResult = spawnSync(process.execPath, [versionManager, 'apply'], { encoding: 'utf8' });
-results.push(check('release-version', versionResult.status === 0, (versionResult.stderr || versionResult.stdout || 'version policy applied').trim()));
+function writeProgress() {
+  fs.writeFileSync(auditProgress, `${JSON.stringify({ schemaVersion: '1.0', status: 'running', startedAt: auditStartedAt, updatedAt: new Date().toISOString(), completedChecks: results.length, checks: results }, null, 2)}\n`);
+}
+writeProgress();
+const appendResult = results.push.bind(results);
+results.push = (...entries) => {
+  const length = appendResult(...entries);
+  writeProgress();
+  return length;
+};
+const progressTimer = setInterval(writeProgress, 1000);
+progressTimer.unref();
+// Auditing must not create a release or advance the version before checks pass.
+const versionResult = spawnSync(process.execPath, [versionManager, 'analyze'], { encoding: 'utf8' });
+results.push(check('release-version', versionResult.status === 0, (versionResult.stderr || versionResult.stdout || 'version policy analyzed').trim()));
 const bridgeSyncResult = spawnSync(process.execPath, [bridgeSync], { encoding: 'utf8' });
 results.push(check('global-bridge-published', bridgeSyncResult.status === 0, (bridgeSyncResult.stderr || bridgeSyncResult.stdout || 'ok').trim()));
 const manifest = fs.existsSync(path.join(apexRoot, 'manifest.yaml')) ? fs.readFileSync(path.join(apexRoot, 'manifest.yaml'), 'utf8') : '';
@@ -50,19 +65,19 @@ try {
   results.push(check('capability-registry', missing.length === 0, missing.length ? `missing capability entrypoints: ${missing.join(', ')}` : `${registry.capabilities.length} capability entrypoints present`));
 } catch (error) { results.push(check('capability-registry', false, error.message)); }
 const guardedActionScripts = {
-  analyze_requirement: ['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs'],
-  plan_visual: ['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs'],
+  analyze_requirement: ['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
+  plan_visual: ['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
   generate_visual: ['demo-source-compiler.mjs', 'visual-sandbox-writer.mjs', 'visual-sandbox-runtime.mjs', 'browser-capture.mjs', 'runtime-visual-baseline.mjs', 'visual-reference-compiler.mjs', 'visual-sandbox-dependency.mjs', 'experience-evaluator.mjs'],
-  'collect_existing_baseline': ['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs', 'role-advisory.mjs'],
-  'sync_stitch': ['stitch-sync.mjs', 'stitch-ui-importer.mjs'],
+  'collect_existing_baseline': ['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
+  'sync_stitch': ['stitch-sync.mjs', 'stitch-ui-importer.mjs', 'strict-replica.mjs', 'confirmation-presentation.mjs'],
   observe_stitch: ['stitch-sync.mjs'],
   validate_stitch: ['strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs'],
   'prepare_workspace': ['apex-workspace.mjs'],
-  'compile_visual_bundle': ['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs', 'role-advisory.mjs'],
+  'compile_visual_bundle': ['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs', 'role-advisory.mjs', 'contract-recorder.mjs', 'confirmation-presentation.mjs', 'agent-runtime.mjs'],
   implement: ['asset-materializer.mjs', 'runtime-materializer.mjs'],
-  verify: ['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'role-advisory.mjs'],
-  'record_context': ['contract-recorder.mjs', 'context-compiler.mjs'],
-  recover: ['apex-recover.mjs']
+  verify: ['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
+  'record_context': ['contract-recorder.mjs', 'context-compiler.mjs', 'evidence-provenance.mjs'],
+  recover: ['apex-recover.mjs', 'run-migrate.mjs']
 };
 for (const [action, scripts] of Object.entries(guardedActionScripts)) {
   const missingGuards = scripts.filter(script => {
@@ -93,16 +108,71 @@ for (const file of files(path.join(apexRoot, 'scripts'), file => file.endsWith('
 for (const file of files(path.join(apexRoot, 'core/runtime/schemas'), file => file.endsWith('.json'))) { try { JSON.parse(fs.readFileSync(file, 'utf8')); results.push(check(`json:${path.basename(file)}`, true, 'valid JSON')); } catch (error) { results.push(check(`json:${path.basename(file)}`, false, error.message)); } }
 const routerContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'router-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('router-contract', routerContract.status === 0, (routerContract.stderr || routerContract.stdout || 'ok').trim()));
+// v4.45 workflow regressions are release checks, not optional local commands.
+// Browser/end-to-end acceptance remains separately reported and is not
+// inferred from these focused contracts.
+for (const [name, script] of [
+  ['default-confirmation-contract', 'default-confirmation-contract-test.mjs'],
+  ['combined-plan-contract', 'combined-plan-contract-test.mjs'],
+  ['implementation-seal-contract', 'implementation-seal-test.mjs'],
+  ['agent-concurrency-contract', 'agent-concurrency-contract-test.mjs'],
+  ['run-ledger-init-race', 'run-ledger-init-race-test.mjs'],
+  ['cancelled-operation-finalizer', 'cancelled-operation-finalizer-test.mjs'],
+  ['controlled-subprocess', 'controlled-subprocess-test.mjs'],
+  ...(process.platform === 'win32' ? [] : [['cancelled-action-race', 'cancelled-action-race-test.mjs']]),
+  ['agent-attempt-usage-contract', 'agent-attempt-usage-test.mjs'],
+  ['release-version-cache-contract', 'release-version-cache-test.mjs'],
+  ['budget-recovery-router-contract', 'budget-recovery-router-test.mjs'],
+  ['agent-budget-reservation-contract', 'agent-budget-reservation-test.mjs'],
+  ['run-metrics-contract', 'run-metrics-test.mjs'],
+  ['design-contract-evidence', 'design-contract-evidence-test.mjs'],
+  ['role-summary-binding', 'role-summary-binding-test.mjs'],
+  ['bridge-confirmation-contract', 'bridge-confirmation-contract-test.mjs'],
+  ['product-to-visual-handoff', 'product-to-visual-handoff-test.mjs'],
+  ['implementation-registration-contract', 'implementation-registration-contract-test.mjs'],
+  ['responsive-evidence', 'responsive-evidence-test.mjs'],
+  ['verification-policy', 'verification-policy-test.mjs'],
+  ['quality-measurement', 'quality-measurement-test.mjs'],
+  ['quality-workflow', 'quality-workflow-test.mjs'],
+  ['industry-review-progress', 'industry-review-progress-test.mjs'],
+  ['visual-quality-evidence', 'visual-quality-evidence-test.mjs'],
+  ['implementation-coverage-contract', 'implementation-coverage-test.mjs'],
+  ['formal-route-coverage-contract', 'formal-route-coverage-test.mjs'],
+  ['formal-task-coverage-contract', 'formal-task-coverage-test.mjs'],
+  ['runtime-baseline-contract', 'runtime-baseline-contract-test.mjs'],
+  ['stitch-screen-binding-contract', 'stitch-screen-binding-test.mjs'],
+  ['external-submission-intent', 'external-submission-intent-test.mjs'],
+  ['external-submission-concurrency', 'external-submission-concurrency-test.mjs'],
+  ['project-external-registry', 'project-external-registry-test.mjs'],
+  ['stitch-upload-contract', 'stitch-upload-contract-test.mjs'],
+  ['stitch-adaptation', 'stitch-adaptation-test.mjs'],
+  ['stitch-submission-contract', 'stitch-submission-contract-test.mjs']
+]) {
+  const result = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', script)], { encoding: 'utf8', timeout: 120000 });
+  results.push(check(name, result.status === 0, (result.stderr || result.stdout || result.error?.message || 'no output').trim()));
+}
 const lifecycleHookContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'codex-lifecycle-hook-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('codex-lifecycle-hook-contract', lifecycleHookContract.status === 0, (lifecycleHookContract.stderr || lifecycleHookContract.stdout || 'ok').trim()));
 const roleAdvisoryContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'role-advisory-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('role-advisory-contract', roleAdvisoryContract.status === 0, (roleAdvisoryContract.stderr || roleAdvisoryContract.stdout || 'ok').trim()));
 const roleQualityAudit = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'role-quality-evaluator.mjs'), 'audit'], { encoding: 'utf8' });
 results.push(check('role-quality-evaluation', roleQualityAudit.status === 0, (roleQualityAudit.stderr || roleQualityAudit.stdout || 'ok').trim()));
+const runLedgerContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'run-ledger-contract-test.mjs')], { encoding: 'utf8' });
+results.push(check('run-ledger-contract', runLedgerContract.status === 0, (runLedgerContract.stderr || runLedgerContract.stdout || 'ok').trim()));
+const agentRuntimeContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'agent-runtime-contract-test.mjs')], { encoding: 'utf8' });
+results.push(check('agent-runtime-contract', agentRuntimeContract.status === 0, (agentRuntimeContract.stderr || agentRuntimeContract.stdout || 'ok').trim()));
+const visualSkillContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'required-visual-skill-contract-test.mjs')], { encoding: 'utf8' });
+results.push(check('required-visual-skill-contract', visualSkillContract.status === 0, (visualSkillContract.stderr || visualSkillContract.stdout || 'ok').trim()));
+const visualRoleSkillIntegration = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'visual-role-skill-integration-test.mjs')], { encoding: 'utf8' });
+results.push(check('visual-role-skill-integration', visualRoleSkillIntegration.status === 0, (visualRoleSkillIntegration.stderr || visualRoleSkillIntegration.stdout || 'ok').trim()));
+const preflightContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'preflight-contract-test.mjs')], { encoding: 'utf8' });
+results.push(check('preflight-contract', preflightContract.status === 0, (preflightContract.stderr || preflightContract.stdout || 'ok').trim()));
 const sandboxWriterContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'visual-sandbox-writer-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('visual-sandbox-writer-contract', sandboxWriterContract.status === 0, (sandboxWriterContract.stderr || sandboxWriterContract.stdout || 'ok').trim()));
 const sandboxRuntimeContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'visual-sandbox-runtime-contract-test.mjs')], { encoding: 'utf8', timeout: 30000 });
 results.push(check('visual-sandbox-runtime-contract', sandboxRuntimeContract.status === 0, (sandboxRuntimeContract.stderr || sandboxRuntimeContract.stdout || 'ok').trim()));
+const interactiveDemoContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'interactive-demo-contract-test.mjs')], { encoding: 'utf8' });
+results.push(check('interactive-demo-contract', interactiveDemoContract.status === 0, (interactiveDemoContract.stderr || interactiveDemoContract.stdout || 'ok').trim()));
 const demoSourceCompilerContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'demo-source-compiler-contract-test.mjs')], { encoding: 'utf8' });
 results.push(check('demo-source-compiler-contract', demoSourceCompilerContract.status === 0, (demoSourceCompilerContract.stderr || demoSourceCompilerContract.stdout || 'ok').trim()));
 const runtimeBaselineContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'runtime-visual-baseline-contract-test.mjs')], { encoding: 'utf8' });
@@ -117,6 +187,18 @@ const scopeBoundaryContract = spawnSync(process.execPath, [path.join(apexRoot, '
 results.push(check('scope-boundary-contract', scopeBoundaryContract.status === 0, (scopeBoundaryContract.stderr || scopeBoundaryContract.stdout || 'ok').trim()));
 const portableInstallContract = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'portable-install-contract-test.mjs')], { encoding: 'utf8', timeout: 120000 });
 results.push(check('portable-install-contract', portableInstallContract.status === 0, (portableInstallContract.stderr || portableInstallContract.stdout || 'ok').trim()));
+const preflightCheck = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'preflight.mjs'), '--json'], { encoding: 'utf8' });
+let preflightReady = false;
+let preflightDetail = (preflightCheck.stderr || preflightCheck.stdout || 'no preflight output').trim();
+if (preflightCheck.status === 0) {
+  try {
+    const preflight = JSON.parse(preflightCheck.stdout);
+    const invalidSkill = (preflight.required || []).find(item => item.status !== 'ready' || (item.expectedContentHash && item.sourceHashStatus !== 'matched'));
+    preflightReady = preflight.status === 'ready' && !invalidSkill;
+    preflightDetail = preflightReady ? `${(preflight.required || []).length} host Skills are source-locked and ready` : `preflight=${preflight.status}; invalidSkill=${invalidSkill?.name || 'unknown'}`;
+  } catch (error) { preflightDetail = `invalid preflight JSON: ${error.message}`; }
+}
+results.push(check('preflight-source-lock', preflightReady, preflightDetail));
 results.push(check('package-manifest', fs.existsSync(path.join(apexRoot, 'package.json')), 'package.json must expose install, preflight, test and release audit commands'));
 results.push(check('executable-preflight', fs.existsSync(path.join(apexRoot, 'scripts', 'preflight.mjs')), 'scripts/preflight.mjs must be present'));
 results.push(check('codex-lifecycle-hooks', fs.existsSync(path.join(apexRoot, 'scripts', 'codex-stop-continuation.mjs')) && fs.existsSync(path.join(apexRoot, 'scripts', 'install-codex-stop-hook.mjs')) && fs.existsSync(path.join(apexRoot, 'scripts', 'codex-pretool-session-refresh.mjs')) && fs.existsSync(path.join(apexRoot, 'scripts', 'install-codex-session-refresh-hook.mjs')), 'APEX must ship the Codex Stop continuation and PreToolUse session refresh hooks with installers'));
@@ -126,5 +208,7 @@ results.push(check('license-declaration', ['LICENSE', 'LICENSE.md', 'COPYING'].s
 const maintainerPath = path.join(path.sep, 'Users', 'fredyw');
 const hardCodedScripts = files(path.join(apexRoot, 'scripts'), file => file.endsWith('.mjs') && fs.readFileSync(file, 'utf8').includes(maintainerPath)).map(file => path.relative(apexRoot, file));
 results.push(check('portable-script-paths', hardCodedScripts.length === 0, hardCodedScripts.length ? `maintainer paths remain: ${hardCodedScripts.join(', ')}` : 'no maintainer-specific script paths'));
+clearInterval(progressTimer);
 const report = { schemaVersion: '3.0', auditedAt: new Date().toISOString(), status: results.every(item => item.status === 'passed') ? 'passed' : 'failed', checks: results };
 const output = path.join(apexRoot, 'release-audit.json'); fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`); console.log(JSON.stringify({ report: output, status: report.status, failed: results.filter(item => item.status === 'failed').map(item => item.id) })); if (report.status !== 'passed') process.exitCode = 2;
+fs.rmSync(auditProgress, { force: true });

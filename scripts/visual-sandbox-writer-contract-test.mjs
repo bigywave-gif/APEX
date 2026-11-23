@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import { demoContract, seedDesignContract } from './interactive-demo-test-fixture.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -20,14 +21,14 @@ try {
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   state.gates.gate1 = { status: 'passed', at: new Date().toISOString(), evidence: ['test'] };
   state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json';
-  fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ sourceSelections: [
+  fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ selectionAnalysis: seedDesignContract(runDir), sourceSelections: [
     { id: 'layout', kind: 'layout', visualNodes: ['demo-root'] }, { id: 'component', kind: 'component', visualNodes: ['demo-root'] },
     { id: 'style', kind: 'style', visualNodes: ['demo-root'] }, { id: 'font', kind: 'font', visualNodes: ['demo-root'] },
     { id: 'content', kind: 'content', visualNodes: ['demo-root'], parameters: { origin: 'test.intent', fields: ['title'], implementation: 'render title' } }
   ] }));
   fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
   const input = path.join(runDir, 'demo-source.json');
-  fs.writeFileSync(input, JSON.stringify({ schemaVersion: '3.0', entrypoint: 'src/App.tsx', files: [{ path: 'src/App.tsx', encoding: 'utf8', content: 'export const App = () => <main>Demo</main>;\n' }, { path: 'package.json', encoding: 'utf8', content: '{"private":true}' }] }));
+  fs.writeFileSync(input, JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'src/App.tsx', files: [{ path: 'src/App.tsx', encoding: 'utf8', content: 'export const App = () => <main>Demo</main>;\n' }, { path: 'package.json', encoding: 'utf8', content: '{"private":true}' }] }));
   const badInput = path.join(runDir, 'bad-demo-source.json');
   fs.writeFileSync(badInput, JSON.stringify({ schemaVersion: '3.0', entrypoint: '../src/App.tsx', files: [{ path: '../src/App.tsx', content: 'escape' }] }));
   const badAuthorization = expect(run(router, ['authorize', project, 'run-demo', 'session-demo', 'generate_visual']), 'authorize invalid writer');
@@ -36,7 +37,10 @@ try {
   const authorization = expect(run(router, ['authorize', project, 'run-demo', 'session-demo', 'generate_visual']), 'authorize writer');
   expect(run(action, ['run', project, 'run-demo', 'session-demo', authorization.authorizationRef, 'generate_visual', 'visual-sandbox-writer.mjs', 'materialize', runDir, input]), 'materialize sandbox Demo');
   if (!fs.existsSync(path.join(runDir, 'visual-sandbox', 'src', 'App.tsx')) || fs.existsSync(path.join(project, 'src', 'App.tsx')) || fs.readFileSync(path.join(project, 'server', 'api.js'), 'utf8') !== 'export const api = true;\n') throw new Error('Demo source escaped the project-local run sandbox or changed formal source');
+  const operationIndex = JSON.parse(fs.readFileSync(path.join(runDir, 'operations-index.json'), 'utf8'));
+  const writerReceipt = Object.values(operationIndex.receipts || {}).find(item => item.script === 'visual-sandbox-writer.mjs' && item.status === 'succeeded');
+  if (!writerReceipt?.outputFileHashes?.['visual-sandbox-files.json']) throw new Error('successful writer receipt must bind its run-local manifest even when the project path has a symlink alias');
   const manifest = JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-files.json'), 'utf8'));
   if (manifest.runtimeRoot !== 'visual-sandbox' || manifest.projectRoot !== fs.realpathSync(project) || manifest.files.length !== 2) throw new Error('sandbox materialization manifest is incomplete');
-  console.log(JSON.stringify({ status: 'passed', checks: 5 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 6 }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

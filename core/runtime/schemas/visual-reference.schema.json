@@ -11,17 +11,72 @@
     "analyticsLock",
     "designTokens",
     "componentContracts"
+  ],
+  "existingCodeReference": {
+    "type": "object",
+    "required": [
+      "sourceTreeHash",
+      "sourceFileCount",
+      "complete"
     ],
-    "existingCodeReference": {
-      "type": "object",
-      "required": ["sourceTreeHash", "sourceFileCount", "complete"],
-      "properties": { "sourceTreeHash": { "type": "string", "minLength": 1 }, "sourceFileCount": { "type": "integer", "minimum": 1 }, "complete": { "const": true } }
-    },
-    "existingPageSkeleton": {
-      "type": "object",
-      "required": ["sourceTreeHash", "skeletonHash", "mappings"],
-      "properties": { "sourceTreeHash": { "type": "string", "minLength": 1 }, "skeletonHash": { "type": "string", "minLength": 1 }, "mappings": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["visualNode", "sourcePath", "sourceMarker"], "properties": { "visualNode": { "type": "string", "minLength": 1 }, "sourcePath": { "type": "string", "minLength": 1 }, "sourceMarker": { "type": "string", "minLength": 1 } } } } }
-    },
+    "properties": {
+      "sourceTreeHash": {
+        "type": "string",
+        "minLength": 1
+      },
+      "sourceFileCount": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "complete": {
+        "const": true
+      }
+    }
+  },
+  "existingPageSkeleton": {
+    "type": "object",
+    "required": [
+      "sourceTreeHash",
+      "skeletonHash",
+      "mappings"
+    ],
+    "properties": {
+      "sourceTreeHash": {
+        "type": "string",
+        "minLength": 1
+      },
+      "skeletonHash": {
+        "type": "string",
+        "minLength": 1
+      },
+      "mappings": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": [
+            "visualNode",
+            "sourcePath",
+            "sourceMarker"
+          ],
+          "properties": {
+            "visualNode": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourcePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceMarker": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  },
   "properties": {
     "schemaVersion": {
       "const": "3.0"
@@ -152,7 +207,6 @@
         },
         "charts": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "object",
             "required": [

@@ -17,7 +17,7 @@ for (const id of staticStepIds) {
   if (!definition.inputPolicy || !definition.completion || !definition.failurePolicy || !definition.stateCommit || !definition.retry) throw new Error(`workflow contract lacks lifecycle policy for ${id}`);
 }
 
-for (const dynamicId of ['baseline-role-select', 'gate1-role-record', 'visual-role-summarize', 'implementation-role-repair', 'verify-role-select']) {
+for (const dynamicId of ['baseline-role-select', 'baseline-role-rebudget', 'gate1-role-record', 'visual-role-summarize', 'implementation-role-repair', 'verify-role-select']) {
   if (!workflowNode(dynamicId)) throw new Error(`dynamic role step missing workflow contract: ${dynamicId}`);
 }
-console.log(JSON.stringify({ status: 'passed', checkedStaticSteps: staticStepIds.length, checkedDynamicRolePatterns: 5 }));
+console.log(JSON.stringify({ status: 'passed', checkedStaticSteps: staticStepIds.length, checkedDynamicRolePatterns: 6 }));

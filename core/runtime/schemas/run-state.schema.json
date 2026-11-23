@@ -50,41 +50,120 @@
     "roleChain": {
       "type": "object",
       "properties": {
-        "version": { "type": "string" },
-        "enabled": { "type": "boolean" },
-        "confirmationModel": { "const": "gate-summary-only" }
+        "version": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "confirmationModel": {
+          "enum": [
+            "gate-summary-only",
+            "two-confirmations"
+          ]
+        }
       },
-      "required": ["version", "enabled", "confirmationModel"],
+      "required": [
+        "version",
+        "enabled",
+        "confirmationModel"
+      ],
       "additionalProperties": false
     },
     "lifecycle": {
-      "enum": ["active", "cancelled", "handed-off"]
+      "enum": [
+        "active",
+        "cancelled",
+        "handed-off"
+      ]
     },
     "handoff": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "properties": {
-        "checkpoint": { "enum": ["gate1", "visual-plan", "visual", "stitch", "implementation"] },
-        "decisionId": { "type": "string", "minLength": 1 },
-        "reason": { "type": "string", "minLength": 1 },
-        "receipt": { "type": "string", "minLength": 1 },
-        "at": { "type": "string", "minLength": 1 },
-        "resumePhase": { "type": "string", "minLength": 1 },
-        "resumedAt": { "type": "string", "minLength": 1 },
-        "resumeReason": { "type": "string", "minLength": 1 }
+        "checkpoint": {
+          "enum": [
+            "gate1",
+            "visual-plan",
+            "visual",
+            "stitch",
+            "implementation"
+          ]
+        },
+        "decisionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receipt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resumePhase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resumedAt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resumeReason": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "required": ["checkpoint", "decisionId", "reason", "receipt", "at", "resumePhase"],
+      "required": [
+        "checkpoint",
+        "decisionId",
+        "reason",
+        "receipt",
+        "at",
+        "resumePhase"
+      ],
       "additionalProperties": false
     },
     "cancellation": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "properties": {
-        "receipt": { "type": "string", "minLength": 1 },
-        "at": { "type": "string", "minLength": 1 },
-        "reason": { "type": "string", "minLength": 1 },
-        "sessionId": { "type": "string", "minLength": 1 },
-        "temporaryArtifactsReclaimed": { "const": true }
+        "receipt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temporaryArtifactsReclaimed": {
+          "const": true
+        }
       },
-      "required": ["receipt", "at", "reason", "sessionId", "temporaryArtifactsReclaimed"],
+      "required": [
+        "receipt",
+        "at",
+        "reason",
+        "sessionId",
+        "temporaryArtifactsReclaimed"
+      ],
       "additionalProperties": false
     },
     "phase": {
@@ -133,9 +212,15 @@
         "requirementsApproved": {
           "type": "boolean"
         },
-        "effectApproved": { "type": "boolean" },
-        "stitchApproved": { "type": "boolean" },
-        "implementationApproved": { "type": "boolean" },
+        "effectApproved": {
+          "type": "boolean"
+        },
+        "stitchApproved": {
+          "type": "boolean"
+        },
+        "implementationApproved": {
+          "type": "boolean"
+        },
         "visualApproved": {
           "type": "boolean"
         },
@@ -189,8 +274,18 @@
             "null"
           ]
         },
-        "gate1PresentationManifest": { "type": ["string", "null"] },
-        "gate1PresentationRegistration": { "type": ["string", "null"] },
+        "gate1PresentationManifest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gate1PresentationRegistration": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "existingBaseline": {
           "type": [
             "string",
@@ -204,30 +299,149 @@
           ]
         },
         "pageSkeleton": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "experienceStrategy": { "type": ["string", "null"] },
-        "roleAdvisoryManifest": { "type": ["string", "null"] },
-        "roleDecisionSummaries": { "type": "object", "additionalProperties": { "type": "string" } },
-        "motionContract": { "type": ["string", "null"] },
-        "motionEvidence": { "type": ["string", "null"] },
-        "visualPlanPresentationManifest": { "type": ["string", "null"] },
-        "demoSourceManifest": { "type": ["string", "null"] },
-        "visualSandboxFiles": { "type": ["string", "null"] },
-        "visualSandboxRuntime": { "type": ["string", "null"] },
-        "evidenceProvenance": { "type": ["string", "null"] },
-        "industryBenchmarkEvidence": { "type": ["string", "null"] },
-        "threeDEvidence": { "type": ["string", "null"] },
-        "motionCapabilityInventory": { "type": ["string", "null"] },
-        "motionCapabilitySelection": { "type": ["string", "null"] },
-        "motionImplementationMap": { "type": ["string", "null"] },
-        "visualExecutionPlan": { "type": ["string", "null"] },
-        "runtimeDemo": { "type": ["string", "null"] },
-        "visualSourceManifest": { "type": ["string", "null"] },
-        "runtimeMaterialization": { "type": ["string", "null"] },
-        "runtimeMaterializationAudit": { "type": ["string", "null"] },
-        "materializedAssets": { "type": ["string", "null"] },
-        "materializedAssetsAudit": { "type": ["string", "null"] },
+        "experienceStrategy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roleAdvisoryManifest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roleDecisionSummaries": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "motionContract": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "motionEvidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visualPlanPresentationManifest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "demoSourceManifest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visualSandboxFiles": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visualSandboxRuntime": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidenceProvenance": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "industryBenchmarkEvidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threeDEvidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "motionCapabilityInventory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "motionCapabilitySelection": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "motionImplementationMap": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visualExecutionPlan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeDemo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeDemoPresentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visualSourceManifest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeMaterialization": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeMaterializationAudit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "materializedAssets": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "materializedAssetsAudit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "domainModel": {
           "type": [
             "string",
@@ -294,6 +508,7 @@
             "null"
           ]
         },
+        "verificationInventory": { "type": ["string", "null"] },
         "verificationPlan": {
           "type": [
             "string",
@@ -312,6 +527,7 @@
             "null"
           ]
         },
+        "implementationRegistration": { "type": ["string", "null"] },
         "changeScope": {
           "type": [
             "string",
@@ -329,6 +545,12 @@
             "string",
             "null"
           ]
+        },
+        "visualScreenReferences": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -341,6 +563,32 @@
     "updatedAt": {
       "type": "string",
       "minLength": 1
+    },
+    "confirmationEpochs": {
+      "type": "object",
+      "properties": {
+        "gate1": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "visual-plan": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "demo": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stitch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "implementation": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     }
   },
   "$defs": {

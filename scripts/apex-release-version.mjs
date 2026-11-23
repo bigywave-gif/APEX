@@ -11,14 +11,18 @@ const baselineFile = path.join(root, 'registry', 'release-baseline.json');
 const historyFile = path.join(root, 'registry', 'release-history.json');
 const trackedRoots = ['core/runtime/schemas', 'scripts', 'runtime', 'skills', 'registry/capability-registry.json', 'package.json', 'manifest.yaml'];
 const ignored = new Set(['registry/release-baseline.json', 'registry/release-history.json', 'scripts/generate-public-pdf.py', 'scripts/release-audit.mjs', 'scripts/apex-release-version.mjs']);
+// Runtime bytecode is host-generated cache, not a versioned capability.
+// Ignore it in both current snapshots and older baselines that accidentally
+// recorded it, so a clean package does not trigger a false major release.
+function transient(file) { return file.split('/').includes('__pycache__') || /\.py[co]$/.test(file); }
 function read(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function walk(target, all = []) { const stat = fs.statSync(target); if (stat.isDirectory()) for (const item of fs.readdirSync(target)) walk(path.join(target, item), all); else all.push(target); return all; }
 function content(file) { const relative = path.relative(root, file); let value = fs.readFileSync(file); if (relative === 'manifest.yaml') value = Buffer.from(value.toString('utf8').replace(/^version:\s*[^\n]+/m, 'version: <managed>')); if (relative === 'package.json') { const pkg = JSON.parse(value.toString('utf8')); pkg.version = '<managed>'; value = Buffer.from(JSON.stringify(pkg)); } return crypto.createHash('sha256').update(value).digest('hex'); }
-function snapshot() { const files = trackedRoots.flatMap(item => walk(path.join(root, item))).map(file => path.relative(root, file)).filter(file => !ignored.has(file)).sort(); return Object.fromEntries(files.map(file => [file, content(path.join(root, file))])); }
+function snapshot() { const files = trackedRoots.flatMap(item => walk(path.join(root, item))).map(file => path.relative(root, file)).filter(file => !ignored.has(file) && !transient(file)).sort(); return Object.fromEntries(files.map(file => [file, content(path.join(root, file))])); }
 function currentVersion() { const hit = fs.readFileSync(manifest, 'utf8').match(/^version:\s*([^\s#]+)/m); if (!hit) throw new Error('manifest version is missing'); return hit[1].replace(/["']/g, ''); }
 function classify(previous, next) {
-  const changed = [...new Set([...Object.keys(previous), ...Object.keys(next)])].filter(file => previous[file] !== next[file]);
+  const changed = [...new Set([...Object.keys(previous), ...Object.keys(next)])].filter(file => !transient(file) && previous[file] !== next[file]);
   const removed = changed.filter(file => previous[file] && !next[file]);
   if (removed.length) return { level: 'major', changed, reason: 'removed versioned APEX capability or contract' };
   const weighted = changed.reduce((sum, file) => sum + (file.startsWith('scripts/') || file.startsWith('core/') || file.startsWith('registry/') ? 2 : 1), 0);

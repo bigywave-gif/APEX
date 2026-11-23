@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { commitRunState, readRunState } from './run-ledger.mjs';
 
 const hash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 const textHash = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
@@ -17,7 +18,7 @@ const [command, runArg, checkpoint] = process.argv.slice(2);
 if (command !== 'compile' || !runArg || !['stitch', 'implementation'].includes(checkpoint)) fail('usage: confirmation-presentation.mjs compile <run-dir> <stitch|implementation>');
 const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, checkpoint === 'stitch' ? 'sync_stitch' : 'compile_visual_bundle'); } catch (error) { fail(error.message); }
-const stateFile = path.join(runDir, 'state.json'), state = read(stateFile), artifacts = state.artifacts || {};
+const state = readRunState(runDir), artifacts = state.artifacts || {};
 const resolve = reference => { const file = path.resolve(runDir, reference || ''); if (!file.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(file)) fail(`required current-run artifact is missing: ${reference || '<unset>'}`); return file; };
 const list = (items, fallback) => (items || []).filter(Boolean).map(item => `- ${typeof item === 'string' ? item : item.id || item.path || item.visualNode || item.name}`).join('\n') || `- ${fallback}`;
 let body, sources, headings, sectionContracts, requiredFacts;
@@ -84,5 +85,5 @@ writeAtomically(path.join(runDir, manifestRef), `${JSON.stringify(manifest, null
 state.artifacts[`${checkpoint}Presentation`] = presentationRef;
 state.artifacts[`${checkpoint}PresentationManifest`] = manifestRef;
 state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString();
-writeAtomically(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+commitRunState(runDir, state, { reason: `${checkpoint}-presentation-recorded` });
 console.log(JSON.stringify({ presentation: path.join(runDir, presentationRef), manifest: path.join(runDir, manifestRef), checkpoint }));

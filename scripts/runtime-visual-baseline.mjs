@@ -2,6 +2,8 @@
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes a visual baseline rendered from complete package patterns or native Web sources. */
 import fs from 'node:fs';
+import { readChatPreview, demoPresentation } from './chat-demo.mjs';
+import { interactionSource, verifyDemoInteractions } from './interactive-demo.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -37,15 +39,23 @@ const evidencePath = path.join(runDir, 'evidence', 'runtime-browser-capture.json
 if (evidence.kind !== 'runtime' || evidence.status !== 'passed') die('a passed runtime browser capture is required before a runtime baseline can be frozen');
 const screen = evidence.evidence?.find(item => item.id === input.referenceScreenId && item.status === 'captured' && item.screenshot && item.domHtml);
 if (!screen) die('referenceScreenId must identify a captured browser screen with DOM evidence');
+let interactiveDemo;
+try { interactiveDemo = verifyDemoInteractions(runDir, evidence, screen.url, { requireJourneyLocation: runState.roleChain?.confirmationModel === 'two-confirmations' }); } catch (error) { die(error.message); }
 const motionSamples = evidence.motionSamples || [];
-if (motionSamples.length < 2 || motionSamples.some(item => item.status !== 'captured' || !item.screenshot)) die('at least two captured runtime motion samples are required');
+const requiresMotion = [...planSelections.values()].some(item => item.kind === 'motion') || input.patterns.some(item => item.animationPath);
+if ((requiresMotion || motionSamples.length) && (motionSamples.length < 2 || motionSamples.some(item => item.status !== 'captured' || !item.screenshot))) die('at least two captured runtime motion samples are required');
 if (motionSamples.some(item => !/^sha256:[a-f0-9]{64}$/.test(item.frameSha256 || ''))) die('runtime motion samples require a SHA-256 frame fingerprint from browser capture');
-if (new Set(motionSamples.map(item => item.frameSha256)).size < 2) die('runtime motion samples are visually identical; a static page cannot satisfy a motion baseline');
+if ((requiresMotion || motionSamples.length) && new Set(motionSamples.map(item => item.frameSha256)).size < 2) die('runtime motion samples are visually identical; a static page cannot satisfy a motion baseline');
 const ids = new Set(); const nodes = new Set();
 const patterns = input.patterns.map(pattern => {
-  if (!pattern?.id || ids.has(pattern.id) || !pattern.sourceSelectionId || !Array.isArray(pattern.visualNodes) || !pattern.visualNodes.length || !pattern.package || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(pattern.version) || !pattern.componentPath || !Array.isArray(pattern.stylePaths) || !pattern.stylePaths.length || pattern.completeStyle !== true || pattern.noCssPatch !== true || !pattern.props || typeof pattern.props !== 'object') die(`invalid complete pattern: ${pattern?.id || '<unknown>'}`);
+  if (!pattern?.id || ids.has(pattern.id) || !pattern.sourceSelectionId || !Array.isArray(pattern.visualNodes) || !pattern.visualNodes.length || !pattern.package || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(pattern.version) || !pattern.componentPath || !Array.isArray(pattern.stylePaths) || (pattern.stylePaths.length === 0 && planSelections.get(pattern.sourceSelectionId)?.kind !== 'motion') || pattern.completeStyle !== true || pattern.noCssPatch !== true || !pattern.props || typeof pattern.props !== 'object') die(`invalid complete pattern: ${pattern?.id || '<unknown>'}`);
   const selection = planSelections.get(pattern.sourceSelectionId); if (!selection || selection.sourceId !== pattern.package || selection.version !== pattern.version || !pattern.visualNodes.every(node => selection.visualNodes.includes(node))) die(`runtime pattern is not the exact source selected in the confirmed visual plan: ${pattern.id}`);
-  ids.add(pattern.id); for (const node of pattern.visualNodes) { if (nodes.has(node)) die(`visual node appears in more than one pattern: ${node}`); nodes.add(node); }
+  // A composed scene legitimately has more than one runtime pattern on the
+  // same visual node (for example, an ECharts relationship layer over a
+  // Three.js depth field).  Provenance is enforced by unique pattern IDs,
+  // exact selected source IDs, package versions, and file hashes below; node
+  // overlap alone is not a conflict.
+  ids.add(pattern.id); for (const node of pattern.visualNodes) nodes.add(node);
   const installed = packageFile(runtimeRoot, pattern.package); if (!fs.existsSync(installed)) die(`pattern package is not installed in the runtime source: ${pattern.package}`);
   if (read(installed).version !== pattern.version) die(`pattern package version is not exact: ${pattern.package}`);
   const files = [{ path: path.relative(runtimeRoot, installed), role: 'package-manifest' }, { path: pattern.componentPath, role: 'component' }, ...pattern.stylePaths.map(path => ({ path, role: 'style' })), ...(pattern.animationPath ? [{ path: pattern.animationPath, role: 'animation' }] : [])].map(file => { const target = inside(runtimeRoot, file.path); if (!target || !fs.existsSync(target)) die(`pattern file is missing or outside the runtime source: ${file.path}`); return { ...file, sha256: hash(target) }; });
@@ -55,11 +65,22 @@ const nativeSelections = [...planSelections.values()]
   .filter(selection => selection.materialization !== 'runtime-package')
   .map(selection => ({ id: selection.id, kind: selection.kind, sourceType: selection.sourceType, sourceId: selection.sourceId, resourceId: selection.resourceId, version: selection.version, materialization: selection.materialization, visualNodes: selection.visualNodes, parameters: selection.parameters }));
 if (!patterns.length && !nativeSelections.length) die('runtime baseline needs a complete package pattern or a native Web source selection');
+// A planned runtime package is a hard materialization contract. Treating it
+// as a generic native selection lets an old CSS-only sandbox pass after a
+// visual plan has selected Motion or another package-backed pattern.
+const requiredRuntimeSelections = [...planSelections.values()]
+  .filter(selection => selection.materialization === 'runtime-package');
+for (const selection of requiredRuntimeSelections) {
+  if (!patterns.some(pattern => pattern.sourceSelectionId === selection.id && pattern.package === selection.sourceId && pattern.version === selection.version)) {
+    die(`selected runtime package was not materialized as an exact complete pattern: ${selection.id}`);
+  }
+}
 // A screenshot may only be treated as a visual baseline when its DOM declares
 // every confirmed source that shaped it: layout, tokens, fonts, icons, charts,
 // components, and motion.  Runtime packages additionally need file-level proof.
 const expectedSourceSelections = [...planSelections.keys()];
-if (!Array.isArray(evidence.sourceSelectionIds) || !expectedSourceSelections.every(id => evidence.sourceSelectionIds.includes(id)) || evidence.evidence.some(item => !Array.isArray(item.sourceSelections) || !expectedSourceSelections.every(id => item.sourceSelections.includes(id)))) die('browser evidence is not DOM-bound to every confirmed layout, token, font, icon, chart, component, and motion source selection');
+const domBoundSelections = expectedSourceSelections.filter(id => planSelections.get(id)?.kind !== 'component');
+if (!Array.isArray(evidence.sourceSelectionIds) || !expectedSourceSelections.every(id => evidence.sourceSelectionIds.includes(id)) || evidence.evidence.some(item => !Array.isArray(item.sourceSelections) || !domBoundSelections.every(id => item.sourceSelections.includes(id)))) die('browser evidence is not DOM-bound to every confirmed layout, token, font, icon, chart, component, and motion source selection');
 const expectedSourceFiles = patterns.flatMap(pattern => (pattern.files || []).filter(file => file.role !== 'package-manifest').map(file => `${pattern.sourceSelectionId}:${file.sha256}`));
 if (evidence.evidence.some(item => !Array.isArray(item.sourceFiles) || !expectedSourceFiles.every(file => item.sourceFiles.includes(file)))) die('browser evidence is not DOM-bound to every exact source file used by the rendered patterns');
 const sourceLock = { schemaVersion: '3.0', projectRoot, runtimeRoot: sourceKind === 'project-installed' ? projectRoot : path.relative(runDir, runtimeRoot), sourceKind, patterns, nativeSelections };
@@ -81,8 +102,35 @@ if (runState.track === 'existing') {
   if (binding.sourceTreeHash !== skeleton.sourceTreeHash || binding.skeletonHash !== skeleton.skeletonHash || !Array.isArray(binding.mappings) || !binding.mappings.length || !binding.mappings.every(mapping => planSelections.has(mapping.sourceSelectionId) && Array.isArray(mapping.nodeIds) && mapping.nodeIds.length && mapping.nodeIds.every(id => knownNodes.has(id)))) die('Existing runtime Demo page-skeleton binding is incomplete or stale');
   if (![...planSelections.keys()].every(id => binding.mappings.some(mapping => mapping.sourceSelectionId === id))) die('Existing runtime Demo must bind every selected visual source to frozen page-skeleton nodes');
 }
-const baseline = { schemaVersion: '3.0', sourceLockHash: hash(lockFile), browserCapture: { path: 'evidence/runtime-browser-capture.json', sha256: hash(evidencePath) }, runtimeDemo: { url: screen.url, entryScreenId: screen.id, viewport: viewportClass, domHtml: screen.domHtml, sourceRoot: sourceKind === 'project-installed' ? projectRoot : path.relative(runDir, runtimeRoot) }, referenceImage: { path: screen.screenshot, sha256: hash(screenshot), viewport: viewportClass }, motionSamples: motionSamples.map(item => ({ id: item.id, screenshot: item.screenshot, frameSha256: item.frameSha256, timestampMs: item.timestampMs })) };
+// Freeze every captured view, not just the chosen cover screenshot. Screen
+// identities and actual bytes are needed to prove multi-page parity later.
+const capturedIds = new Set();
+const screenCaptures = (evidence.evidence || []).map(item => {
+  if (!item.id || capturedIds.has(item.id) || item.status !== 'captured' || !/^\d+x\d+$/.test(item.viewport || '') || !item.url || !item.screenshot || !item.domHtml) die('each runtime screen requires a unique id, URL, viewport, screenshot, and DOM');
+  capturedIds.add(item.id);
+  let actualUrl, expectedUrl;
+  try { actualUrl = new URL(item.url); expectedUrl = new URL(screen.url); } catch { die(`runtime screen URL is invalid: ${item.id}`); }
+  if (actualUrl.origin !== expectedUrl.origin) die(`runtime screen is outside the current Demo origin: ${item.id}`);
+  const shot = inside(runDir, item.screenshot), html = inside(runDir, item.domHtml);
+  if (!shot || !html || !fs.existsSync(shot) || !fs.existsSync(html) || !fs.realpathSync(shot).startsWith(`${fs.realpathSync(runDir)}${path.sep}`) || !fs.realpathSync(html).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)) die(`runtime screen evidence is missing or outside the run: ${item.id}`);
+  return { id: item.id, url: item.url, viewport: item.viewport, screenshot: { path: item.screenshot, sha256: hash(shot) }, dom: { path: item.domHtml, sha256: hash(html) } };
+});
+// Journey screenshots capture post-interaction states even in single-route SPAs.
+const journeysById = new Map(interactionSource(runDir).contract.journeys.map(journey => [journey.id, journey]));
+const journeyCaptures = evidence.interactiveDemo.journeys.map(item => {
+  const journey = journeysById.get(item.id);
+  if (!journey) die(`captured journey has no interaction contract: ${item.id}`);
+  if (!/^\d+x\d+$/.test(item.viewport || '') || !item.finalUrl) die(`captured journey needs its actual final URL and viewport: ${item.id}`);
+  let finalUrl, demoUrl;
+  try { finalUrl = new URL(item.finalUrl); demoUrl = new URL(screen.url); } catch { die(`captured journey final URL is invalid: ${item.id}`); }
+  if (finalUrl.origin !== demoUrl.origin) die(`captured journey ended outside the Demo origin: ${item.id}`);
+  return { id: item.id, kind: journey.kind, task: journey.task, route: journey.route, url: item.url, finalUrl: item.finalUrl, viewport: item.viewport, screenshot: item.screenshot, dom: item.dom };
+});
+const demoCaptureFile = path.join(runDir, 'evidence/demo-browser-capture.json'); write(demoCaptureFile, evidence);
+const baseline = { schemaVersion: '3.0', screenCaptures, journeyCaptures, sourceLockHash: hash(lockFile), browserCapture: { path: 'evidence/demo-browser-capture.json', sha256: hash(demoCaptureFile) }, runtimeDemo: { url: screen.url, entryScreenId: screen.id, viewport: viewportClass, domHtml: screen.domHtml, sourceRoot: sourceKind === 'project-installed' ? projectRoot : path.relative(runDir, runtimeRoot) }, referenceImage: { path: screen.screenshot, sha256: hash(screenshot), viewport: viewportClass }, motionSamples: motionSamples.map(item => ({ id: item.id, screenshot: item.screenshot, frameSha256: item.frameSha256, timestampMs: item.timestampMs })) };
 const baselineFile = path.join(runDir, 'runtime-visual-baseline.json'); write(baselineFile, baseline);
-const demoFile = path.join(runDir, 'runtime-demo.json'); write(demoFile, { schemaVersion: '3.0', runtimeVisualBaseline: 'runtime-visual-baseline.json', ...baseline.runtimeDemo, sourceLockHash: baseline.sourceLockHash, browserCaptureHash: baseline.browserCapture.sha256 });
+let chatPreview;
+try { chatPreview = readChatPreview(runDir, read(path.join(runDir, 'visual-sandbox-files.json'))); } catch (error) { die(error.message); }
+const demoFile = path.join(runDir, 'runtime-demo.json'); write(demoFile, { schemaVersion: '3.0', runtimeVisualBaseline: 'runtime-visual-baseline.json', ...baseline.runtimeDemo, ...interactiveDemo, interactionEvidence: { path: 'evidence/demo-browser-capture.json', sha256: hash(demoCaptureFile) }, ...(chatPreview ? { chatPreview } : {}), presentation: demoPresentation(runDir, { chatPreview }), sourceLockHash: baseline.sourceLockHash, browserCaptureHash: baseline.browserCapture.sha256 });
 const stateFile = path.join(runDir, 'state.json'), state = read(stateFile); state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.runtimeVisualBaseline = 'runtime-visual-baseline.json'; state.artifacts.runtimeDemo = 'runtime-demo.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
 console.log(JSON.stringify({ runtimeSourceLock: lockFile, runtimeVisualBaseline: baselineFile, runtimeDemo: demoFile, demoUrl: baseline.runtimeDemo.url, patterns: patterns.length, nativeSelections: nativeSelections.length }));

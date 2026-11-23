@@ -23,11 +23,13 @@ const actionScript = script => ({ kind: 'guarded-apex-action', script });
 const routerCommand = command => ({ kind: 'router-command', command });
 
 export const workflowNodes = Object.freeze({
+  'reconcile-run-integrity': node('recover', ['run-ledger.sqlite', 'state.json'], actionScript('apex-recover.mjs'), { inputPolicy: 'current-run-ledger-projection-and-operation-receipts-only', completion: 'reconciliation reports consistent; otherwise retain the typed repair-required receipt', failurePolicy: 'never resume a downstream gate while reconciliation remains repair-required', retry: 'repair the reported durable artifact, lineage, or Agent-job inconsistency before requesting another Router status' }),
   'capture-project-inventory': node('collect_existing_baseline', ['project-inventory.json'], actionScript('project-intake.mjs')),
   'freeze-code-reference': node('collect_existing_baseline', ['code-reference.json', 'page-skeleton.json'], actionScript('existing-code-reference.mjs')),
   'capture-existing-browser-baseline': node('collect_existing_baseline', ['evidence/existing-browser-capture.json'], actionScript('browser-capture.mjs')),
   'freeze-existing-baseline': node('collect_existing_baseline', ['existing-baseline.json'], actionScript('baseline-collector.mjs')),
   'freeze-change-scope': node('record_context', ['change-scope.json'], actionScript('contract-recorder.mjs')),
+  'compile-functional-freeze': node('collect_existing_baseline', ['functional-freeze.json'], actionScript('functional-freeze-compiler.mjs')),
   'continue-gate1-analysis': node('analyze_requirement', [], routerCommand('status')),
   'derive-intent-and-delivery': node('record_context', ['intent-brief.json', 'delivery-contract.json'], actionScript('context-compiler.mjs')),
   'record-domain-model': node('record_context', ['domain-model.json'], actionScript('contract-recorder.mjs')),
@@ -35,6 +37,7 @@ export const workflowNodes = Object.freeze({
   'evaluate-experience-strategy': node('analyze_requirement', ['experience-strategy.json', 'experience-quality-evidence.json'], actionScript('experience-evaluator.mjs')),
   'compile-gate1-presentation': node('analyze_requirement', ['gate1-presentation.md', 'gate1-presentation-manifest.json'], actionScript('contract-recorder.mjs')),
   'register-gate1-presentation': node('analyze_requirement', ['registrations/gate1-presentation-*.json'], routerCommand('register-gate1-presentation')),
+  'repair-gate1-validation': node('analyze_requirement', [], { kind: 'host-controlled-implementation' }, { completion: 'repair the specific failed pre-Gate-1 source through its authorized action and revalidate dependent artifacts', retry: 'do not repeat the same invalid inputs without repair' }),
   'compile-complete-visual-plan': node('plan_visual', ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json'], actionScript('visual-execution-plan.mjs')),
   'reopen-incomplete-existing-visual-plan': node('revoke_visual', ['visual-execution-plan.json'], routerCommand('transition revoke-stitch')),
   'restore-approved-visual-plan-after-package-identity-repair': node('repair_visual_source_identity', ['visual-execution-plan.json'], routerCommand('transition repair-visual-source-identity')),
@@ -47,21 +50,40 @@ export const workflowNodes = Object.freeze({
   'emit-runtime-visual-reference': node('generate_visual', ['visual-reference.json', 'gate1-visual-output.json'], actionScript('visual-reference-compiler.mjs')),
   'record-selected-runtime-design-candidate': node('generate_visual', ['design-candidates.json'], actionScript('experience-evaluator.mjs')),
   'register-runtime-demo': node('register_runtime_demo', ['registrations/runtime-demo-*.json'], routerCommand('register-runtime-demo')),
+  'present-run-local-runtime-demo': node('present_runtime_demo', ['presentations/runtime-demo-*.json'], routerCommand('present-runtime-demo'), { inputPolicy: 'current-run-verified-chat-fragment-or-visual-sandbox-http-fallback', completion: 'the same-source chat content reference is prepared for final output, or the current Run HTTP preview is opened, with a bound presentation receipt' }),
   'create-stitch-candidate': node('sync_stitch', ['stitch-freeze.json'], actionScript('stitch-sync.mjs')),
   'verify-stitch-candidate-parity': node('sync_stitch', ['stitch-parity-evidence.json'], actionScript('strict-replica.mjs')),
+  'compile-stitch-screen-reference': node('sync_stitch', ['visual-screen-references.json'], actionScript('visual-reference-compiler.mjs')),
+  'verify-stitch-candidate-screen': node('sync_stitch', ['evidence/parity/stitch-result-*.json'], actionScript('strict-replica.mjs')),
+  'seal-unchanged-stitch-candidate': node('sync_stitch', ['machine-seals/stitch.json'], actionScript('stitch-sync.mjs')),
   'compile-stitch-confirmation-presentation': node('sync_stitch', ['stitch-presentation.md', 'stitch-presentation-manifest.json'], actionScript('confirmation-presentation.mjs')),
   'publish-complete-stitch-presentation': node('sync_stitch', ['stitch-presentation.md', 'stitch-presentation-manifest.json'], routerCommand('status')),
   'derive-site-contract': node('compile_visual_bundle', ['site-contract.json'], actionScript('contract-recorder.mjs')),
+  'freeze-visual-source-manifest': node('compile_visual_bundle', ['visual-source-manifest.json'], actionScript('visual-source.mjs')),
+  'resolve-visual-dependencies': node('compile_visual_bundle', ['dependency-lock.json'], actionScript('asset-resolver.mjs')),
   'compile-visual-bundle-and-implementation-map': node('compile_visual_bundle', ['visual-bundle.json', 'implementation-map.json'], actionScript('bundle-compiler.mjs')),
   'compile-implementation-confirmation-presentation': node('compile_visual_bundle', ['implementation-presentation.md', 'implementation-presentation-manifest.json'], actionScript('confirmation-presentation.mjs')),
   'publish-complete-implementation-freeze': node('compile_visual_bundle', ['implementation-presentation.md', 'implementation-presentation-manifest.json'], routerCommand('status')),
   'run-pre-gate2-and-open-implementation': node('open_gate2', ['Gate 2 machine validation'], routerCommand('transition open-gate2')),
   'emit-formal-runtime-source-markers': node('implement', ['evidence/implementation-audit.json'], { kind: 'host-controlled-implementation' }),
   'apply-approved-formal-implementation': node('implement', ['page-delta.json'], { kind: 'host-controlled-implementation' }),
-  'capture-formal-runtime-source-provenance': node('verify', ['runtime-state-matrix.json'], actionScript('browser-capture.mjs')),
-  'capture-runtime-state-matrix': node('verify', ['runtime-state-matrix.json'], actionScript('browser-capture.mjs')),
+  'capture-formal-runtime-source-provenance': node('verify', ['evidence/runtime-browser-capture.json'], actionScript('browser-capture.mjs')),
+  'compile-formal-screen-reference': node('verify', ['visual-screen-references.json'], actionScript('visual-reference-compiler.mjs')),
+  'verify-formal-direct-screen': node('verify', ['evidence/parity/implementation-result-*.json'], actionScript('strict-replica.mjs')),
+  'verify-formal-stitch-screen': node('verify', ['evidence/parity/implementation-result-*.json'], actionScript('strict-replica.mjs')),
+  'capture-formal-route-coverage': node('verify', ['evidence/runtime-browser-capture.json'], actionScript('browser-capture.mjs')),
+  'capture-runtime-state-matrix': node('verify', ['runtime-state-matrix.json'], actionScript('stability-evidence.mjs')),
+  'capture-verification-inventory': node('verify', ['verification-inventory.json'], actionScript('project-intake.mjs')),
   'compile-verification-plan': node('verify', ['verification-plan.json'], actionScript('verification-planner.mjs')),
+  'verify-required-visual-parity': node('verify', ['implementation-parity-evidence.json'], actionScript('strict-replica.mjs')),
+  'compile-visual-quality-evidence': node('verify', ['evidence/visual-verification.json'], actionScript('quality-evidence.mjs')),
+  'capture-accessibility-measurement': node('verify', ['evidence/accessibility-measurement.json'], actionScript('quality-measurement.mjs')),
+  'capture-performance-measurement': node('verify', ['evidence/performance-measurement.json'], actionScript('quality-measurement.mjs')),
+  'compile-accessibility-evidence': node('verify', ['evidence/accessibility-verification.json'], actionScript('quality-evidence.mjs')),
+  'compile-performance-evidence': node('verify', ['evidence/performance-verification.json'], actionScript('quality-evidence.mjs')),
+  'repair-quality-context': node('verify', [], { kind: 'host-controlled-implementation' }),
   'run-controlled-verification': node('verify', ['verification-bundle.json'], actionScript('verification-orchestrator.mjs')),
+  'seal-verification-evidence': node('record_context', ['evidence-provenance.json'], actionScript('evidence-provenance.mjs')),
   'compile-evidence-bound-industry-review': node('verify', ['industry-benchmark-evidence.json'], actionScript('industry-benchmark.mjs')),
   'pass-controlled-proof-gate': node('pass_proof', ['evidence/proof-*.json', 'Proof Gate passed evidence'], routerCommand('transition pass-proof')),
   'validate-gate3-delivery-evidence': node('open_gate3', ['Gate 3 delivery evidence'], routerCommand('transition open-gate3'))
@@ -71,7 +93,7 @@ export function workflowNode(id) {
   if (workflowNodes[id]) return workflowNodes[id];
   // Role work is selected/recorded/summarized dynamically for every stage,
   // but it is still a concrete guarded node rather than host prose.
-  const role = String(id).match(/^(baseline|gate1|visual|implementation|verify)-role-(select|record|summarize|repair)$/);
+  const role = String(id).match(/^(baseline|gate1|visual|implementation|verify)-role-(select|record|summarize|repair|rebudget)$/);
   if (role) {
     const action = role[1] === 'baseline' ? 'collect_existing_baseline' : role[1] === 'gate1' ? 'analyze_requirement' : role[1] === 'visual' ? 'plan_visual' : role[1] === 'implementation' ? 'compile_visual_bundle' : 'verify';
     return node(action, [`advisories/${role[1]}/role-decision-summary.md`], actionScript('role-advisory.mjs'));

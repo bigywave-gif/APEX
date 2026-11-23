@@ -12,7 +12,7 @@ const file = path.join(runDir, 'events.ndjson'); const events = fs.existsSync(fi
 const errors = []; const authorized = new Set(); let gate1 = false; let gate2 = false;
 for (const event of events) {
   if (event.type === 'run-created') continue;
-  if (event.type === 'approval-recorded' && event.gate === 'gate1') gate1 = true;
+  if (event.type === 'approval-recorded' && (event.gate === 'gate1' || (event.gate === 'visual-plan' && event.scope === 'requirements-and-visual-plan'))) gate1 = true;
   if (event.type === 'approval-recorded' && event.gate === 'visual' && !gate1) errors.push(`event ${event.index}: visual approval precedes Gate 1 approval`);
   if (event.type === 'state-transition' && event.transition === 'open-gate2') { if (!gate1) errors.push(`event ${event.index}: Gate 2 opened before Gate 1`); gate2 = true; }
   if (event.type === 'state-transition' && ['pass-proof', 'open-gate3'].includes(event.transition) && !gate2) errors.push(`event ${event.index}: ${event.transition} precedes Gate 2`);

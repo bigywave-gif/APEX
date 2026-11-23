@@ -29,10 +29,10 @@
 - 默认启用：
   - `google-design-md`
   - `design-director`
+  - `taste-skill`（必须加载到 UI Designer；具体规则按场景采用）
 - 按需启用：
   - `impeccable`
   - `ui-ux-pro-max-skill`
-  - `taste-skill`
   - `stitch-design`（高保真方向探索、同骨架变体、交互原型；仅在 Gate 1 后启用）
   - `better-icons`
   - `react-bits`

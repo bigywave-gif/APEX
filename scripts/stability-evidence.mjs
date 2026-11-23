@@ -3,10 +3,14 @@ import { canonicalApexRoot } from './apex-paths.mjs';
 /** Validates real multi-viewport, state and interaction evidence before Gate 3. */
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
+import { validateFormalInteractionEvidence } from './formal-interaction-evidence.mjs';
+import { responsiveEvidenceFailures } from './responsive-evidence.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Stability evidence failed: ${message}`); process.exit(1); }
@@ -47,6 +51,15 @@ for (const sample of matrix.rangeChecks || []) { const range = responsiveRanges.
 for (const viewportClass of ['mobile', 'tablet', 'desktop']) if ([...rangeSamples.values()].filter(sample => sample.class === viewportClass).length < 3) failures.push(`responsive range needs min/mid/max evidence: ${viewportClass}`);
 for (const stateCase of matrix.states || []) if (stateCase.screenshot && !fs.existsSync(path.resolve(runDir, stateCase.screenshot))) failures.push(`state screenshot missing: ${stateCase.name}`);
 for (const interaction of matrix.interactions || []) if (!fs.existsSync(path.resolve(runDir, interaction.evidence))) failures.push(`interaction evidence missing: ${interaction.id}`);
+if (state.roleChain?.confirmationModel === 'two-confirmations') {
+  try { validateFormalInteractionEvidence(runDir, state, matrix.interactions); } catch (error) { failures.push(error.message); }
+  try {
+    const capture = read(path.join(runDir, 'evidence/runtime-browser-capture.json'));
+    const receipts = Object.values(read(path.join(runDir, 'operations-index.json')).receipts || {});
+    failures.push(...responsiveEvidenceFailures(runDir, capture, receipts, matrix, bundle.responsive));
+  } catch (error) { failures.push(`responsive browser evidence is unavailable: ${error.message}`); }
+  for (const required of ['default', 'loading', 'empty', 'error', 'permission-denied']) if (!names.has(required)) failures.push(`runtime state is missing: ${required}`);
+}
 if (state.track === 'existing') {
   const scopeFile = path.join(runDir, state.artifacts.changeScope || 'change-scope.json');
   const scope = read(scopeFile), scopeHash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(scopeFile)).digest('hex')}`;
@@ -54,6 +67,16 @@ if (state.track === 'existing') {
 }
 if (failures.length || matrix.status !== 'passed') die([...(failures.length ? failures : []), ...(matrix.status !== 'passed' ? ['matrix status must be passed'] : [])].join('; '));
 matrix.sourceProvenance = sourceProvenance;
+// Reject malformed matrices before replacing a previously verified artifact.
+const candidateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-matrix-validation-'));
+let validationFailure = '';
+try {
+  const candidate = path.join(candidateDir, 'runtime-state-matrix.json');
+  write(candidate, matrix);
+  const validation = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'validate', 'runtime-state-matrix.schema.json', candidate], { encoding: 'utf8' });
+  if (validation.status !== 0) validationFailure = (validation.stderr || validation.stdout || validation.error?.message || 'validator failed').trim();
+} finally { fs.rmSync(candidateDir, { recursive: true, force: true }); }
+if (validationFailure) die(`runtime state matrix schema validation failed: ${validationFailure}`);
 // The normal invocation passes the canonical output path as matrixArg.  Always
 // write after enrichment; conditional writes here silently discarded the
 // newly derived provenance while still reporting success.

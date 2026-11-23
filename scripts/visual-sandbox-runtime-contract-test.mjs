@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Proves a materialized Demo receives a real run-local URL rather than a status-only handoff. */
 import fs from 'node:fs';
+import { demoContract, seedDesignContract } from './interactive-demo-test-fixture.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -20,15 +21,15 @@ try {
   expect(run(router, ['intake', project, 'run-runtime', 'greenfield', 'standard', 'interactive', 'session-runtime', '确认调用 APEX']), 'intake');
   const runDir = path.join(project, '.apex', 'runs', 'run-runtime'); const stateFile = path.join(runDir, 'state.json'); const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   state.gates.gate1 = { status: 'passed', at: new Date().toISOString(), evidence: ['test'] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.demoSourceManifest = 'demo-source-manifest.json'; state.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json';
-  fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ sourceSelections: [
+  fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ selectionAnalysis: seedDesignContract(runDir), sourceSelections: [
     { id: 'native-layout', kind: 'layout', visualNodes: ['demo-root'] }, { id: 'component', kind: 'component', visualNodes: ['demo-root'] },
     { id: 'style', kind: 'style', visualNodes: ['demo-root'] }, { id: 'font', kind: 'font', visualNodes: ['demo-root'] },
     { id: 'content', kind: 'content', visualNodes: ['demo-root'], parameters: { origin: 'test.intent', fields: ['title'], implementation: 'render title' } }
   ] }));
   fs.mkdirSync(path.join(project, 'data'), { recursive: true }); fs.mkdirSync(path.join(project, 'logs'), { recursive: true }); fs.writeFileSync(path.join(project, 'data', 'runtime.json'), '{"revision":0}\n'); fs.writeFileSync(path.join(project, 'logs', 'output.log'), 'runtime started\n');
   fs.mkdirSync(path.join(runDir, 'visual-sandbox'), { recursive: true }); fs.writeFileSync(path.join(runDir, 'visual-sandbox', 'index.html'), '<main data-apex-source-selection="native-layout">Runtime Demo</main>');
-  fs.writeFileSync(path.join(runDir, 'demo-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', entrypoint: 'index.html', files: [{ path: 'index.html', encoding: 'utf8', content: '<main data-apex-source-selection="native-layout">Runtime Demo</main>' }], sourceBindings: [{ sourceSelectionId: 'native-layout', files: ['index.html'] }] }));
-  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', status: 'materialized', entrypoint: 'visual-sandbox/index.html' })); fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  fs.writeFileSync(path.join(runDir, 'demo-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'index.html', files: [{ path: 'index.html', encoding: 'utf8', content: '<main data-apex-source-selection="native-layout">Runtime Demo</main>' }], sourceBindings: [{ sourceSelectionId: 'native-layout', files: ['index.html'] }] }));
+  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, status: 'materialized', entrypoint: 'visual-sandbox/index.html' })); fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
   const beforeStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'materialized Demo status');
   if (beforeStart.executionDirective?.currentStep?.id !== 'start-run-local-demo' || beforeStart.terminalResponseContract?.allowed !== false) throw new Error('a materialized but unstarted Demo must expose the exact automatic start step, never a null step or user prompt');
   const authorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'runtime start authorization');

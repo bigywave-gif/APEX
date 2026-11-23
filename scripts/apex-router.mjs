@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+import { implementationRegistrationCurrent } from './implementation-registration.mjs';
+import { controlledOutput } from './verification-policy.mjs';
+import { qualityVerificationPending } from './quality-workflow.mjs';
+import { industryReviewFailures } from './industry-review-progress.mjs';
+import { gate1RoleSummaryCurrent, visualRoleSummaryCurrent, approvedRoleSummariesCurrent } from './role-summary-binding.mjs';
 import { canonicalApexRoot, globalBridge } from './apex-paths.mjs';
 /**
  * Code-level admission point for Codex sessions. Existing gates and skills are
@@ -6,28 +11,75 @@ import { canonicalApexRoot, globalBridge } from './apex-paths.mjs';
  * allow-list scoped to one project, run, and session.
  */
 import crypto from 'node:crypto';
+import { demoPresentation, verifyChatPresentation } from './chat-demo.mjs';
+import { validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { assertAffectedOnlyPresentation } from './scope-boundary.mjs';
+import { assertAffectedOnlyPresentation, protectedFileChecks } from './scope-boundary.mjs';
+import { bindStitchScreen, resolveStitchScreenReference } from './stitch-screen-binding.mjs';
+import { evidenceFor, pass } from './structure-evidence.mjs';
+import { stitchScreenProgress } from './stitch-screen-progress.mjs';
+import { formalRouteCoverage } from './formal-route-coverage.mjs';
+import { formalStitchProgress } from './formal-stitch-progress.mjs';
+import { formalDirectProgress } from './formal-direct-progress.mjs';
+import { implementationSealCurrent } from './implementation-seal.mjs';
+import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
+import { requiredFormalTasks } from './formal-interaction-evidence.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
+import { agentRuntimeStatus, appendLedgerEvent, commitRunState, externalSubmissionIntents, fenceRunCancellation, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bridgeSource = path.join(apexRoot, 'runtime', 'host-bridges', 'codex-skill', 'SKILL.md');
 const bridgeSync = path.join(apexRoot, 'scripts', 'sync-codex-bridge.mjs');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
 const DEFAULT_LEASE_MS = 15 * 60 * 1000;
+const usesCombinedPlan = state => state.roleChain?.confirmationModel === 'two-confirmations';
+const confirmationEpoch = (state, gate) => Number(state.confirmationEpochs?.[gate] || 0);
+function invalidateConfirmationEpochs(state, gates) {
+  state.confirmationEpochs = { ...(state.confirmationEpochs || {}) };
+  for (const gate of gates) state.confirmationEpochs[gate] = confirmationEpoch(state, gate) + 1;
+}
 function fail(message) { console.error(`APEX router failed: ${message}`); process.exit(1); }
 function json(value) { console.log(JSON.stringify(value, null, 2)); }
 function now() { return new Date().toISOString(); }
 function read(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
-function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
+function write(file, value) {
+  // state.json remains a compatibility projection, while the durable ledger is
+  // committed first.  This lets a later Router invocation repair a torn or
+  // stale projection instead of guessing a flow transition from chat history.
+  if (path.basename(file) === 'state.json') {
+    const runDirectory = path.dirname(file);
+    commitRunState(runDirectory, value, { reason: 'router-state-write' });
+    return;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`);
+  fs.renameSync(temporary, file);
+}
 function writeText(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, value); }
 function sha(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function sha256Text(value) { return `sha256:${sha(value)}`; }
 function hashFile(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function sha256File(file) { return `sha256:${hashFile(file)}`; }
+function visualRevisionBindingCurrent(file, expectedHash) {
+  if (sha256File(file) === expectedHash) return true;
+  const chunks = fs.readFileSync(file, 'utf8').match(/[^\n]*\n|[^\n]+/g) || [];
+  let prefix = '';
+  for (let index = 0; index < chunks.length; index += 1) {
+    prefix += chunks[index];
+    if (sha256Text(prefix) !== expectedHash) continue;
+    return chunks.slice(index + 1).every(chunk => {
+      try {
+        const revision = JSON.parse(chunk);
+        return revision.checkpoint === 'implementation' && revision.impact === 'implementation-only';
+      } catch { return false; }
+    });
+  }
+  return false;
+}
 function fileFingerprint(file) { const stat = fs.statSync(file); return { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs }; }
 function sameFingerprint(expected, file) { if (!expected || !file || !fs.existsSync(file)) return false; const actual = fileFingerprint(file); return Object.entries(expected).every(([key, value]) => actual[key] === value); }
 function operationRecords(dir) {
@@ -82,6 +134,7 @@ function failureCategory(receipt) {
     if (!Array.isArray(receipt.productionBoundary?.changedFiles)) return 'obsolete-boundary-snapshot';
     return 'production-boundary';
   }
+  if (/stage-token-budget-exhausted/i.test(evidence)) return 'token-budget-exhausted';
   if (/PROJECT_DELETION_POLICY|deletion policy|delete(?:d|\s+operation)?\s+(?:is\s+)?forbidden/i.test(evidence)) return 'policy-denied';
   if (/EACCES|EPERM|permission denied|not permitted/i.test(evidence)) return 'permission-denied';
   if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network|browser.*unavailable/i.test(evidence)) return 'external-unavailable';
@@ -242,7 +295,7 @@ const gate1Artifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 
 // product behavior.  Everything derived from that behavior must be rebuilt;
 // otherwise an approved Gate 1 receipt can silently describe an older scope.
 const gate1DerivedArtifacts = ['intentBrief', 'deliveryContract', 'gate1Presentation', 'gate1PresentationManifest', 'experienceStrategy', 'experienceQualityEvidence', 'domainModel', 'apiContract', 'functionalFreeze', 'changeScope'];
-const visualAndImplementationArtifacts = ['motionContract', 'motionEvidence', 'visualExecutionPlan', 'visualPlanPresentation', 'visualPlanPresentationManifest', 'demoSourceManifest', 'visualSandboxFiles', 'visualSandboxRuntime', 'runtimeDemo', 'runtimeSourceLock', 'runtimeVisualBaseline', 'runtimeMaterialization', 'runtimeMaterializationAudit', 'materializedAssets', 'materializedAssetsAudit', 'designCandidates', 'visualSourceManifest', 'visualReference', 'gate1VisualOutput', 'siteContract', 'stitchFreeze', 'stitchParityEvidence', 'stitchPresentation', 'stitchPresentationManifest', 'implementationParityEvidence', 'visualBundle', 'implementationMap', 'implementationPresentation', 'implementationPresentationManifest', 'runtimeStateMatrix', 'verificationPlan', 'verificationBundle', 'pageDelta', 'dependencyLock'];
+const visualAndImplementationArtifacts = ['motionContract', 'motionEvidence', 'visualExecutionPlan', 'visualPlanPresentation', 'visualPlanPresentationManifest', 'demoSourceManifest', 'visualSandboxFiles', 'visualSandboxRuntime', 'runtimeDemo', 'runtimeDemoPresentation', 'runtimeSourceLock', 'runtimeVisualBaseline', 'runtimeMaterialization', 'runtimeMaterializationAudit', 'materializedAssets', 'materializedAssetsAudit', 'designCandidates', 'visualSourceManifest', 'visualReference', 'visualScreenReferences', 'gate1VisualOutput', 'siteContract', 'stitchFreeze', 'stitchParityEvidence', 'stitchPresentation', 'stitchPresentationManifest', 'implementationParityEvidence', 'visualBundle', 'implementationMap', 'implementationPresentation', 'implementationPresentationManifest', 'runtimeStateMatrix', 'verificationPlan', 'verificationBundle', 'pageDelta', 'implementationRegistration', 'dependencyLock'];
 function clearArtifactReferences(state, names) {
   const cleared = [];
   for (const name of names) {
@@ -295,10 +348,14 @@ function runDir(root, runId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId || '')) fail('runId must contain only letters, numbers, dot, underscore, or dash');
   return path.join(root, '.apex', 'runs', runId);
 }
-function stateOf(dir) { const file = path.join(dir, 'state.json'); if (!fs.existsSync(file)) fail(`run state does not exist: ${file}`); return read(file); }
-function appendEvent(dir, event) { fs.appendFileSync(path.join(dir, 'events.ndjson'), `${JSON.stringify({ at: now(), ...event })}\n`); }
+function stateOf(dir) { try { return readRunState(dir); } catch (error) { fail(error.message); } }
+function appendEvent(dir, event) {
+  const entry = { at: now(), ...event };
+  appendLedgerEvent(dir, entry);
+  fs.appendFileSync(path.join(dir, 'events.ndjson'), `${JSON.stringify(entry)}\n`);
+}
 const cancellationReceiptName = 'cancellation-receipt.json';
-const cancellationRetainedEntries = new Set(['state.json', 'events.ndjson', cancellationReceiptName]);
+const cancellationRetainedEntries = new Set(['state.json', 'events.ndjson', 'run-ledger.sqlite', 'run-ledger.sqlite-wal', 'run-ledger.sqlite-shm', cancellationReceiptName]);
 function isCurrentRunChild(runDir, candidate) {
   const root = path.resolve(runDir);
   const resolved = path.resolve(candidate);
@@ -394,11 +451,15 @@ function reclaimCancelledRun(root, run, sessionId, reason) {
   for (const key of Object.keys(state.artifacts || {})) state.artifacts[key] = key === 'roleDecisionSummaries' ? {} : null;
   state.handoff = null;
   state.cancellation = { receipt: cancellationReceiptName, at: state.updatedAt, reason, sessionId, temporaryArtifactsReclaimed: true };
-  write(path.join(run.runDir, 'state.json'), state);
+  commitRunState(run.runDir, state, { reason: 'run-cancellation-reclaimed' });
+  const cancelledAgentJobs = agentRuntimeStatus(run.runDir).jobs.filter(job => job.status === 'cancelled').map(job => ({ jobId: job.jobId, agentId: job.agentId, attempt: job.attempt }));
   const receipt = {
     schemaVersion: '1.0', type: 'run-cancellation-reclamation', projectId: projectId(root), runId: run.runId, sessionId,
     cancelledAt: state.updatedAt, reason, temporaryArtifactsReclaimed: true, removedEntries: removed,
-    services: { stopped: services.stopped, alreadyStopped: services.alreadyStopped }
+    services: { stopped: services.stopped, alreadyStopped: services.alreadyStopped },
+    agents: { fencedJobs: cancelledAgentJobs, externalInterruption: 'not-confirmed' },
+    externalJobs: externalSubmissionIntents(run.runDir).filter(item => item.operation !== 'upload' && !['ready', 'not-submitted'].includes(item.status)),
+    externalUploads: externalSubmissionIntents(run.runDir).filter(item => item.operation === 'upload' && !['consumed', 'not-submitted'].includes(item.status))
   };
   write(path.join(run.runDir, cancellationReceiptName), receipt);
   appendEvent(run.runDir, { type: 'run-temporary-artifacts-reclaimed', sessionId, receipt: cancellationReceiptName, removedEntries: removed, stoppedServices: services.stopped.map(item => item.pid), alreadyStoppedServices: services.alreadyStopped.map(item => item.pid) });
@@ -416,16 +477,26 @@ function revokeDownstreamDeliveryState(state, reason) {
     state.gates.gate3 = { status: 'revoked', at: now(), evidence: [reason] };
     revoked.push('gate3');
   }
-  for (const artifact of ['runtimeStateMatrix', 'verificationPlan', 'verificationBundle', 'industryBenchmarkEvidence', 'evidenceProvenance']) {
+  for (const artifact of ['runtimeStateMatrix', 'verificationInventory', 'verificationPlan', 'verificationBundle', 'industryBenchmarkEvidence', 'evidenceProvenance']) {
     if (state.artifacts?.[artifact]) { state.artifacts[artifact] = null; revoked.push(artifact); }
   }
   return revoked;
 }
 function reconcileGateDependencyState(dir, state) {
   const gate2Open = state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed === true;
+  if (!gate2Open && !state.locks?.implementationApproved && /GATE_2$/.test(state.phase || '')) {
+    state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE';
+    state.revision = Number(state.revision || 0) + 1;
+    state.updatedAt = now();
+    write(path.join(dir, 'state.json'), state);
+    appendEvent(dir, { type: 'phase-recovered-before-implementation-approval', reason: 'compile-artifact-must-not-open-gate2' });
+  }
   if (gate2Open || (state.gates?.proof?.status !== 'passed' && state.gates?.gate3?.status !== 'passed')) return state;
   const revoked = revokeDownstreamDeliveryState(state, 'upstream-gate2-is-not-open');
-  state.phase = state.track === 'greenfield' ? 'G-08 GATE_2' : 'E-10 GATE_2';
+  // A pending Gate 2 does not imply that implementation freeze was approved.
+  // Keep/recover the compile phase until the named implementation checkpoint
+  // has been approved; only then may the Gate-2 transition own E-10/G-08.
+  if (!state.locks?.implementationApproved) state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE';
   state.revision = Number(state.revision || 0) + 1;
   state.updatedAt = now();
   write(path.join(dir, 'state.json'), state);
@@ -438,7 +509,7 @@ function invalidateVisualIntermediates(dir, reason) {
   // mistaken for the current Demo by a host that discovers files by name.
   // Preserve the evidence trail under invalidated/, but leave no runnable
   // generated visual at the active run root after a material reset.
-  const candidates = ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json', 'visual-sandbox', 'visual-sandbox-files.json', 'runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'design-candidates.json', 'visual-reference.json', 'gate1-visual-output.json', 'stitch-job.json', 'stitch-freeze.json', 'stitch-raw.json', 'stitch-parity-evidence.json', 'visual-bundle.json', 'implementation-map.json', 'evidence/stitch-ui-import.json'];
+  const candidates = ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json', 'visual-sandbox', 'visual-sandbox-files.json', 'runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'design-candidates.json', 'visual-reference.json', 'visual-screen-references.json', 'visual-screen-references', 'gate1-visual-output.json', 'stitch-job.json', 'stitch-freeze.json', 'stitch-raw.json', 'stitch-parity-evidence.json', 'visual-bundle.json', 'implementation-map.json', 'evidence/stitch-ui-import.json'];
   const stamp = `${Date.now()}-${String(reason).replace(/[^A-Za-z0-9._-]/g, '_')}`;
   const archive = path.join(dir, 'invalidated', stamp); const moved = [];
   for (const relative of candidates) {
@@ -479,8 +550,8 @@ function executeRouterController(command, args) {
   const stateFile = dir => path.join(dir, 'state.json');
   const load = dir => read(stateFile(dir));
   const save = (dir, state) => { state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(stateFile(dir), state); };
-  const validate = (stage, dir) => {
-    const result = spawnSync(process.execPath, [validator, stage, dir], { encoding: 'utf8' });
+  const validate = (stage, dir, ...extra) => {
+    const result = spawnSync(process.execPath, [validator, stage, dir, ...extra], { encoding: 'utf8' });
     if (result.status !== 0) die((result.stderr || result.stdout).trim());
   };
   const approval = (dir, reference, gate, state) => {
@@ -489,7 +560,7 @@ function executeRouterController(command, args) {
     const file = path.resolve(dir, reference);
     if (!file.startsWith(`${approvals}${path.sep}`) || !fs.existsSync(file)) die(`approval receipt must exist under ${approvals}`);
     const receipt = read(file);
-    if (receipt.schemaVersion !== '3.0' || receipt.status !== 'approved' || receipt.gate !== gate || receipt.runId !== state.runId || !receipt.projectId || !receipt.sessionId) die(`invalid ${gate} approval receipt`);
+    if (receipt.schemaVersion !== '3.0' || receipt.status !== 'approved' || receipt.gate !== gate || receipt.runId !== state.runId || !receipt.projectId || !receipt.sessionId || Number(receipt.confirmationEpoch || 0) !== confirmationEpoch(state, gate)) die(`invalid or superseded ${gate} approval receipt`);
     if (!Array.isArray(receipt.artifactHashes) || !receipt.artifactHashes.length) die(`approval receipt has no frozen artifact hashes`);
     for (const item of receipt.artifactHashes) {
       const artifact = path.resolve(dir, item.path || '');
@@ -510,6 +581,7 @@ function executeRouterController(command, args) {
     // Contract fixtures intentionally exercise the pre-role-chain state
     // machine. This test-only switch is never emitted by normal invocation.
     if (process.env.APEX_TEST_LEGACY_ROLE_CHAIN === '1') state.roleChain = { version: '1.0', enabled: false, confirmationModel: 'gate-summary-only' };
+    initializeLedger(dir, state, 'run-initialized');
     write(stateFile(dir), state);
     write(path.join(dir, 'context-index.json'), { schemaVersion: '3.0', sources: [] });
     write(path.join(dir, 'decisions.json'), { schemaVersion: '3.0', decisions: [] });
@@ -521,7 +593,21 @@ function executeRouterController(command, args) {
     const [runDir, evidence] = args; const dir = path.resolve(runDir); validate('pre-gate1', dir); const state = load(dir); const receipt = approval(dir, evidence, 'gate1', state);
     state.gates.gate1 = { status: 'passed', at: now(), evidence: [evidence, `approval:${receipt.approvalId}`] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = false; state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; save(dir, state);
   } else if (command === 'confirm-visual-plan') {
-    const [runDir, evidence] = args; const dir = path.resolve(runDir); const state = load(dir); if (state.gates.gate1.status !== 'passed' || !state.artifacts.visualExecutionPlan) die('Gate 1 and a visual execution plan are required before visual-plan confirmation'); const receipt = approval(dir, evidence, 'visual-plan', state);
+    const [runDir, evidence] = args; const dir = path.resolve(runDir); const state = load(dir);
+    const combined = usesCombinedPlan(state) && state.gates.gate1.status !== 'passed';
+    if ((!combined && state.gates.gate1.status !== 'passed') || !state.artifacts.visualExecutionPlan) die('a current product plan and visual execution plan are required before visual-plan confirmation');
+    if (combined) { if (!checkpointReady(state, dir, 'gate1')) die('the product plan is not current'); validate('pre-gate1', dir); }
+    const receipt = approval(dir, evidence, 'visual-plan', state);
+    if (usesCombinedPlan(state)) {
+      const rendered = combinedPlanPresentation(state, dir);
+      if (!rendered || receipt.presentation?.sha256 !== sha256Text(rendered.content) || receipt.presentation?.renderPolicy !== rendered.renderPolicy) die('visual approval no longer matches the exact combined presentation');
+    }
+    if (combined) {
+      const required = ['intentBrief', 'deliveryContract', 'experienceStrategy', 'experienceQualityEvidence', 'gate1Presentation', 'gate1PresentationManifest', 'gate1PresentationRegistration'].map(name => state.artifacts?.[name]);
+      if (receipt.scope !== 'requirements-and-visual-plan' || required.some(ref => !ref || !receipt.artifactHashes.some(item => item.path === ref))) die('combined approval must bind the current product and visual evidence');
+      state.gates.gate1 = { status: 'passed', at: now(), evidence: [evidence, `combined-approval:${receipt.approvalId}`] };
+      state.locks.requirementsApproved = true;
+    }
     state.locks.visualPlanApproved = true; state.phase = state.track === 'greenfield' ? 'G-05 VISUAL' : 'E-07 VISUAL'; save(dir, state);
   } else if (command === 'register') {
     const [runDir, artifact, reference] = args; const dir = path.resolve(runDir); const state = load(dir);
@@ -547,15 +633,40 @@ function executeRouterController(command, args) {
     const [runDir, evidence] = args; const dir = path.resolve(runDir); const state = load(dir); if ((!state.locks.stitchCurrent && !state.locks.stitchSkipped) || !state.locks.stitchApproved || !state.artifacts.visualBundle || !state.artifacts.implementationMap) die('confirmed current or explicitly skipped Stitch, Visual Bundle, and Implementation Map are required before implementation confirmation'); const receipt = approval(dir, evidence, 'implementation', state);
     state.locks.implementationApproved = true; save(dir, state);
   } else if (command === 'open-gate2') {
-    const dir = path.resolve(args[0] || '.'); validate('pre-gate2', dir); const state = load(dir); state.gates.gate2 = { status: 'passed', at: now(), evidence: ['machine-pre-gate2-passed'] }; state.locks.implementationAllowed = true; state.phase = state.track === 'greenfield' ? 'G-09 PROOF_IMPLEMENT' : 'E-11 IMPLEMENT'; save(dir, state); validate('gate2', dir);
+    const dir = path.resolve(args[0] || '.'); const before = hashFile(stateFile(dir)); const state = load(dir); const expectedStateHash = sha256Text(JSON.stringify(state));
+    if (hashFile(stateFile(dir)) !== before) die('run state changed before Gate 2 validation; retry with fresh authorization');
+    let seal = null;
+    if (usesCombinedPlan(state) && !state.locks.implementationApproved) {
+      const root = path.dirname(path.dirname(path.dirname(dir))), run = { runDir: dir, runId: state.runId };
+      const demoApproval = confirmedDemoReceipt(root, run, state);
+      if (!demoApproval || !checkpointReady(state, dir, 'implementation')) die('a current confirmed Demo and complete implementation artifacts are required for the machine seal');
+      validate('pre-gate2-machine-seal', dir);
+      const refs = [demoApproval, state.artifacts.visualBundle, state.artifacts.implementationMap, state.artifacts.implementationPresentation, state.artifacts.implementationPresentationManifest];
+      const artifactHashes = decisionArtifactHashes(run, [], refs);
+      const sealId = sha(JSON.stringify(artifactHashes));
+      seal = path.join('machine-seals', `implementation-${sealId}.json`);
+      write(path.join(dir, seal), { schemaVersion: '3.0', type: 'implementation-machine-seal', status: 'validated', runId: state.runId, demoApproval, artifactHashes, validatedAt: now() });
+      state.locks.implementationApproved = true;
+    } else validate('pre-gate2', dir);
+    // Validate the exact proposed state while the authoritative state remains
+    // closed. A crash or validation failure cannot grant implementation access.
+    state.gates.gate2 = { status: 'passed', at: now(), evidence: ['machine-pre-gate2-passed', ...(seal ? [seal] : [])] }; state.locks.implementationAllowed = true; state.phase = state.track === 'greenfield' ? 'G-09 PROOF_IMPLEMENT' : 'E-11 IMPLEMENT';
+    const candidate = path.join(dir, `.gate2-candidate-${crypto.randomUUID()}.json`);
+    try {
+      write(candidate, state);
+      validate('gate2-candidate', dir, candidate);
+      if (hashFile(stateFile(dir)) !== before) die('run state changed during Gate 2 validation; retry with fresh authorization');
+      state.revision = Number(state.revision || 0) + 1; state.updatedAt = now();
+      commitRunState(dir, state, { reason: 'router-open-gate2', expectedStateHash });
+    } finally { fs.rmSync(candidate, { force: true }); }
   } else if (command === 'revoke-stitch') {
-    const [runDir, reason = 'stitch-content-changed'] = args; const dir = path.resolve(runDir); const state = load(dir); const invalidated = invalidateVisualIntermediates(dir, reason); const invalidatedRoles = invalidateRoleStages(dir, state, ['visual', 'implementation', 'verify'], reason); state.gates.gate2 = { status: 'revoked', at: now(), evidence: [reason] }; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.visualPlanApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.implementationApproved = false; state.locks.stitchCurrent = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.pendingDeliveryRoute = null; state.pendingDeliveryRouteReceipt = null; for (const artifact of ['visualExecutionPlan', 'runtimeDemo', 'designCandidates', 'visualReference', 'gate1VisualOutput', 'stitchFreeze', 'stitchParityEvidence', 'visualBundle', 'implementationMap']) state.artifacts[artifact] = null; const revoked = revokeDownstreamDeliveryState(state, reason); state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; save(dir, state); appendEvent(dir, { type: 'visual-reset', reason, invalidated, invalidatedRoles, revoked });
+    const [runDir, reason = 'stitch-content-changed'] = args; const dir = path.resolve(runDir); const state = load(dir); invalidateConfirmationEpochs(state, ['visual-plan', 'demo', 'stitch', 'implementation']); const invalidated = invalidateVisualIntermediates(dir, reason); const invalidatedRoles = invalidateRoleStages(dir, state, ['visual', 'implementation', 'verify'], reason); state.gates.gate2 = { status: 'revoked', at: now(), evidence: [reason] }; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.visualPlanApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.implementationApproved = false; state.locks.stitchCurrent = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.pendingDeliveryRoute = null; state.pendingDeliveryRouteReceipt = null; for (const artifact of ['visualExecutionPlan', 'runtimeDemo', 'designCandidates', 'visualReference', 'visualScreenReferences', 'gate1VisualOutput', 'stitchFreeze', 'stitchParityEvidence', 'visualBundle', 'implementationMap']) state.artifacts[artifact] = null; const revoked = revokeDownstreamDeliveryState(state, reason); state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; save(dir, state); appendEvent(dir, { type: 'visual-reset', reason, invalidated, invalidatedRoles, revoked });
   } else if (command === 'repair-visual-source-identity') {
     const [runDir, evidence] = args; const dir = path.resolve(runDir); const state = load(dir); const repair = latestTechnicalIdentityRepair(state, dir);
     if (!repair.ready) die(`technical visual identity repair is unavailable: ${repair.reason || 'no exact prior approval and equivalent rebuilt plan'}`);
     const receipt = { schemaVersion: '3.0', type: 'technical-visual-source-identity-repair', repairedAt: now(), reason: repair.reason, priorPlan: { path: repair.priorPlan, sha256: repair.priorHash, approval: repair.approval }, currentPlan: { path: repair.currentPlan, sha256: repair.currentHash }, evidence };
     const relative = path.join('repairs', `visual-source-identity-${Date.now()}.json`); write(path.join(dir, relative), receipt);
-    state.locks.visualPlanApproved = true; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.pendingDeliveryRoute = null; state.pendingDeliveryRouteReceipt = null; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['technical-visual-source-identity-repair'] }; const revoked = revokeDownstreamDeliveryState(state, 'technical-visual-source-identity-repair'); state.phase = state.track === 'greenfield' ? 'G-05 VISUAL' : 'E-07 VISUAL'; save(dir, state); appendEvent(dir, { type: 'visual-source-identity-repaired-with-prior-approval', receipt: relative, priorPlan: repair.priorPlan, currentPlan: repair.currentPlan, priorApproval: repair.approval, revoked });
+    state.locks.visualPlanApproved = true; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.pendingDeliveryRoute = null; state.pendingDeliveryRouteReceipt = null; state.artifacts.runtimeDemoPresentation = null; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['technical-visual-source-identity-repair'] }; const revoked = revokeDownstreamDeliveryState(state, 'technical-visual-source-identity-repair'); state.phase = state.track === 'greenfield' ? 'G-05 VISUAL' : 'E-07 VISUAL'; save(dir, state); appendEvent(dir, { type: 'visual-source-identity-repaired-with-prior-approval', receipt: relative, priorPlan: repair.priorPlan, currentPlan: repair.currentPlan, priorApproval: repair.approval, revoked });
   } else if (command === 'checkpoint') {
     const [runDir, label = 'checkpoint'] = args; const dir = path.resolve(runDir); const state = load(dir); const artifacts = {};
     for (const [name, ref] of Object.entries(state.artifacts)) { if (typeof ref !== 'string' || !ref) continue; const file = path.isAbsolute(ref) ? ref : path.join(dir, ref); if (fs.existsSync(file)) artifacts[name] = { path: ref, hash: hashFile(file) }; }
@@ -565,6 +676,66 @@ function executeRouterController(command, args) {
   } else if (command === 'open-gate3') {
     const dir = path.resolve(args[0] || '.'); validate('gate3', dir); const state = load(dir); if (!['passed', 'not-required'].includes(state.gates.proof.status)) die('Proof Gate has not passed'); state.gates.gate3 = { status: 'passed', at: now(), evidence: [state.artifacts.verificationBundle || 'verification-bundle.json'] }; state.phase = state.track === 'greenfield' ? 'G-13 MEMORY' : 'E-15 MEMORY'; save(dir, state);
   } else die(`unsupported internal controller command: ${command}`);
+}
+function registerImplementation(root, run, sessionId, authorizationRef, leaseId, deltaReference) {
+  const token = verifyAuthorization(root, run, sessionId, authorizationRef, 'implement');
+  const lease = fs.existsSync(leaseFile(root)) ? read(leaseFile(root)) : null;
+  if (!validLease(lease) || lease.projectId !== projectId(root) || lease.runId !== run.runId || lease.sessionId !== sessionId || lease.leaseId !== leaseId) fail('implementation registration requires the current project mutation lease');
+  const state = stateOf(run.runDir), expectedStateHash = sha256Text(JSON.stringify(state));
+  if (state.gates?.gate2?.status !== 'passed' || !state.locks?.implementationAllowed || (usesCombinedPlan(state) && !postGateImplementationCurrent(state, run.runDir))) fail('implementation registration requires current Gate 2 authorization and frozen baseline');
+  if (typeof deltaReference !== 'string' || path.isAbsolute(deltaReference)) fail('page delta must be a run-relative file');
+  const runRoot = fs.realpathSync(run.runDir), delta = path.resolve(runRoot, deltaReference);
+  if (!fs.existsSync(delta) || !fs.realpathSync(delta).startsWith(`${runRoot}${path.sep}`) || !fs.statSync(delta).isFile()) fail('page delta is missing or outside the current Run');
+  const validated = spawnSync(process.execPath, [validator, 'validate', 'page-delta.schema.json', delta], { encoding: 'utf8' });
+  if (validated.status !== 0) fail(`page delta validation failed: ${(validated.stderr || validated.stdout).trim()}`);
+  const value = read(delta), mapFile = artifactFile(run.runDir, state.artifacts?.implementationMap), siteFile = artifactFile(run.runDir, state.artifacts?.siteContract);
+  if (!mapFile || !siteFile) fail('implementation map and site contract are required');
+  const map = read(mapFile), site = read(siteFile);
+  if (value.inherits?.siteContractVersion !== site.version || value.inherits?.siteContractHash !== site.hash) fail('page delta must bind the current site contract');
+  const targets = [...new Set((map.entries || []).flatMap(entry => entry.runtimeTarget || []))];
+  if (!targets.length) fail('implementation map has no formal targets');
+  const files = targets.map(target => {
+    if (typeof target !== 'string' || path.isAbsolute(target)) fail('formal target must be project-relative');
+    const file = path.resolve(root, target), relativeTarget = path.relative(root, file), first = relativeTarget.split(path.sep)[0];
+    const excluded = new Set(['.apex', '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
+    if (!file.startsWith(`${root}${path.sep}`) || excluded.has(first) || !fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`) || !fs.statSync(file).isFile()) fail(`formal target is missing, outside the project, or not a formal source: ${target}`);
+    return { path: target, sha256: sha256File(file) };
+  });
+  if (state.track === 'existing') {
+    const scopeFile = artifactFile(run.runDir, state.artifacts?.changeScope);
+    if (!scopeFile) fail('Existing implementation requires the frozen change scope');
+    const scope = read(scopeFile), allowed = new Set(scope.affected?.runtimeTargets || []);
+    if (targets.some(target => !allowed.has(target))) fail('formal targets exceed the frozen Existing change scope');
+    const changed = protectedFileChecks(root, scope.protected?.files || []).filter(item => !item.passed);
+    if (changed.length) fail(`protected Existing files changed outside the approved scope: ${changed.map(item => item.path).join(', ')}`);
+  }
+  const relative = path.join('registrations', `implementation-${token.tokenId}.json`), receiptFile = path.join(runRoot, relative);
+  const receipt = { schemaVersion: '3.0', type: 'implementation-registration', projectId: projectId(root), runId: run.runId, sessionId, authorizationRef, leaseId, pageDelta: { path: path.relative(runRoot, fs.realpathSync(delta)), sha256: sha256File(delta) }, implementationMap: { path: state.artifacts.implementationMap, sha256: sha256File(mapFile) }, files, registeredAt: now() };
+  // Recover a crash after the durable receipt but before state commit without
+  // changing its timestamp/hash or accepting different implementation bytes.
+  if (fs.existsSync(receiptFile)) {
+    const previous = read(receiptFile), { registeredAt: ignoredOld, ...oldFacts } = previous, { registeredAt: ignoredNew, ...newFacts } = receipt;
+    if (JSON.stringify(oldFacts) !== JSON.stringify(newFacts)) fail('prior implementation registration differs; obtain a fresh authorization');
+    receipt.registeredAt = previous.registeredAt;
+  } else write(receiptFile, receipt);
+  const oldRef = state.artifacts?.implementationRegistration, oldFile = oldRef && artifactFile(runRoot, oldRef), oldReceipt = oldFile && read(oldFile);
+  const changed = Boolean(state.artifacts?.pageDelta) && (!oldReceipt || JSON.stringify(oldReceipt.files) !== JSON.stringify(files) || oldReceipt.pageDelta?.sha256 !== receipt.pageDelta.sha256 || oldReceipt.implementationMap?.sha256 !== receipt.implementationMap.sha256);
+  if (changed) {
+    const captureRef = 'evidence/runtime-browser-capture.json', captureFile = path.join(runRoot, captureRef);
+    if (fs.existsSync(captureFile)) {
+      const archived = path.join(runRoot, 'invalidated', `implementation-${token.tokenId}`, captureRef);
+      fs.mkdirSync(path.dirname(archived), { recursive: true });
+      archiveArtifacts(runRoot, [captureRef], 'formal-implementation-changed');
+      fs.renameSync(captureFile, archived);
+    }
+    revokeDownstreamDeliveryState(state, 'formal-implementation-changed');
+    state.artifacts.implementationParityEvidence = null;
+  }
+  recordArtifact(runRoot, { artifactId: `implementation-registration:${token.tokenId}`, reference: relative, sha256: sha256File(receiptFile), metadata: { type: receipt.type, authorizationRef } });
+  state.artifacts.pageDelta = receipt.pageDelta.path; state.artifacts.implementationRegistration = relative; state.revision = Number(state.revision || 0) + 1; state.updatedAt = now();
+  commitRunState(runRoot, state, { reason: 'implementation-registered', expectedStateHash });
+  appendEvent(runRoot, { type: 'implementation-registered', sessionId, receipt: relative, pageDelta: receipt.pageDelta.path, files: files.length });
+  return { receipt: relative, ...routerState(root, { ...run, state: stateOf(runRoot) }, sessionId) };
 }
 function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
   if (!authorizationRef) fail('runtime Demo registration requires a current register_runtime_demo Router authorization');
@@ -581,23 +752,196 @@ function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
     if (!operation) fail(`${artifact} is not an unchanged output of a successful generate_visual operation`);
     records.push({ artifact, path: path.relative(run.runDir, file), sha256: sha256File(file), operationReceipt: path.relative(run.runDir, operation.path) });
   }
+  const runtimeFile = artifactFile(run.runDir, state.artifacts?.visualSandboxRuntime);
+  const sandboxFiles = artifactFile(run.runDir, state.artifacts?.visualSandboxFiles);
+  const demo = artifactFile(run.runDir, state.artifacts?.runtimeDemo) && read(artifactFile(run.runDir, state.artifacts.runtimeDemo));
+  const runtime = runtimeFile && read(runtimeFile), manifest = sandboxFiles && read(sandboxFiles);
+  const sandboxRoot = manifest?.entrypoint && path.resolve(run.runDir, path.dirname(manifest.entrypoint));
+  if (!runtimeFile || !sandboxFiles || !runtime || !manifest || !sandboxRoot || path.resolve(run.runDir, runtime.runtimeRoot || '') !== sandboxRoot || runtime.status !== 'running' || !/^http:\/\/127\.0\.0\.1:\d+\/$/.test(String(runtime.url || '')) || demo?.url !== runtime.url || !actionOutputReceiptFor(run.runDir, runtimeFile, 'generate_visual', true) || !actionOutputReceiptFor(run.runDir, sandboxFiles, 'generate_visual', true)) fail('runtime Demo registration requires a successful current Run visual-sandbox runtime and manifest; file URLs, formal services, and unverified sources are forbidden');
+  if (!interactiveDemoReady(state, run.runDir)) fail('runtime Demo registration requires verified interactive user journeys for the current source');
   const receipt = { schemaVersion: '3.0', type: 'runtime-demo-registration', projectId: projectId(root), runId: run.runId, sessionId, registeredAt: now(), artifacts: records };
   const relative = path.join('registrations', `runtime-demo-${Date.now()}.json`); write(path.join(run.runDir, relative), receipt);
   runControllerCommand('register', [run.runDir, 'runtimeDemo', state.artifacts.runtimeDemo]);
   appendEvent(run.runDir, { type: 'runtime-demo-registration-verified', sessionId, receipt: relative, artifacts: records.map(item => item.artifact) });
-  applyPendingDeliveryRouteAfterRuntimeDemoRegistration(root, run, sessionId);
   return { receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
 }
-function applyPendingDeliveryRouteAfterRuntimeDemoRegistration(root, run, sessionId) {
-  // A route utterance made while the Demo was still being generated is a
-  // durable user decision, not a second visual-plan confirmation. Apply it
-  // only after this registration proves the same runtime Demo exists.
+function runtimeDemoPresentationReady(root, run, state, sessionId = null) {
+  const receiptFile = artifactFile(run.runDir, state.artifacts?.runtimeDemoPresentation);
+  const runtimeDemoFile = artifactFile(run.runDir, state.artifacts?.runtimeDemo);
+  const runtimeFile = artifactFile(run.runDir, state.artifacts?.visualSandboxRuntime);
+  const sandboxFiles = artifactFile(run.runDir, state.artifacts?.visualSandboxFiles);
+  if (!receiptFile || !runtimeDemoFile || !runtimeFile || !sandboxFiles) return false;
+  try {
+    const receipt = read(receiptFile), demo = read(runtimeDemoFile), runtime = read(runtimeFile), manifest = read(sandboxFiles);
+    const sandboxRoot = path.resolve(run.runDir, path.dirname(manifest.entrypoint || ''));
+    const expectedRoot = path.resolve(run.runDir, runtime.runtimeRoot || '');
+    const url = String(demo.url || '');
+    const ready = receipt.schemaVersion === '3.0' && receipt.type === 'runtime-demo-presentation'
+      && receipt.projectId === projectId(root) && receipt.runId === run.runId
+      && (!sessionId || receipt.sessionId === sessionId)
+      && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(url) && url === runtime.url && receipt.url === url
+      && runtime.status === 'running' && expectedRoot === sandboxRoot
+      && receipt.runtimeDemo?.sha256 === sha256File(runtimeDemoFile)
+      && receipt.visualSandboxRuntime?.sha256 === sha256File(runtimeFile)
+      && receipt.visualSandboxFiles?.sha256 === sha256File(sandboxFiles);
+    return ready && (!demo.chatPreview || verifyChatPresentation(run.runDir, demo, manifest, receipt.presentation || {})) && (demo.kind !== 'interactive-ui-prototype' || interactiveDemoReady(state, run.runDir));
+  } catch { return false; }
+}
+// Bind the actual sandbox files as well as their manifest: hashing only the
+// manifest would let a changed served page reuse an old user confirmation.
+function demoConfirmationReferences(run, state) {
+  const refs = [state.artifacts.runtimeDemoPresentation, state.artifacts.runtimeDemo, state.artifacts.visualSandboxRuntime, state.artifacts.visualSandboxFiles, state.artifacts.visualReference, state.artifacts.gate1VisualOutput, state.artifacts.designCandidates, state.artifacts.visualExecutionPlan];
+  if (refs.some(ref => !ref)) return null;
+  try {
+    if (usesCombinedPlan(state)) { const plan = read(artifactFile(run.runDir, state.artifacts.visualExecutionPlan)); assertDesignContractCurrent(run.runDir, path.dirname(path.dirname(path.dirname(run.runDir))), plan.selectionAnalysis?.designContract); }
+    const manifest = read(artifactFile(run.runDir, state.artifacts.visualSandboxFiles));
+    if (!Array.isArray(manifest.files) || !manifest.files.length || !manifest.files.some(file => file.path === manifest.entrypoint)) return null;
+    const root = path.resolve(run.runDir, 'visual-sandbox');
+    for (const item of manifest.files) {
+      const file = path.resolve(run.runDir, item.path || '');
+      if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file) || !fs.statSync(file).isFile() || !fs.realpathSync(file).startsWith(`${fs.realpathSync(root)}${path.sep}`) || item.sha256 !== sha256File(file)) return null;
+      refs.push(item.path);
+    }
+    const demo = read(artifactFile(run.runDir, state.artifacts.runtimeDemo));
+    if (demo.kind === 'interactive-ui-prototype') {
+      const baselineRef = state.artifacts.runtimeVisualBaseline, sourceLockRef = state.artifacts.runtimeSourceLock;
+      const baselineFile = artifactFile(run.runDir, baselineRef), sourceLockFile = artifactFile(run.runDir, sourceLockRef);
+      if (!baselineFile || !sourceLockFile) return null;
+      const baseline = read(baselineFile);
+      if (!Array.isArray(baseline.screenCaptures) || !baseline.screenCaptures.length || baseline.sourceLockHash !== sha256File(sourceLockFile)) return null;
+      refs.push(baselineRef, sourceLockRef);
+      if (!Array.isArray(baseline.journeyCaptures) || !baseline.journeyCaptures.length) return null;
+      const captureFile = artifactFile(run.runDir, demo.interactionEvidence?.path);
+      if (!captureFile || sha256File(captureFile) !== demo.interactionEvidence.sha256) return null;
+      const captured = read(captureFile), journeys = manifest.interactionContract?.journeys;
+      if (!Array.isArray(journeys) || !Array.isArray(captured.interactiveDemo?.journeys) || baseline.journeyCaptures.length !== journeys.length || baseline.screenCaptures.length !== captured.evidence?.length) return null;
+      if (!journeys.every(journey => {
+        const baselineMatches = baseline.journeyCaptures.filter(item => item.id === journey.id);
+        const evidenceMatches = captured.interactiveDemo.journeys.filter(item => item.id === journey.id);
+        const item = baselineMatches[0], proof = evidenceMatches[0];
+        return baselineMatches.length === 1 && evidenceMatches.length === 1 && item.kind === journey.kind && item.task === journey.task && item.route === journey.route && item.url === proof.url && item.finalUrl === proof.finalUrl && item.viewport === proof.viewport && JSON.stringify(item.screenshot) === JSON.stringify(proof.screenshot) && JSON.stringify(item.dom) === JSON.stringify(proof.dom);
+      })) return null;
+      if (!captured.evidence.every(screen => {
+        const matches = baseline.screenCaptures.filter(item => item.id === screen.id), item = matches[0];
+        return matches.length === 1 && item.url === screen.url && item.viewport === screen.viewport && item.screenshot?.path === screen.screenshot && item.dom?.path === screen.domHtml;
+      })) return null;
+      for (const capture of [...baseline.screenCaptures, ...baseline.journeyCaptures]) for (const proof of [capture.screenshot, capture.dom]) {
+        const file = artifactFile(run.runDir, proof?.path);
+        if (!file || !fs.realpathSync(file).startsWith(`${fs.realpathSync(run.runDir)}${path.sep}`) || sha256File(file) !== proof.sha256) return null;
+        refs.push(proof.path);
+      }
+      if (state.artifacts.visualScreenReferences) {
+        const indexFile = artifactFile(run.runDir, state.artifacts.visualScreenReferences);
+        if (!indexFile) return null;
+        const index = read(indexFile), seen = new Set();
+        if (!Array.isArray(index.entries) || !index.entries.length) return null;
+        refs.push(state.artifacts.visualScreenReferences);
+        for (const entry of index.entries) {
+          const key = `${entry.kind}:${entry.id}`, file = artifactFile(run.runDir, entry.path);
+          if (seen.has(key) || !file || !fs.realpathSync(file).startsWith(`${fs.realpathSync(run.runDir)}${path.sep}`) || sha256File(file) !== entry.sha256) return null;
+          seen.add(key);
+          const visual = read(file), evidence = visual.demoEvidence;
+          if (visual.demoCapture?.kind !== entry.kind || visual.demoCapture?.id !== entry.id || !evidence?.route || !evidence?.viewport) return null;
+          const width = Number(evidence.viewport.split('x')[0]), viewport = width < 768 ? 'mobile' : width < 1100 ? 'tablet' : 'desktop';
+          const binding = bindStitchScreen(run.runDir, { screenId: entry.id, demoCapture: visual.demoCapture, route: evidence.route, viewport, state: entry.kind === 'screen' ? 'initial' : `journey:${entry.id}` }, baseline);
+          if (JSON.stringify(binding) !== JSON.stringify(evidence) || visual.referenceImage?.sha256 !== binding.screenshot.sha256 || !pass(evidenceFor(visual, fs.readFileSync(artifactFile(run.runDir, binding.dom.path), 'utf8')))) return null;
+          refs.push(entry.path);
+        }
+      }
+    }
+    return [...new Set(refs)];
+  } catch { return null; }
+}
+// A confirmation is a durable, source-bound user decision, not a presentation receipt.
+function confirmedDemoReceipt(root, run, state, sessionId = null) {
+  if (!runtimeDemoPresentationReady(root, run, state, sessionId)) return null;
+  const presentationFile = artifactFile(run.runDir, state.artifacts?.runtimeDemoPresentation);
+  const presentation = read(presentationFile);
+  const refs = demoConfirmationReferences(run, state);
+  if (!refs) return null;
+  const dir = path.join(run.runDir, 'approvals');
+  if (!fs.existsSync(dir)) return null;
+  for (const name of fs.readdirSync(dir).filter(name => name.startsWith('demo-') && name.endsWith('.json')).sort().reverse()) {
+    try {
+      const receipt = read(path.join(dir, name));
+      if (receipt.schemaVersion !== '3.0' || receipt.type !== 'runtime-demo-confirmation' || receipt.status !== 'approved' || receipt.projectId !== projectId(root) || receipt.runId !== run.runId || receipt.sessionId !== presentation.sessionId || (sessionId && receipt.sessionId !== sessionId) || Number(receipt.confirmationEpoch || 0) !== confirmationEpoch(state, 'demo')) continue;
+      if (!Array.isArray(receipt.artifactHashes)) continue;
+      // Page references created after the Demo decision are derived from the
+      // already confirmed screenshots and DOM and are validated above. Do not
+      // reinterpret them as content that the user was previously shown.
+      let requiredRefs = refs;
+      const indexRef = state.artifacts?.visualScreenReferences;
+      if (indexRef && !receipt.artifactHashes.some(item => item.path === indexRef)) {
+        const index = read(artifactFile(run.runDir, indexRef));
+        const derived = new Set([indexRef, ...(index.entries || []).map(item => item.path)]);
+        requiredRefs = refs.filter(ref => !derived.has(ref));
+      }
+      if (!requiredRefs.every(ref => receipt.artifactHashes.some(item => item.path === ref && artifactFile(run.runDir, ref) && item.sha256 === hashFile(artifactFile(run.runDir, ref))))) continue;
+      return path.join('approvals', name);
+    } catch { /* stale or incomplete receipts are never approvals */ }
+  }
+  return null;
+}
+function confirmRuntimeDemo(root, run, sessionId, confirmationId, utterance) {
+  const state = stateOf(run.runDir);
+  const accepted = /^(?:确认(?:交互式)?\s*demo(?:\s*(?:无问题|没问题|符合预期))?|demo\s*(?:确认|无问题|没问题|符合预期)|确认(?:交互式)?原型)$/i;
+  if (!confirmationId || !accepted.test(String(utterance || '').trim())) fail('explicit confirmation of the current Demo is required');
+  if (!usesCombinedPlan(state) || state.lifecycle !== 'active' || !state.locks?.effectApproved || state.deliveryRoute || state.locks?.stitchApproved || state.locks?.stitchSkipped || !runtimeDemoPresentationReady(root, run, state, sessionId)) fail('Demo confirmation is unavailable until the current Demo has been presented');
+  const refs = demoConfirmationReferences(run, state);
+  if (!refs) fail('Demo confirmation requires current baseline artifacts and unchanged sandbox files');
+  const hashes = decisionArtifactHashes(run, [], refs);
+  const relative = path.join('approvals', `demo-${confirmationId.replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
+  const file = path.join(run.runDir, relative);
+  const receipt = { schemaVersion: '3.0', type: 'runtime-demo-confirmation', status: 'approved', confirmationId, projectId: projectId(root), runId: run.runId, sessionId, confirmationEpoch: confirmationEpoch(state, 'demo'), userUtterance: utterance, approvedAt: now(), artifactHashes: hashes };
+  if (fs.existsSync(file)) {
+    const prior = read(file);
+    if (prior.confirmationId !== confirmationId || prior.userUtterance !== utterance || prior.sessionId !== sessionId || Number(prior.confirmationEpoch || 0) !== confirmationEpoch(state, 'demo') || JSON.stringify(prior.artifactHashes) !== JSON.stringify(hashes)) fail('Demo confirmation id already belongs to a different decision or baseline');
+  } else {
+    write(file, receipt);
+    appendEvent(run.runDir, { type: 'runtime-demo-confirmed', sessionId, confirmationId, receipt: relative });
+  }
+  return { receipt: relative, ...routerState(root, { ...run, state }, sessionId) };
+}
+function presentRuntimeDemo(root, run, sessionId, authorizationRef, presentationId, surface, fallbackReason) {
+  if (!authorizationRef || !presentationId) fail('runtime Demo presentation requires a current present_runtime_demo authorization and presentation id');
+  verifyAuthorization(root, run, sessionId, authorizationRef, 'present_runtime_demo');
+  const state = stateOf(run.runDir);
+  if (state.lifecycle !== 'active' || !state.locks?.effectApproved || state.deliveryRoute || state.locks?.stitchApproved || state.locks?.stitchSkipped) fail('runtime Demo presentation is available only after Demo registration and before a delivery route is applied');
+  const runtimeDemoFile = artifactFile(run.runDir, state.artifacts?.runtimeDemo);
+  const runtimeFile = artifactFile(run.runDir, state.artifacts?.visualSandboxRuntime);
+  const sandboxFiles = artifactFile(run.runDir, state.artifacts?.visualSandboxFiles);
+  if (!runtimeDemoFile || !runtimeFile || !sandboxFiles) fail('runtime Demo presentation requires current run-local Demo, runtime, and sandbox manifest artifacts');
+  const demo = read(runtimeDemoFile), runtime = read(runtimeFile), manifest = read(sandboxFiles);
+  const sandboxRoot = path.resolve(run.runDir, path.dirname(manifest.entrypoint || ''));
+  const runtimeRoot = path.resolve(run.runDir, runtime.runtimeRoot || '');
+  const url = String(demo.url || '');
+  if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(url) || url !== runtime.url || runtime.status !== 'running' || runtimeRoot !== sandboxRoot) fail('runtime Demo must be presented from this Run visual-sandbox HTTP URL; file:// URLs, formal project services, and non-run-local sources are forbidden');
+  if (demo.kind === 'interactive-ui-prototype' && !interactiveDemoReady(state, run.runDir)) fail('interactive Demo evidence is missing or stale; rebuild before presenting');
+  const presentation = { surface: surface || (demo.chatPreview ? 'chat-inline' : 'browser-panel'), ...(demo.chatPreview ? { fragment: demo.chatPreview } : {}), ...(fallbackReason ? { fallbackReason } : {}) };
+  if (presentation.surface === 'chat-inline') presentation.deliveryEvidence = 'prepared-for-host-final-response';
+  try { verifyChatPresentation(run.runDir, demo, manifest, presentation); } catch (error) { fail(error.message); }
+  const safeId = presentationId.replace(/[^A-Za-z0-9._-]/g, '_');
+  const relative = path.join('presentations', `runtime-demo-${safeId}.json`);
+  const receipt = { schemaVersion: '3.0', type: 'runtime-demo-presentation', projectId: projectId(root), runId: run.runId, sessionId, presentationId, presentedAt: now(), url, presentation,
+    runtimeDemo: { path: path.relative(run.runDir, runtimeDemoFile), sha256: sha256File(runtimeDemoFile) },
+    visualSandboxRuntime: { path: path.relative(run.runDir, runtimeFile), sha256: sha256File(runtimeFile) },
+    visualSandboxFiles: { path: path.relative(run.runDir, sandboxFiles), sha256: sha256File(sandboxFiles) } };
+  write(path.join(run.runDir, relative), receipt);
+  state.artifacts.runtimeDemoPresentation = relative; state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(path.join(run.runDir, 'state.json'), state);
+  appendEvent(run.runDir, { type: 'runtime-demo-presented', sessionId, presentationId, receipt: relative, url });
+  applyPendingDeliveryRouteAfterRuntimeDemoPresentation(root, run, sessionId);
+  return { receipt: relative, presentation: { ...demoPresentation(run.runDir, demo, presentation.surface), ...presentation }, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
+}
+function applyPendingDeliveryRouteAfterRuntimeDemoPresentation(root, run, sessionId) {
+  // A queued direct-code instruction is accepted only after the same current
+  // Run's HTTP Demo has actually been displayed and durably recorded.
   const registered = stateOf(run.runDir);
-  if (registered.pendingDeliveryRoute === 'direct-code') {
+  if (!usesCombinedPlan(registered) && registered.pendingDeliveryRoute === 'direct-code') {
     const intent = registered.pendingDeliveryRouteReceipt;
     if (!intent) fail('pending direct-code route is missing its decision receipt');
+    if (!runtimeDemoPresentationReady(root, run, registered, sessionId)) fail('pending direct-code route cannot apply before the current run-local Demo presentation receipt exists');
     skipStitchStage(root, { ...run, state: registered }, sessionId, 'pending-direct-code-route', `apply registered direct-code route intent: ${intent}`, [intent]);
-    appendEvent(run.runDir, { type: 'pending-delivery-route-applied-after-runtime-demo-registration', sessionId, route: 'direct-code', intent });
+    appendEvent(run.runDir, { type: 'pending-delivery-route-applied-after-runtime-demo-presentation', sessionId, route: 'direct-code', intent });
   }
 }
 function gate1PresentationRegistrationReady(runDir, state) {
@@ -692,7 +1036,6 @@ function recoverRecordedRegistration(root, run, sessionId) {
     if (candidate) {
       runControllerCommand('register', [run.runDir, 'runtimeDemo', state.artifacts.runtimeDemo]);
       appendEvent(run.runDir, { type: 'runtime-demo-registration-recovered', sessionId, receipt: candidate.relative, artifacts: candidate.receipt.artifacts.map(item => item.artifact) });
-      applyPendingDeliveryRouteAfterRuntimeDemoRegistration(root, run, sessionId);
       return { type: 'runtime-demo-registration', receipt: candidate.relative };
     }
   }
@@ -782,6 +1125,29 @@ function existingBrowserCaptureFreshness(runDir, state, referenceStatus = existi
     return bound ? { ready: true, reason: null, displayFile } : { ready: false, reason: 'Existing browser evidence is not bound to the current code reference and page skeleton' };
   } catch (error) { return { ready: false, reason: `Existing browser evidence is unreadable: ${error.message}` }; }
 }
+function functionalFreezeStatus(runDir, state) {
+  // Compact Router contract fixtures intentionally omit full baseline schemas.
+  // Normal invocations never set this test-only switch.
+  if (process.env.APEX_TEST_LEGACY_ROLE_CHAIN === '1') return { ready: true, reason: null };
+  if (state.track !== 'existing') return { ready: true, reason: null };
+  const freezeFile = artifactFile(runDir, state.artifacts?.functionalFreeze);
+  const referenceFile = artifactFile(runDir, state.artifacts?.codeReference);
+  const skeletonFile = artifactFile(runDir, state.artifacts?.pageSkeleton);
+  const baselineFile = artifactFile(runDir, state.artifacts?.existingBaseline);
+  const scopeFile = artifactFile(runDir, state.artifacts?.changeScope);
+  if (!freezeFile || !referenceFile || !skeletonFile || !baselineFile || !scopeFile) return { ready: false, reason: 'functional freeze and its complete baseline bindings are required' };
+  try {
+    const freeze = read(freezeFile), reference = read(referenceFile), skeleton = read(skeletonFile), baseline = read(baselineFile), scope = read(scopeFile);
+    if (containsGateTemplatePlaceholder(freeze) || !Array.isArray(freeze.items) || !freeze.items.length) return { ready: false, reason: 'functional freeze is a template or contains no frozen items' };
+    const bindings = freeze.sourceBindings;
+    if (!bindings || bindings.codeReference?.path !== state.artifacts.codeReference || bindings.codeReference?.sha256 !== sha256File(referenceFile) || bindings.codeReference?.sourceTreeHash !== reference.sourceTreeHash || bindings.pageSkeleton?.path !== state.artifacts.pageSkeleton || bindings.pageSkeleton?.sha256 !== sha256File(skeletonFile) || bindings.pageSkeleton?.skeletonHash !== skeleton.skeletonHash || bindings.existingBaseline?.path !== state.artifacts.existingBaseline || bindings.existingBaseline?.sha256 !== sha256File(baselineFile) || bindings.changeScope?.path !== state.artifacts.changeScope || bindings.changeScope?.sha256 !== sha256File(scopeFile)) return { ready: false, reason: 'functional freeze is not bound to the current baseline evidence and scope' };
+    const names = new Set(freeze.items.map(item => item?.name));
+    if ((scope.affected?.visualNodes || []).some(name => !names.has(name))) return { ready: false, reason: 'functional freeze does not cover every affected visual node' };
+    const boundTargets = new Set(bindings.runtimeTargets || []);
+    if ((scope.affected?.runtimeTargets || []).some(target => !boundTargets.has(target)) || [...boundTargets].some(target => !(scope.affected?.runtimeTargets || []).includes(target))) return { ready: false, reason: 'functional freeze runtime targets do not match the change closure' };
+    return { ready: true, reason: null };
+  } catch (error) { return { ready: false, reason: `functional freeze is unreadable: ${error.message}` }; }
+}
 function existingVisualBaselineStatus(runDir, state) {
   if (state.track !== 'existing') return { ready: true, reason: null };
   const inventoryFile = artifactFile(runDir, state.artifacts?.projectInventory);
@@ -855,6 +1221,13 @@ function visualPlanSourceBindingStatus(runDir, state) {
   if (!planFile) return { ready: false, reason: 'visual execution plan is missing' };
   try {
     const plan = read(planFile);
+    if (usesCombinedPlan(state)) {
+      assertDesignContractCurrent(runDir, path.dirname(path.dirname(path.dirname(runDir))), plan.selectionAnalysis?.designContract);
+      // A confirmed plan must stop authorizing Demo generation when either
+      // stage's bound role summary has since changed. Old test/legacy runs
+      // without presentation manifests retain their existing migration path.
+      if (!approvedRoleSummariesCurrent(state, runDir)) return { ready: false, reason: 'confirmed role summary is missing or stale' };
+    }
     const requiredKinds = ['layout', 'component', 'style', 'font', 'content'];
     const byNode = new Map();
     for (const selection of plan.sourceSelections || []) {
@@ -916,8 +1289,23 @@ function latestTechnicalIdentityRepair(state, runDir) {
     return { ready: true, reason: reset.reason, archive: invalidation.archive, priorPlan: path.relative(runDir, priorPlan), priorHash, currentPlan: state.artifacts.visualExecutionPlan, currentHash, approval: approval.relative };
   } catch { return { ready: false, reason: 'technical identity repair evidence is unreadable' }; }
 }
+function interactiveDemoReady(state, runDir) {
+  try {
+    const demo = read(artifactFile(runDir, state.artifacts?.runtimeDemo));
+    const captureFile = artifactFile(runDir, demo.interactionEvidence?.path);
+    if (!captureFile) return false;
+    if (demo.kind !== 'interactive-ui-prototype' || demo.interactionEvidence?.sha256 !== sha256File(captureFile)) return false;
+    verifyDemoInteractions(runDir, read(captureFile), demo.url, { requireJourneyLocation: usesCombinedPlan(state) });
+    return true;
+  } catch { return false; }
+}
+function interactiveDemoRefreshRequired(state, runDir) {
+  if (!runDir || !state.locks?.effectApproved || state.gates?.gate2?.status === 'passed') return false;
+  try { return read(artifactFile(runDir, state.artifacts?.runtimeDemo)).kind === 'interactive-ui-prototype' && !interactiveDemoReady(state, runDir); } catch { return false; }
+}
 function runtimeDemoRegistrationReady(state, runDir) {
   if (!runDir || !state.artifacts?.runtimeDemo || !state.artifacts?.designCandidates || !state.artifacts?.visualReference || !state.artifacts?.gate1VisualOutput) return false;
+  if (!interactiveDemoReady(state, runDir)) return false;
   const required = ['runtimeDemo', 'designCandidates', 'visualReference', 'gate1VisualOutput'];
   return required.every(artifact => {
     const reference = state.artifacts[artifact];
@@ -971,7 +1359,9 @@ function confirmationInputsValidated(runDir, checkpoint) {
   // stand-ins to exercise state routing. Production runs never receive this
   // switch and always execute the full pre-confirmation validator.
   if (process.env.APEX_TEST_LEGACY_ROLE_CHAIN === '1') return true;
-  const validation = spawnSync(process.execPath, [validator, 'pre-confirmation', runDir, checkpoint], { encoding: 'utf8' });
+  const validation = checkpoint === 'gate1'
+    ? spawnSync(process.execPath, [validator, 'pre-gate1', runDir], { encoding: 'utf8' })
+    : spawnSync(process.execPath, [validator, 'pre-confirmation', runDir, checkpoint], { encoding: 'utf8' });
   return validation.status === 0;
 }
 function displayList(values, empty = '无') {
@@ -1014,7 +1404,7 @@ function gate1PresentationReady(state, runDir) {
       const source = manifest.sources?.[name], file = artifactFile(runDir, source?.path);
       return file && source.sha256 === sha256File(file) && source.path === state.artifacts?.[name];
     });
-    if (!sourcesCurrent) return false;
+    if (!sourcesCurrent || !gate1RoleSummaryCurrent(state, runDir, manifest)) return false;
     if (state.track === 'existing') {
       const scope = read(artifactFile(runDir, state.artifacts.changeScope));
       const result = assertAffectedOnlyPresentation(fs.readFileSync(presentation, 'utf8'), scope, { requireBaselineSection: true });
@@ -1024,6 +1414,7 @@ function gate1PresentationReady(state, runDir) {
   } catch { return false; }
 }
 function visualPlanReady(state, runDir) {
+  if (usesCombinedPlan(state) && state.gates?.gate1?.status !== 'passed' && !checkpointReady(state, runDir, 'gate1')) return false;
   const plan = artifactFile(runDir, state.artifacts?.visualExecutionPlan);
   const presentation = artifactFile(runDir, state.artifacts?.visualPlanPresentation);
   const manifestFile = artifactFile(runDir, state.artifacts?.visualPlanPresentationManifest);
@@ -1036,7 +1427,7 @@ function visualPlanReady(state, runDir) {
       && manifest.visualExecutionPlanSha256 === sha256File(plan)
       && manifest.presentation === state.artifacts.visualPlanPresentation
       && manifest.presentationSha256 === sha256File(presentation);
-    if (!basicReady) return false;
+    if (!basicReady || !visualRoleSummaryCurrent(state, runDir, manifest)) return false;
     if (state.track === 'existing') {
       const scope = read(artifactFile(runDir, state.artifacts.changeScope));
       const result = assertAffectedOnlyPresentation(fs.readFileSync(presentation, 'utf8'), scope);
@@ -1058,10 +1449,40 @@ function roleStageReady(state, runDir, stage) {
     const summary = artifactFile(runDir, entry.summary);
     if (!summary || !fs.existsSync(summary) || entry.summarySha256 !== sha256File(summary)) return false;
     const operationIndex = fs.existsSync(path.join(runDir, 'operations-index.json')) ? read(path.join(runDir, 'operations-index.json')).receipts || {} : {};
-    return entry.advisories.every(item => {
+    const advisoryReceiptsCurrent = entry.advisories.every(item => {
       const file = artifactFile(runDir, item.path);
       const receipt = item.operationReceipt && operationIndex[item.operationReceipt];
       return file && fs.existsSync(file) && sha256File(file) === item.sha256 && entry.selectedRoles.includes(item.roleId) && receipt?.status === 'succeeded' && receipt.script === 'role-advisory.mjs' && receipt.outputFileHashes?.[item.path] === item.sha256;
+    });
+    if (!advisoryReceiptsCurrent) return false;
+    // Version 1.1 binds each selected profession to a durable Job.  A
+    // hand-written summary/receipt is not sufficient: every selected job
+    // must have reached succeeded in the same run ledger, with no running or
+    // dead-letter substitute hidden behind a human-readable summary.
+    if (Number.parseFloat(state.roleChain.version || '1.0') < 1.1) return true;
+    const selectionFile = path.join(runDir, 'advisories', stage, 'selection.json');
+    if (!fs.existsSync(selectionFile)) return false;
+    const selection = read(selectionFile);
+    if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return false;
+    if (selection.schemaVersion !== '1.1' || JSON.stringify(selection.selectedRoles) !== JSON.stringify(entry.selectedRoles) || !selection.agentJobs || Object.keys(selection.agentJobs).length !== entry.selectedRoles.length) return false;
+    const bindingsCurrent = (selection.inputBindings || []).every(binding => {
+      // visualRevision is intentionally a first-class role input without
+      // becoming a state.artifacts entry; it is the append-only prompt log.
+      const file = binding.artifact === 'visualRevision'
+        ? path.resolve(runDir, binding.path)
+        : artifactFile(runDir, state.artifacts?.[binding.artifact]);
+      return file && file.startsWith(`${path.resolve(runDir)}${path.sep}`)
+        && fs.existsSync(file)
+        && (binding.artifact === 'visualRevision' || state.artifacts?.[binding.artifact] === binding.path)
+        && (binding.artifact === 'visualRevision'
+          ? visualRevisionBindingCurrent(file, binding.sha256)
+          : sha256File(file) === binding.sha256);
+    });
+    if (!bindingsCurrent) return false;
+    const jobs = new Map(agentRuntimeStatus(runDir).jobs.map(job => [job.jobId, job]));
+    return entry.selectedRoles.every(roleId => {
+      const job = jobs.get(selection.agentJobs[roleId]);
+      return job?.agentId === roleId && job.stage === stage && job.status === 'succeeded';
     });
   } catch { return false; }
 }
@@ -1075,10 +1496,38 @@ function deliveryRequiresApiContracts(state, runDir) {
 function roleStageState(state, runDir, stage) {
   if (!state.roleChain?.enabled) return 'not-required';
   const manifestFile = artifactFile(runDir, state.artifacts?.roleAdvisoryManifest);
-  if (!manifestFile) return 'select';
+  const selectedStageState = () => {
+    const selectionFile = path.join(runDir, 'advisories', stage, 'selection.json');
+    if (!fs.existsSync(selectionFile)) return 'select';
+    try {
+      const selection = read(selectionFile);
+      if (!Array.isArray(selection.selectedRoles) || !selection.selectedRoles.length) return 'select';
+      if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return 'repair';
+      // Legacy selections used a fixed split that could be smaller than the
+      // deterministic context they froze. Route that state to a guarded
+      // migration before allowing a record attempt that must fail.
+      const supportedBudgetPolicies = new Set([
+        'frozen-input-floor-plus-output-and-retry-reserve',
+        'frozen-input-floor-plus-output-and-retry-reserve-and-one-repair-epoch',
+        'role-input-and-required-skill-reserve-v2'
+      ]);
+      const runtime = agentRuntimeStatus(runDir);
+      const jobs = new Map(runtime.jobs.map(job => [job.jobId, job]));
+      const running = selection.selectedRoles.some(roleId => jobs.get(selection.agentJobs?.[roleId])?.status === 'running');
+      const budgetObsolete = !supportedBudgetPolicies.has(selection.tokenBudget?.policy) || selection.tokenBudget.policy !== 'role-input-and-required-skill-reserve-v2' || !Number.isInteger(selection.tokenBudget?.perAgent) || selection.tokenBudget.perAgent < Number(selection.tokenBudget?.inputFloor || 0) || selection.selectedRoles.some(roleId => !Number.isInteger(selection.tokenBudget?.perRole?.[roleId]));
+      if (budgetObsolete && !running) return 'rebudget';
+      if (!budgetObsolete && selection.selectedRoles.some(roleId => {
+        const job = jobs.get(selection.agentJobs?.[roleId]);
+        return job?.status === 'queued' && (Number(job.payload?.tokenBudget) !== Number(selection.tokenBudget.perRole[roleId]) || Number(job.payload?.stageTokenBudget) !== Number(selection.tokenBudget.stage));
+      }) && !running) return 'rebudget';
+      const everyAdvisoryExists = selection.selectedRoles.every(roleId => fs.existsSync(path.join(runDir, 'advisories', stage, `${roleId}.json`)));
+      return everyAdvisoryExists ? 'summarize' : 'record';
+    } catch { return 'select'; }
+  };
+  if (!manifestFile) return selectedStageState();
   try {
     const entry = read(manifestFile).stages?.[stage];
-    if (!entry?.selectedRoles?.length) return 'select';
+    if (!entry?.selectedRoles?.length) return selectedStageState();
     if (!entry.advisories || entry.advisories.length !== entry.selectedRoles.length) return 'record';
     if (!entry.summary || !artifactFile(runDir, entry.summary)) return 'summarize';
     return roleStageReady(state, runDir, stage) ? 'ready' : 'repair';
@@ -1090,11 +1539,23 @@ function visualSandboxSourceReady(state, runDir) {
   if (!manifestFile || !sandboxFile) return { ready: false, reason: 'Demo source manifest or sandbox materialization is missing' };
   try {
     const source = read(manifestFile), sandbox = read(sandboxFile);
+    validateInteractionContract(source.interactionContract);
+    if (JSON.stringify(source.interactionContract) !== JSON.stringify(sandbox.interactionContract)) return { ready: false, reason: 'interactive contract differs from materialized Demo' };
     if (!Array.isArray(source.sourceBindings) || !source.sourceBindings.length || sandbox.status !== 'materialized' || !sandbox.entrypoint) return { ready: false, reason: 'Demo source bindings or materialization manifest is incomplete' };
     const entry = artifactFile(runDir, sandbox.entrypoint);
     if (!entry || !fs.existsSync(entry)) return { ready: false, reason: 'materialized Demo entrypoint is missing' };
     const renderedSource = fs.readFileSync(entry, 'utf8');
-    const missing = source.sourceBindings.map(item => item.sourceSelectionId).filter(id => typeof id !== 'string' || !renderedSource.includes(`data-apex-source-selection=\"${id}\"`) && !renderedSource.includes(`data-apex-source-selection='${id}'`));
+    const plan = read(artifactFile(runDir, state.artifacts?.visualExecutionPlan));
+    const selections = new Map((plan.sourceSelections || []).map(item => [item.id, item]));
+    const declaredFiles = new Set((source.files || []).map(item => item.path));
+    const missing = source.sourceBindings.map(item => {
+      const id = item?.sourceSelectionId;
+      if (typeof id !== 'string') return id;
+      const isDomDeclared = new RegExp(`data-apex-source-selection=[\"'][^\"']*\\b${id}\\b[^\"']*[\"']`).test(renderedSource);
+      const selection = selections.get(id);
+      const isRuntimeAsset = ['style', 'font', 'motion', 'component'].includes(selection?.kind) && Array.isArray(item.files) && item.files.length && item.files.every(file => declaredFiles.has(file));
+      return isDomDeclared || isRuntimeAsset ? null : id;
+    }).filter(Boolean);
     return missing.length ? { ready: false, reason: `materialized Demo does not declare its selected sources: ${missing.join(', ')}` } : { ready: true, reason: null };
   } catch { return { ready: false, reason: 'Demo source or sandbox materialization is unreadable' }; }
 }
@@ -1133,10 +1594,57 @@ function formalRuntimeSourceProvenanceStatus(state, runDir) {
     return { ready: true, enforce: true, needsImplementation: false, reason: null };
   } catch (error) { return { ready: false, enforce: true, needsImplementation: false, reason: `formal runtime provenance is unreadable: ${error.message}` }; }
 }
+function formalCaptureSourceReady(state, runDir) {
+  try {
+    const file = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
+    const manifest = read(artifactFile(runDir, state.artifacts?.visualSourceManifest));
+    const plan = read(artifactFile(runDir, state.artifacts?.visualExecutionPlan));
+    const capture = read(file), bindings = capture.sourceBindings || [];
+    const expected = new Set((plan.sourceSelections || []).map(item => item.id));
+    if (capture.kind !== 'runtime' || capture.status !== 'passed' || !bindings.length || !capture.evidence?.length || bindings.length !== (manifest.bindings || []).length) return false;
+    if (usesCombinedPlan(state)) {
+      const sandbox = read(artifactFile(runDir, state.artifacts?.visualSandboxFiles));
+      const strategyFile = artifactFile(runDir, state.artifacts?.experienceStrategy);
+      const tasks = requiredFormalTasks(sandbox, strategyFile ? read(strategyFile) : {});
+      if (!tasks.size || capture.formalInteractions?.status !== 'passed' || [...tasks].some(task => !(capture.formalInteractions.journeys || []).some(item => item.task === task && item.status === 'passed' && item.evidence))) return false;
+    }
+    if (![...expected].every(id => capture.sourceSelectionIds?.includes(id)) || (capture.sourceSelectionIds || []).some(id => !expected.has(id))) return false;
+    if (!(manifest.bindings || []).every(item => bindings.some(binding => binding.visualNode === item.visualNode && binding.selector === item.selector && binding.sourceMarker === item.sourceMarker))) return false;
+    if (capture.evidence.some(item => item.status !== 'captured' || !Array.isArray(item.sourceBindings) || bindings.some(binding => !item.sourceBindings.some(actual => actual.visualNode === binding.visualNode && actual.selector === binding.selector && actual.sourceMarker === binding.sourceMarker && actual.rendered === true)) || [...expected].some(id => !item.sourceSelections?.includes(id)))) return false;
+    const reference = path.relative(runDir, file), digest = sha256File(file);
+    return operationRecords(runDir).some(({ receipt }) => receipt?.action === 'verify' && receipt.status === 'succeeded' && path.basename(receipt.script || '') === 'browser-capture.mjs' && receipt.outputFileHashes?.[reference] === digest);
+  } catch { return false; }
+}
+function gate3VerificationBundleReady(state, runDir) {
+  if (!state.artifacts?.verificationBundle) return false;
+  if (!usesCombinedPlan(state)) return Boolean(artifactFile(runDir, state.artifacts.verificationBundle));
+  return Boolean(!qualityVerificationPending(state, runDir) && state.artifacts?.verificationPlan && controlledOutput(runDir, state.artifacts.verificationBundle, ['verification-orchestrator.mjs'], [state.artifacts.verificationPlan]));
+}
+function gate3ProvenanceReady(state, runDir) {
+  try {
+    const file = artifactFile(runDir, state.artifacts?.evidenceProvenance);
+    if (!file || !fs.existsSync(file)) return false;
+    const envelope = read(file), root = fs.realpathSync(runDir), operations = fs.realpathSync(path.join(root, 'operations'));
+    if (envelope.status !== 'passed' || !Array.isArray(envelope.entries) || !envelope.entries.length) return false;
+    const ids = new Set();
+    return envelope.entries.every(entry => {
+      if (!entry.id || ids.has(entry.id) || entry.result !== 'passed') return false;
+      ids.add(entry.id);
+      const evidence = fs.realpathSync(path.resolve(runDir, entry.path)), receipt = fs.realpathSync(path.resolve(runDir, entry.operationReceipt));
+      if (!evidence.startsWith(`${root}${path.sep}`) || !receipt.startsWith(`${operations}${path.sep}`)) return false;
+      const operation = read(receipt);
+      return entry.sha256 === sha256File(evidence) && operation.status === 'succeeded' && operation.outputFileHashes?.[entry.path] === entry.sha256;
+    });
+  } catch { return false; }
+}
 function gate3IndustryEvidenceReady(state, runDir) {
   try {
-    const evidence = artifactFile(runDir, state.artifacts?.industryBenchmarkEvidence);
-    return Boolean(evidence && fs.existsSync(evidence));
+    const file = artifactFile(runDir, state.artifacts?.industryBenchmarkEvidence);
+    const provenance = artifactFile(runDir, state.artifacts?.evidenceProvenance);
+    const plan = artifactFile(runDir, state.artifacts?.visualExecutionPlan);
+    if (!file || !provenance || !plan) return false;
+    const evidence = read(file);
+    return evidence.status === 'passed' && evidence.provenanceHash === sha256File(provenance) && evidence.visualPlanHash === sha256File(plan) && (!usesCombinedPlan(state) || Boolean(evidence.reviewPath && controlledOutput(runDir, state.artifacts.industryBenchmarkEvidence, ['industry-benchmark.mjs'], [evidence.reviewPath])));
   } catch { return false; }
 }
 function automaticWorkStep(state, runDir, action) {
@@ -1166,6 +1674,7 @@ function automaticWorkStep(state, runDir, action) {
       }
     };
   };
+  if (action === 'recover') return step('reconcile-run-integrity', '修复并重新对账当前 Run 的完整性', ['run-ledger.sqlite', 'state.json'], '当前 Run 的产物、谱系或 Agent 作业存在不一致。通过 recover 调用 apex-recover.mjs；无法自动修复时必须保留失败回执，禁止继续 Gate。');
   if (action === 'collect_existing_baseline') {
     if (!runFile('projectInventory')) return step('capture-project-inventory', '扫描正式项目入口、技术栈与脚本', ['project-inventory.json'], '通过 collect_existing_baseline 调用 project-intake.mjs scan；仅扫描正式项目，排除 .apex 与临时 Demo。');
     const reference = existingCodeReferenceFreshness(runDir, state);
@@ -1173,71 +1682,140 @@ function automaticWorkStep(state, runDir, action) {
     const display = existingBrowserCaptureFreshness(runDir, state, reference);
     if (!display.ready) return step('capture-existing-browser-baseline', '采集并绑定当前 Existing 页面截图与 DOM 证据', ['browser-spec.json', 'evidence/existing-browser-capture.json'], `内部基于当前冻结代码引用和页面骨架生成浏览器规格并调用 browser-capture.mjs capture。当前原因：${display.reason}。截图和 DOM 必须绑定同一 sourceTreeHash，且仅作证据，不是用户确认。`);
     const baseline = existingVisualBaselineStatus(runDir, state);
-    const scope = changeScopeStatus(runDir, state);
-    if (!baseline.ready && scope.ready) return step('freeze-existing-baseline', '从同一版本的真实代码、DOM、截图和样式源冻结 Existing 基线', ['existing-baseline-input.json', 'existing-baseline.json'], `内部生成真实基线输入并调用 baseline-collector.mjs capture；当前校验原因：${baseline.reason}。禁止提交占位符、1970 时间或 Replace 模板。`);
+    const scope = state.artifacts?.changeScope ? changeScopeStatus(runDir, state) : { ready: false, reason: 'change scope has not been recorded' };
+    if (!baseline.ready && (!state.artifacts?.changeScope || scope.ready)) return step('freeze-existing-baseline', '从同一版本的真实代码、DOM、截图和样式源冻结 Existing 基线', ['existing-baseline-input.json', 'existing-baseline.json'], `内部生成真实基线输入并调用 baseline-collector.mjs capture；当前校验原因：${baseline.reason}。禁止提交占位符、1970 时间或 Replace 模板。`);
     if (!scope.ready) return step('freeze-change-scope', '刷新本次受影响闭包与未改动保护补集', ['change-scope-input.json', 'change-scope.json'], `内部从最新完整代码引用生成局部变更闭包，再以 record_context 调用 contract-recorder.mjs scope。当前原因：${scope.reason}。`, 'record_context');
+    if (!functionalFreezeStatus(runDir, state).ready) return step('compile-functional-freeze', '从冻结页面骨架、代码快照和变更闭包生成可验证功能冻结', ['functional-freeze.json'], `内部通过 collect_existing_baseline 调用 functional-freeze-compiler.mjs compile；当前原因：${functionalFreezeStatus(runDir, state).reason}。不得使用初始化模板、空数组或人工改写状态。`);
     const roles = roleStageState(state, runDir, 'baseline');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`baseline-role-${roles}`, '完成 Existing 基线专业角色汇总', ['advisories/baseline/selection.json', 'advisories/baseline/*.json', 'advisories/baseline/role-decision-summary.md'], `通过 collect_existing_baseline 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record' : 'summarize'}；已选角色必须形成可验证结论，失败保留受控回执并停止当前 Gate。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`baseline-role-${roles}`, '完成 Existing 基线专业角色汇总', ['advisories/baseline/selection.json', 'advisories/baseline/*.json', 'advisories/baseline/role-decision-summary.md'], `通过 collect_existing_baseline 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record' : roles === 'repair' ? 'repair' : roles === 'rebudget' ? 'rebudget' : 'summarize'}；已选角色必须形成可验证结论，失败保留受控回执并停止当前 Gate。`);
     return step('continue-gate1-analysis', '转入 Gate 1 需求与交付方案编译', [], 'Existing 基线已有效；重新读取 Router 后必须授权 analyze_requirement 并继续完整 Gate 1 链。', 'analyze_requirement');
   }
   if (action === 'analyze_requirement') {
+    // A prior Core version could reach Gate 1 with the init-time functional
+    // freeze template still registered. Route that defect back to its owned
+    // baseline compiler instead of exposing a presentation that will fail on
+    // the user's approval click.
+    if (state.track === 'existing' && !functionalFreezeStatus(runDir, state).ready) return step('compile-functional-freeze', '修复并编译 Existing 功能冻结', ['functional-freeze.json'], `当前功能冻结不可用于 Gate 1：${functionalFreezeStatus(runDir, state).reason}。通过 collect_existing_baseline 调用 functional-freeze-compiler.mjs compile，完成后重新读取 Router；不得绕过或手工编辑冻结工件。`, 'collect_existing_baseline');
     if (!runFile('intentBrief') || !runFile('deliveryContract') || !gate1InputArtifactsReady(state, runDir)) return step('derive-intent-and-delivery', '根据用户需求和冻结基线生成需求及交付契约', ['intent-brief.json', 'delivery-contract.json'], '内部从当前任务和 Existing/Greenfield 基线提炼可验证目标、范围、能力与不包含项；初始化模板、Replace 文本或未绑定字段必须在此自动替换，绝不得先展示确认。', 'record_context');
     if (deliveryRequiresApiContracts(state, runDir) && !runFile('domainModel')) return step('record-domain-model', '登记领域模型', ['domain-model-input.json', 'domain-model.json'], '基于当前代码/API 证据生成领域模型输入，再以 record_context 调用 contract-recorder.mjs domain。', 'record_context');
     if (deliveryRequiresApiContracts(state, runDir) && !runFile('apiContract')) return step('record-api-contract', '登记 API 契约', ['api-contract-input.json', 'api-contract.json'], '基于当前代码/API 证据生成 API 契约输入，再以 record_context 调用 contract-recorder.mjs api。', 'record_context');
     if (!runFile('experienceStrategy') || !runFile('experienceQualityEvidence')) return step('evaluate-experience-strategy', '评估体验策略与质量证据', ['experience-strategy.json', 'experience-quality-evidence.json'], '通过 analyze_requirement 调用 experience-evaluator.mjs；质量结论必须绑定当前需求与基线。');
     const roles = roleStageState(state, runDir, 'gate1');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`gate1-role-${roles}`, '完成 Gate 1 专业角色汇总', ['advisories/gate1/selection.json', 'advisories/gate1/*.json', 'advisories/gate1/role-decision-summary.md'], `通过 analyze_requirement 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record' : 'summarize'}；角色结论必须可验证并写入八节方案的内部专业协作摘要。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`gate1-role-${roles}`, '完成 Gate 1 专业角色汇总', ['advisories/gate1/selection.json', 'advisories/gate1/*.json', 'advisories/gate1/role-decision-summary.md'], `通过 analyze_requirement 调用 role-advisory.mjs ${roles}；角色结论必须可验证并写入八节方案的内部专业协作摘要。`);
     // Presence is not readiness. A stale body, manifest, source hash, or
     // affected-scope proof must be rebuilt here rather than falling through
     // with analyze_requirement but no runnable currentStep.
     if (!gate1PresentationReady(state, runDir)) return step('compile-gate1-presentation', '生成或重建完整八节需求与交付方案', ['gate1-presentation.md', 'gate1-presentation-manifest.json'], '通过 analyze_requirement 调用 contract-recorder.mjs gate1-presentation，重新绑定当前需求、冻结基线与范围证明。完成后不得停止，必须登记该方案。');
-    if (!gate1PresentationRegistrationReady(runDir, state)) return step('register-gate1-presentation', '登记完整 Gate 1 方案并打开唯一确认点', ['registrations/gate1-presentation-*.json'], '重新授权 analyze_requirement 后调用 Router register-gate1-presentation；随后完整流式展示八节方案，并且只显示“确认需求与交付方案”。');
+    if (!gate1PresentationRegistrationReady(runDir, state)) return step('register-gate1-presentation', '登记完整产品方案', ['registrations/gate1-presentation-*.json'], usesCombinedPlan(state) ? '重新授权 analyze_requirement 后调用 Router register-gate1-presentation；完成后继续视觉方案，不单独要求产品确认。' : '重新授权 analyze_requirement 后调用 Router register-gate1-presentation；随后完整流式展示八节方案，并且只显示“确认需求与交付方案”。');
+    if (!confirmationInputsValidated(runDir, 'gate1')) {
+      const validation = spawnSync(process.execPath, [validator, 'pre-gate1', runDir], { encoding: 'utf8' });
+      const reason = (validation.stderr || validation.stdout || validation.error?.message || 'Gate 1 validation failed').trim();
+      return step('repair-gate1-validation', '修复产品方案的前置验证', [], `当前 Gate 1 真实校验失败：${reason}。根据失败原因通过对应的 record_context、collect_existing_baseline 或 analyze_requirement 受控动作修复源工件和受影响的角色汇总与方案登记；不得跳过校验或重复提交未改变的输入。`);
+    }
   }
   if (action === 'plan_visual') {
     // A Gate 1 approval must never leave the host in an automatic state with
     // no concrete instruction.  The visual-plan compiler owns the complete
     // plan, role summary and ten-section presentation as one controlled chain.
+    const roles = roleStageState(state, runDir, 'visual');
+    if (roles !== 'ready' && roles !== 'not-required') return step(`visual-role-${roles}`, '完成视觉阶段专业角色汇总', ['advisories/visual/selection.json', 'advisories/visual/*.json', 'advisories/visual/role-decision-summary.md'], `以 plan_visual 调用 role-advisory.mjs ${roles}；UX、UI、图表/动效与视觉审查结论必须完成并绑定当前来源，才能编译十节视觉方案。`);
     return step('compile-complete-visual-plan', '编译完整视觉方案及十节确认内容', ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json'], '基于已确认需求、冻结基线、DESIGN 规范和专业角色结论，以 plan_visual 生成视觉执行方案及完整十节展示内容；完成后重新读取 Router，并且只呈现“确认视觉方案”。不得以一句摘要、文件卡片或“继续”替代该确认。');
   }
   if (action === 'generate_visual') {
     const manifest = artifactFile(runDir, state.artifacts?.demoSourceManifest) || path.join(runDir, 'demo-source-manifest.json');
-    if (!fs.existsSync(manifest)) return step('compile-demo-source-manifest', '编译运行时 Demo 源清单', ['demo-source-input.json', 'demo-source-manifest.json'], '从已确认视觉方案、精确来源选择和 Existing 页面骨架自动构建 Demo 源输入；以 generate_visual 调用 demo-source-compiler.mjs compile，再调用 visual-sandbox-writer.mjs materialize。清单缺失是自动链内部步骤，禁止作为用户阻断或确认。');
+    if (!fs.existsSync(manifest)) return step('compile-demo-source-manifest', '编译运行时 Demo 源清单', ['demo-source-input.json', 'demo-source-manifest.json'], '从已确认视觉方案、精确来源选择和 Existing 页面骨架自动构建可交互 UI 原型（前端 Demo）；默认声明 chatPreview.fragment，编写自包含 HTML/CSS/JavaScript 片段，由编译器生成同源 index.html；不兼容时说明具体回退原因。demo-source-input.json 必须包含 interactionContract：示例数据提示、功能任务、真实操作及前后状态断言、重置流程，格式见 core/runtime/interactive-demo-contract.md；以 generate_visual 调用 demo-source-compiler.mjs compile，再调用 visual-sandbox-writer.mjs materialize。清单缺失是自动链内部步骤，禁止作为用户阻断或确认。');
     if (!runFile('visualSandboxFiles')) return step('materialize-run-local-demo-code', '物化当前 Run 的运行时 Demo 源码', ['visual-sandbox/index.html', 'visual-sandbox-files.json'], '以当前 Demo 源清单调用 visual-sandbox-writer.mjs materialize；只能写入当前 Run 的 visual-sandbox，正式项目代码不得变更。');
     const sandbox = visualSandboxSourceReady(state, runDir);
     if (!sandbox.ready) return step('rebuild-invalid-run-local-demo-source', '重建未绑定真实来源的运行时 Demo 源码', ['demo-source-input.json', 'demo-source-manifest.json', 'visual-sandbox-files.json'], `当前沙盒源码不可作为视觉证据：${sandbox.reason}。内部必须从已确认来源选择重建源码，并为每项选择写入 data-apex-source-selection 标记；禁止将该内部缺陷展示为用户确认、继续按钮或已完成 Demo。`);
     if (!runFile('visualSandboxRuntime')) return step('start-run-local-demo', '启动当前 Run 的运行时 Demo', ['visual-sandbox-runtime.json'], '以 generate_visual 调用 visual-sandbox-runtime.mjs start；启动当前 Run 的 visual-sandbox 静态运行时并登记可访问 URL。不得只报告“沙盒已生成”。');
     const runtimeEvidence = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
-    if (!fs.existsSync(runtimeEvidence)) return step('capture-runtime-browser-evidence', '采集 Demo 的真实浏览器与动效证据', ['runtime-browser-spec.json', 'evidence/runtime-browser-capture.json'], '内部从已确认来源、入口和运行时 URL 生成浏览器规格，再调用 browser-capture.mjs capture；必须验证 DOM 中每项已选来源，截图与动效帧均为真实运行时证据。');
-    if (!runFile('runtimeVisualBaseline') || !runFile('runtimeDemo') || !runFile('runtimeSourceLock')) return step('freeze-runtime-visual-baseline', '冻结真实运行时视觉基线', ['runtime-visual-baseline-input.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'runtime-demo.json'], '内部根据已确认来源、真实浏览器证据和运行时依赖生成基线输入，并调用 runtime-visual-baseline.mjs compile；不得手填 URL、截图或来源哈希。');
+    const runtimeEvidenceCurrent = (() => {
+      try {
+        const evidence = read(runtimeEvidence);
+        const runtime = read(artifactFile(runDir, state.artifacts?.visualSandboxRuntime));
+        const selected = new Set((read(artifactFile(runDir, state.artifacts?.visualExecutionPlan)).sourceSelections || []).map(item => item.id));
+        const captured = new Set(evidence.sourceSelectionIds || []);
+        verifyDemoInteractions(runDir, evidence, runtime.url, { requireJourneyLocation: usesCombinedPlan(state) });
+        return Boolean(runtime.url && evidence.status === 'passed'
+          && Array.isArray(evidence.evidence) && evidence.evidence.length
+          && evidence.evidence.every(item => { try { return item.status === 'captured' && new URL(item.url).origin === new URL(runtime.url).origin; } catch { return false; } })
+          && [...selected].every(id => captured.has(id)));
+      } catch { return false; }
+    })();
+    if (!runtimeEvidenceCurrent) return step('capture-runtime-browser-evidence', '验证前端 Demo 的任务交互并采集浏览器证据', ['runtime-browser-spec.json', 'evidence/runtime-browser-capture.json'], '内部从已确认来源、入口和运行时 URL 生成浏览器规格，再调用 browser-capture.mjs capture；必须验证 DOM 中每项已选来源，并真实执行 interactionContract 的全部操作，核对可见状态变化与重置；截图、动效帧不能代替交互通过证据。');
+    if (!runFile('runtimeVisualBaseline') || !runFile('runtimeDemo') || !runFile('runtimeSourceLock') || !interactiveDemoReady(state, runDir)) return step('freeze-runtime-visual-baseline', '冻结真实运行时视觉基线', ['runtime-visual-baseline-input.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'runtime-demo.json'], '内部根据已确认来源、真实浏览器证据和运行时依赖生成基线输入，并调用 runtime-visual-baseline.mjs compile；不得手填 URL、截图或来源哈希。');
     if (!runFile('visualReference') || !runFile('gate1VisualOutput')) return step('emit-runtime-visual-reference', '从已冻结 Demo 生成视觉引用', ['visual-reference-input.json', 'visual-reference.json', 'gate1-visual-output.json'], '内部仅使用已冻结运行时截图、内容锁、布局锁、图表口径和 Existing 页面骨架映射调用 visual-reference-compiler.mjs emit。');
     if (!runFile('designCandidates')) return step('record-selected-runtime-design-candidate', '登记已确认方案的运行时候选证据', ['design-candidates.json'], '内部将视觉方案中的已选候选与其真实运行时截图、策略哈希和取舍依据写入 design-candidates.json，再调用 experience-evaluator.mjs candidates；禁止生成虚假的替代效果图或要求用户再次确认视觉。');
   }
   if (action === 'verify') {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
-    if (provenance.enforce && !provenance.ready) return step('capture-formal-runtime-source-provenance', '采集正式页面的来源选择与交互证据', ['evidence/runtime-browser-capture.json', 'runtime-state-matrix.json'], `从冻结 Visual Source Manifest 自动生成正式页来源绑定；浏览器必须在每个视口读取 data-apex-source 标记并映射回已确认来源选择。当前原因：${provenance.reason}。这不是确认点，也不得用空来源规格伪造通过。`);
-    if (!runFile('runtimeStateMatrix')) return step('capture-runtime-state-matrix', '采集正式页面的视口、状态与关键交互证据', ['runtime-state-matrix.json'], '以 verify 调用 browser-capture.mjs，覆盖桌面、平板、移动端以及加载、空、异常或权限状态；这是自动验证证据，不是用户确认。');
+    if (provenance.enforce && !provenance.ready) {
+      if (!formalCaptureSourceReady(state, runDir)) return step('capture-formal-runtime-source-provenance', '采集正式页面的来源选择证据', ['evidence/runtime-browser-capture.json'], `以 verify 调用 browser-capture.mjs，从冻结 Visual Source Manifest 采集实际 DOM 来源标记，并在 formalJourneys 中执行每项已确认任务、记录前后状态和受控回执。当前原因：${provenance.reason}。`);
+      return step('capture-runtime-state-matrix', '校验正式页面状态与交互矩阵', ['runtime-state-matrix.json'], '根据真实浏览器截图、响应式范围、状态与已确认任务的 formalJourneys 前后变化证据构建矩阵输入，以 verify 调用 stability-evidence.mjs verify <run-dir> <matrix-input.json>；脚本校验并登记矩阵与来源证据。');
+    }
+    if (usesCombinedPlan(state) && runFile('runtimeVisualBaseline')) {
+      const baseline = read(artifactFile(runDir, state.artifacts.runtimeVisualBaseline));
+      const captureFile = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
+      const coverage = formalRouteCoverage(runDir, baseline, fs.existsSync(captureFile) ? read(captureFile) : null, operationRecords(runDir).map(item => item.receipt));
+      if (coverage.status === 'incomplete') return step('capture-formal-route-coverage', '采集所有已确认页面的正式运行证据', ['evidence/runtime-browser-capture.json'], `以 verify 调用 browser-capture.mjs，逐个覆盖已确认 Demo 的路由与视口组合并保留实际截图、DOM 和受控回执。当前原因：${coverage.reason}。`);
+    }
+    if (usesCombinedPlan(state)) {
+      const direct = formalDirectProgress(runDir, state, operationRecords(runDir).map(item => item.receipt));
+      if (direct.status === 'missing-capture') return step('capture-formal-route-coverage', '采集所有已确认页面的正式运行证据', ['evidence/runtime-browser-capture.json'], `以 verify 采集与每个已确认 Demo 路由及视口匹配的正式页面。当前原因：${direct.reason}。`);
+      if (direct.status === 'missing-reference') return step('compile-formal-screen-reference', '为正式页面编译已确认 Demo 参考', ['visual-screen-references.json'], `以 verify 调用 visual-reference-compiler.mjs emit-screen，绑定 Demo 页面 ${direct.demoCaptureId} 的已确认截图和 DOM；根据视觉方案生成页面契约。${direct.reason}`);
+      if (direct.status === 'pending') return step('verify-formal-direct-screen', '逐页验证正式实现与已确认 Demo', ['evidence/parity/implementation-result-*.json'], `以 verify 调用 strict-replica.mjs runtime <run-dir> ${direct.captureId}，核对该正式页面与对应 Demo 页面。${direct.reason || ''}`);
+      const progress = formalStitchProgress(runDir, state, operationRecords(runDir).map(item => item.receipt));
+      if (progress.status === 'missing-capture') return step('capture-formal-route-coverage', '采集所有已确认页面的正式运行证据', ['evidence/runtime-browser-capture.json'], `以 verify 调用 browser-capture.mjs，为每个 Stitch 页面采集匹配的正式路由和视口。当前原因：${progress.reason}。`);
+      if (progress.status === 'pending') return step('verify-formal-stitch-screen', '逐页验证正式实现与已确认设计', ['evidence/parity/implementation-result-*.json'], `以 verify 调用 strict-replica.mjs runtime <run-dir> ${progress.captureId} ${progress.screenId}，核对该正式页面与对应冻结 Stitch 页面。${progress.reason || ''}`);
+    }
+    if (!runFile('runtimeStateMatrix')) return step('capture-runtime-state-matrix', '校验正式页面的视口、状态与关键交互证据', ['runtime-state-matrix.json'], '先以 browser-capture.mjs 采集真实视口、状态及 formalJourneys 操作前后变化；为已确认 Demo 的每项任务保留受控交互回执，再以 verify 调用 stability-evidence.mjs verify <run-dir> <matrix-input.json> 校验并登记矩阵。');
+    if (usesCombinedPlan(state) && !runFile('verificationInventory')) return step('capture-verification-inventory', '采集当前正式项目的验证清单', ['verification-inventory.json'], '以 verify 调用 project-intake.mjs scan，只读扫描当前正式项目及声明的测试命令；不覆盖 Existing 的原始基线清单。');
     if (!runFile('verificationPlan')) return step('compile-verification-plan', '根据项目声明脚本编译验证计划', ['verification-plan.json'], '以 verify 调用 verification-planner.mjs generate；只选取项目已声明且安全的检查，不得猜测或虚构测试命令。');
-    if (!runFile('verificationBundle')) return step('run-controlled-verification', '执行受控验证并生成证据包', ['verification-bundle.json', 'evidence/proof-*.json'], '以 verify 调用 verification-orchestrator.mjs，汇总运行时状态、构建/测试、结构、视觉、无障碍与实现映射证据；失败必须形成可观察 operation receipt。');
-    if (!gate3IndustryEvidenceReady(state, runDir)) return step('compile-evidence-bound-industry-review', '生成并执行证据绑定的行业基准复核', ['industry-benchmark-review.json', 'industry-benchmark-evidence.json'], '基于本次正式页浏览器证据、冻结来源选择与视觉方案，为每项行业准则生成独立观察、评分和证据 ID，再以 verify 调用 industry-benchmark.mjs verify。不得复制视觉方案的计划分数，也不得把该内部复核变成用户确认。');
+    const pendingQuality = qualityVerificationPending(state, runDir);
+    if (pendingQuality?.stage === 'parity') return step('verify-required-visual-parity', '验证正式页面与确认设计的一致性', ['implementation-parity-evidence.json'], '以 verify 对当前正式页面运行 strict-replica.mjs runtime，逐个核对已确认 Demo 或 Stitch 页面及视口；缺失参考或不一致时修复真实原因，不得伪造通过。');
+    if (pendingQuality?.kind === 'visual' && pendingQuality.stage === 'evidence') return step('compile-visual-quality-evidence', '登记真实视觉还原证据', ['evidence/visual-verification.json'], '以 verify 调用 quality-evidence.mjs verify <run-dir> visual <input.json> <project-root>，由当前受控的逐页还原和浏览器证据生成结果；该检查不代替用户审美确认。');
+    if (pendingQuality?.stage === 'measurement') return step(`capture-${pendingQuality.kind}-measurement`, '采集项目声明的质量测量', [`evidence/${pendingQuality.kind}-measurement.json`], `以 verify 调用 quality-measurement.mjs measure <run-dir> ${pendingQuality.kind} <project-check-id>；仅使用当前清单中真实声明的项目检查脚本，脚本输出约定的自动化 JSON 报告。缺少可执行检查或运行失败时保留未验证或失败，不得编造结果。`);
+    if (pendingQuality?.stage === 'evidence') return step(`compile-${pendingQuality.kind}-evidence`, '核验质量测量并登记结果', [`evidence/${pendingQuality.kind}-verification.json`], `以 verify 调用 quality-evidence.mjs verify <run-dir> ${pendingQuality.kind} <input.json> <project-root>，输入 measurementPath 指向本 Run 的受控测量；存在违规、未完成项或超过目标时保留真实失败。`);
+    if (pendingQuality) return step('repair-quality-context', '修复质量验证上下文', [], '当前质量验证合同或测量上下文不可读取；修复具体缺失项并重新执行对应受控动作，不得跳过检查。');
+    if (!gate3VerificationBundleReady(state, runDir)) return step('run-controlled-verification', '执行受控验证并生成证据包', ['verification-bundle.json', 'evidence/proof-*.json'], '以 verify 调用 verification-orchestrator.mjs，汇总运行时状态、构建/测试、结构、视觉、无障碍与实现映射证据；失败必须形成可观察 operation receipt。');
+    if (!gate3ProvenanceReady(state, runDir)) return step('seal-verification-evidence', '封存当前验证证据来源', ['evidence-provenance.json'], '从当前 Run 的成功受控操作回执中选择实际生成且哈希未变的正式页面、测试或构建证据，以 record_context 调用 evidence-provenance.mjs seal；不得把未执行或失败的检查标为通过。', 'record_context');
+    if (!gate3IndustryEvidenceReady(state, runDir)) {
+      const failures = industryReviewFailures(state, runDir);
+      const repair = failures.length ? `上次真实复核未通过或未验证：${failures.map(item => `${item.criterion}(${item.result})`).join('、')}。先补充对应实际观察或修复实际缺陷，再重新复核；证据不足时保持未验证，不得重复提交相同结论或伪造通过。` : '';
+      return step('compile-evidence-bound-industry-review', '生成并执行证据绑定的行业基准复核', ['industry-benchmark-review.json', 'industry-benchmark-evidence.json'], `基于本次正式页浏览器证据、冻结来源选择与视觉方案，为每项行业准则生成独立观察、评分和证据 ID，再以 verify 调用 industry-benchmark.mjs verify。不得复制视觉方案的计划分数，也不得把该内部复核变成用户确认。${repair}`);
+    }
     const roles = roleStageState(state, runDir, 'verify');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`verify-role-${roles}`, '完成验证阶段专业角色汇总', ['advisories/verify/selection.json', 'advisories/verify/*.json', 'advisories/verify/role-decision-summary.md'], `通过 verify 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record' : 'summarize'}；仅作为证据综合，不新增用户交互。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`verify-role-${roles}`, '完成验证阶段专业角色汇总', ['advisories/verify/selection.json', 'advisories/verify/*.json', 'advisories/verify/role-decision-summary.md'], `通过 verify 调用 role-advisory.mjs ${roles}；仅作为证据综合，不新增用户交互。`);
   }
-  if (action === 'register_runtime_demo') return step('register-runtime-demo', '登记已验证的运行时 Demo 并进入交付路线选择', ['registrations/runtime-demo-*.json'], '确认当前 Run 的 Demo、来源锁、运行时基线、视觉引用和候选证据均来自同一 generate_visual 受控回执后，调用 Router register-runtime-demo。登记完成后展示可访问 Demo，并且仅提供“使用 Stitch”与“直接代码”两条路线；这不是确认点。');
+  if (action === 'register_runtime_demo') return step('register-runtime-demo', '登记已验证的运行时 Demo', ['registrations/runtime-demo-*.json'], usesCombinedPlan(state) ? '核验当前 Run 的 Demo、来源锁、运行时基线、视觉引用与候选证据均来自成功受控动作，再调用 Router register-runtime-demo；随后展示 Demo 并等待用户明确确认，确认后才提供路线选择。' : '核验当前 Run 的 Demo、来源锁、运行时基线、视觉引用与候选证据均来自成功受控动作，再登记、展示并按旧模型提供路线选择。');
+  if (action === 'present_runtime_demo') return step('present-run-local-runtime-demo', '展示当前 Run 的运行时 Demo 并登记展示回执', ['presentations/runtime-demo-*.json'], '默认聊天内展示：读取 runtime-demo.json.chatPreview，与同 Run 的 visual-sandbox-files.json 核对哈希；以 chat-inline 登记 present-runtime-demo，在本轮 final 原样输出返回的 presentation.contentReference，随后按当前确认模型展示 Router 返回的 Demo 确认或路线选择。片段由同源 HTTP Demo 验收，不能用 URL iframe 或另画原型代替。此回执证明已准备输出，不伪称宿主已渲染或用户已点击。缺少片段或宿主不支持时，实际打开当前 Run 的 HTTP URL，以 browser-panel 及具体 fallback-reason 登记并说明原因。只有截图、源码或链接不算展示；禁止正式服务和其他 Run。');
   if (action === 'sync_stitch') {
-    if (!runFile('stitchFreeze')) return step('create-stitch-candidate', '生成并冻结 Stitch 候选内容', ['stitch-freeze.json'], '以 sync_stitch 提交或恢复当前 Run 对应的 Stitch 作业，并将导出结果冻结为 stitch-freeze.json；不得复用其它 Run 或 Session 的候选。');
-    if (!runFile('stitchParityEvidence')) return step('verify-stitch-candidate-parity', '采集 Stitch 候选与运行时 Demo 的严格一致性证据', ['stitch-parity-evidence.json'], '以 sync_stitch 对当前冻结候选执行结构与视觉一致性校验；完成后重新读取 Router，并完整展示候选、差异、来源、风险与调整项，再仅呈现“确认 Stitch 内容”。');
+    if (!runFile('stitchFreeze')) return step('create-stitch-candidate', '生成并冻结 Stitch 候选内容', ['stitch-freeze.json'], '以 sync_stitch 提交或恢复当前 Run 对应的 Stitch 作业，并将导出结果冻结为 stitch-freeze.json；不得复用其它 Run 或 Session 的候选。需要 Stitch 设计语言适配时，可先以同一动作调用 stitch-sync.mjs skills <run-dir> list，再按需 load 所选技能；仅引用与已确认 Demo 一致的规则，不强制加载或静默修改设计。');
+    if (usesCombinedPlan(state)) {
+      const freeze = read(artifactFile(runDir, state.artifacts.stitchFreeze));
+      if (freeze.approvedScreens?.length > 1) {
+        const progress = stitchScreenProgress(runDir, state, freeze, operationRecords(runDir).map(item => item.receipt));
+        if (progress.status === 'missing-reference') return step('compile-stitch-screen-reference', '从已确认 Demo 编译页面视觉参考', ['visual-screen-references.json', 'visual-screen-references/*.json'], `读取冻结 Stitch 页面 ${progress.screenId} 的 demoCapture、已确认 Demo 截图和 DOM，以及视觉方案与范围；构建该页面的文字、布局、图表和组件契约，以 sync_stitch 调用 visual-reference-compiler.mjs emit-screen。当前原因：${progress.reason}。不得伪造或更改已确认 Demo。`);
+        if (progress.status !== 'ready') return step('verify-stitch-candidate-screen', '逐页验证 Stitch 与已确认 Demo', ['evidence/parity/stitch-result-*.json'], `对页面 ${progress.screenId || '（无效页面集合）'} 执行 strict-replica.mjs stitch <run-dir> <screen-id>；必须使用其已确认 Demo 截图、DOM 和页面参考。当前状态：${progress.status}${progress.reason ? `（${progress.reason}）` : ''}。逐页通过后才可尝试封存。`);
+      }
+    }
+    if (!runFile('stitchParityEvidence')) return step('verify-stitch-candidate-parity', '采集 Stitch 候选与运行时 Demo 的严格一致性证据', ['stitch-parity-evidence.json'], usesCombinedPlan(state) ? '以 sync_stitch 对当前冻结候选执行结构与视觉一致性校验；一致时自动封存，存在真实差异时展示差异并提供用户选择。' : '以 sync_stitch 对当前冻结候选执行结构与视觉一致性校验；完成后重新读取 Router，并完整展示候选、差异、来源、风险与调整项，再仅呈现“确认 Stitch 内容”。');
+    if (usesCombinedPlan(state) && !state.locks?.stitchApproved) return step('seal-unchanged-stitch-candidate', '校验并自动冻结与 Demo 一致的 Stitch 候选', ['machine-seals/stitch.json'], '以 sync_stitch 调用 stitch-sync.mjs seal；仅当当前候选、结构、画面、内容及 Demo 基线全部通过校验时自动冻结。存在差异时保留真实失败证据，不得静默替换用户确认的 Demo。');
     if (!durableConfirmationPresentationReady(state, runDir, 'stitch', stitchPresentationSections, ['stitchFreeze', 'stitchParityEvidence'], 'sync_stitch')) return step('compile-stitch-confirmation-presentation', '编译来源绑定的 Stitch 确认正文', ['stitch-presentation.md', 'stitch-presentation-manifest.json'], '以 sync_stitch 调用 confirmation-presentation.mjs compile <run-dir> stitch。正文必须绑定当前候选、冻结页面、来源锁与严格一致性证据；不得以文件清单、短摘要或临时聊天拼接替代。');
     return step('publish-complete-stitch-presentation', '整理完整 Stitch 候选确认内容', ['stitch-freeze.json', 'stitch-parity-evidence.json'], '当前候选与一致性证据已齐备；重新读取 Router 以打开唯一的 Stitch 确认点。不得以进度文字或通用“继续”结束。');
   }
   if (action === 'compile_visual_bundle') {
     if (!runFile('siteContract')) return step('derive-site-contract', '从已锁定视觉方案生成站点实施契约', ['site-contract.json'], '以 compile_visual_bundle 从已确认视觉方案、来源锁和当前项目边界生成站点契约；不得扩大到未受影响页面。');
+    if (usesCombinedPlan(state) && !runFile('visualSourceManifest')) return step('freeze-visual-source-manifest', '冻结已确认 Demo 的实现来源', ['visual-source-manifest.json'], '根据已确认视觉方案、运行时来源锁和真实 Demo，为每个节点生成精确来源与正式代码目标，再以 compile_visual_bundle 调用 visual-source.mjs compile；完成后实施角色才可基于当前来源工作。');
+    if (usesCombinedPlan(state) && !runFile('dependencyLock')) return step('resolve-visual-dependencies', '解析已确认视觉来源的依赖锁', ['dependency-lock.json'], '依据已确认视觉方案和来源生成依赖选择并调用 asset-resolver.mjs resolve；没有外部依赖时生成真实空锁，不得安装项目依赖。');
+    if (usesCombinedPlan(state) && (!runFile('visualBundle') || !runFile('implementationMap'))) return step('compile-visual-bundle-and-implementation-map', '编译待实施角色审核的视觉包与代码映射', ['visual-bundle.json', 'implementation-map.json'], '根据已确认 Demo、冻结来源和依赖锁，调用 bundle-compiler.mjs 编译待审核实施映射；随后由前端工程师和代码审查角色检查实际映射，未通过机器 Gate 2 前不得修改正式项目。');
     const roles = roleStageState(state, runDir, 'implementation');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`implementation-role-${roles}`, '完成实施阶段专业角色汇总', ['advisories/implementation/selection.json', 'advisories/implementation/*.json', 'advisories/implementation/role-decision-summary.md'], `以 compile_visual_bundle 调用 role-advisory.mjs ${roles === 'select' ? 'select' : roles === 'record' ? 'record' : 'summarize'}，将前端、设计、可访问性和验证约束汇总进实施冻结；不得新增用户交互。`);
-    if (!runFile('visualBundle') || !runFile('implementationMap')) return step('compile-visual-bundle-and-implementation-map', '编译视觉实施包与受影响代码映射', ['visual-bundle.json', 'implementation-map.json'], '以 compile_visual_bundle 物化已选依赖并编译实施包及 Implementation Map；只能包含已确认的页面、组件、来源和运行时目标。完成后完整展示实施范围、文件、依赖、验证、风险与回滚边界，并且只呈现“确认实施冻结”。');
+    if (roles !== 'ready' && roles !== 'not-required') return step(`implementation-role-${roles}`, '完成实施阶段专业角色汇总', ['advisories/implementation/selection.json', 'advisories/implementation/*.json', 'advisories/implementation/role-decision-summary.md'], `以 compile_visual_bundle 调用 role-advisory.mjs ${roles}，将前端、设计、可访问性和验证约束汇总进实施冻结；不得新增用户交互。`);
+    if (!runFile('visualBundle') || !runFile('implementationMap')) return step('compile-visual-bundle-and-implementation-map', '编译视觉实施包与受影响代码映射', ['visual-bundle.json', 'implementation-map.json'], '以 compile_visual_bundle 物化已选依赖并编译实施包及 Implementation Map；只能包含已确认的页面、组件、来源和运行时目标。直接落地时 screenId 对应已确认 Demo 截图标识，须覆盖每个不同路由；同一路由的不同视口可共用一个页面映射。Stitch 路线须覆盖全部冻结页面标识。完成后按当前确认模型继续后续步骤。');
     if (!durableConfirmationPresentationReady(state, runDir, 'implementation', implementationPresentationSections, ['visualBundle', 'implementationMap'], 'compile_visual_bundle')) return step('compile-implementation-confirmation-presentation', '编译来源绑定的实施冻结确认正文', ['implementation-presentation.md', 'implementation-presentation-manifest.json'], '以 compile_visual_bundle 调用 confirmation-presentation.mjs compile <run-dir> implementation。正文必须绑定当前 Visual Bundle、Implementation Map、正式代码目标与验收边界；不得以文件清单、短摘要或临时聊天拼接替代。');
-    return step('publish-complete-implementation-freeze', '整理完整实施冻结确认内容', ['visual-bundle.json', 'implementation-map.json'], '实施包与代码映射已齐备；重新读取 Router 以打开唯一的实施冻结确认点。不得以文件清单或“继续”代替完整确认内容。');
+    return step('publish-complete-implementation-freeze', '整理完整实施冻结内容', ['visual-bundle.json', 'implementation-map.json'], usesCombinedPlan(state) ? '实施包与代码映射已齐备；重新读取 Router，继续 Gate 2 机器校验，无需额外用户确认。' : '实施包与代码映射已齐备；重新读取 Router 以打开唯一的实施冻结确认点。不得以文件清单或“继续”代替完整确认内容。');
   }
-  if (action === 'open_gate2') return step('run-pre-gate2-and-open-implementation', '执行 Gate 2 机器校验并开启正式实施权限', ['Gate 2 机器校验结果'], '先执行 pre-gate2 完整契约校验；通过后立即调用 open-gate2 转换。该转换不是用户确认，也不能以“已授权”或文件卡片代替实际转换。');
+  if (action === 'open_gate2') return step('run-pre-gate2-and-open-implementation', '执行 Gate 2 机器校验并开启正式实施权限', ['Gate 2 机器校验结果'], usesCombinedPlan(state) ? '通过 Router transition open-gate2 校验已确认 Demo、实施工件和完整 Gate 2 契约；校验成功后记录机器冻结回执并开启实施权限，不额外要求用户确认。' : '先执行 pre-gate2 完整契约校验；通过后立即调用 open-gate2 转换。该转换不是用户确认，也不能以“已授权”或文件卡片代替实际转换。');
   if (action === 'implement') {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
     if (provenance.needsImplementation) return step('emit-formal-runtime-source-markers', '把冻结来源标记写入正式受影响节点', ['正式项目受影响实现文件', 'evidence/implementation-audit.json'], `仅在已批准的 Implementation Map 目标和选择器上写入精确 data-apex-source 标记，随后重新采集浏览器证据。当前原因：${provenance.reason}。不得把标记写在注释、配置或 Run 工件中，也不得修改未受影响页面。`, 'implement');
@@ -1249,6 +1827,18 @@ function automaticWorkStep(state, runDir, action) {
   if (action === 'revoke_visual') return step('reopen-incomplete-existing-visual-plan', '撤销来源或页面骨架不完整的视觉方案并重建', ['visual-execution-plan.json', 'visual-plan-presentation.md'], '当前视觉方案缺少每个可视节点必需的已确认来源绑定，或 Existing 页面骨架映射不完整；通过受控 revoke-stitch 转换撤销无效方案，随后自动重编译完整十节方案并仅呈现“确认视觉方案”。这是内部契约修复，不是用户确认或 Demo 失败。');
   return null;
 }
+function formalPageEvidenceReady(state, runDir) {
+  if (!usesCombinedPlan(state) || !runDir) return true;
+  try {
+    const baselineFile = artifactFile(runDir, state.artifacts?.runtimeVisualBaseline);
+    if (!baselineFile) return false;
+    const captureFile = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
+    const receipts = operationRecords(runDir).map(item => item.receipt);
+    const coverage = formalRouteCoverage(runDir, read(baselineFile), fs.existsSync(captureFile) ? read(captureFile) : null, receipts);
+    const parity = formalStitchProgress(runDir, state, receipts), direct = formalDirectProgress(runDir, state, receipts);
+    return ['ready', 'not-required'].includes(coverage.status) && ['ready', 'not-required'].includes(parity.status) && ['ready', 'not-required'].includes(direct.status);
+  } catch { return false; }
+}
 function gate1PrerequisitesReady(state, runDir) {
   if (!runDir) return false;
   const required = ['intentBrief', 'deliveryContract', 'experienceStrategy', 'experienceQualityEvidence'];
@@ -1258,7 +1848,7 @@ function gate1PrerequisitesReady(state, runDir) {
   }
   try {
     if (required.some(name => !artifactFile(runDir, state.artifacts?.[name]))) return false;
-    if (!roleStageReady(state, runDir, 'gate1') || (state.track === 'existing' && !roleStageReady(state, runDir, 'baseline'))) return false;
+    if (!roleStageReady(state, runDir, 'gate1') || (state.track === 'existing' && (!roleStageReady(state, runDir, 'baseline') || !functionalFreezeStatus(runDir, state).ready))) return false;
     return !deliveryRequiresApiContracts(state, runDir) || ['domainModel', 'apiContract'].every(name => artifactFile(runDir, state.artifacts?.[name]));
   } catch { return false; }
 }
@@ -1269,7 +1859,7 @@ function checkpointReady(state, runDir, checkpoint) {
     // approval path below still runs pre-gate1, including full source hashes.
     const required = ['gate1Presentation', 'gate1PresentationManifest'];
     try {
-      if (!gate1PrerequisitesReady(state, runDir) || required.some(name => !artifactFile(runDir, state.artifacts?.[name])) || !gate1PresentationReady(state, runDir) || !gate1PresentationRegistrationReady(runDir, state)) return false;
+      if (!gate1PrerequisitesReady(state, runDir) || required.some(name => !artifactFile(runDir, state.artifacts?.[name])) || !confirmationInputsValidated(runDir, 'gate1') || !gate1PresentationReady(state, runDir) || !gate1PresentationRegistrationReady(runDir, state)) return false;
       return true;
     } catch { return false; }
   }
@@ -1278,19 +1868,43 @@ function checkpointReady(state, runDir, checkpoint) {
   if (checkpoint === 'implementation') return Boolean(roleStageReady(state, runDir, 'implementation') && (state.locks?.stitchCurrent || state.locks?.stitchSkipped) && state.locks?.stitchApproved && state.artifacts?.visualBundle && state.artifacts?.implementationMap && durableConfirmationPresentationReady(state, runDir, 'implementation', implementationPresentationSections, ['visualBundle', 'implementationMap'], 'compile_visual_bundle'));
   return false;
 }
+function postGateImplementationCurrent(state, runDir) {
+  if (!runDir) return false;
+  const approval = confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+  return Boolean(approval && implementationSealCurrent(runDir, state, approval));
+}
 function allowedActions(state, runDir = null) {
+  // A durable Run can be inspected when its projection is stale, but it must
+  // never advance while its artifacts, lineage, or Agent jobs disagree with
+  // the ledger.  This is intentionally checked before lifecycle/gate logic:
+  // recovery is the only safe predecessor of every ordinary workflow action.
+  if (runDir) {
+    try {
+      if (reconcileRun(runDir).status !== 'consistent') return ['inspect_run', 'recover'];
+    } catch {
+      return ['inspect_run', 'recover'];
+    }
+  }
   if (state.lifecycle === 'cancelled') return ['inspect_run', 'recover'];
   if (state.lifecycle === 'handed-off') return ['inspect_run', 'recover', 'resume_handoff'];
   const gate1 = state.gates?.gate1?.status === 'passed';
   const gate2 = state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed === true;
   const gate3 = state.gates?.gate3?.status === 'passed';
   const actions = new Set(['inspect_run', 'record_context', 'recover']);
+  // Gate 2 authority depends on the current Demo and machine-sealed implementation artifacts.
+  if (gate2 && usesCombinedPlan(state) && !postGateImplementationCurrent(state, runDir)) {
+    const approval = runDir && confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+    if (!approval) actions.add('revoke_visual');
+    return [...actions].sort();
+  }
   if (!gate1) {
     actions.add('analyze_requirement');
     // Gate 1 production is governed by analyze_requirement.  Do not expose a
     // synthetic plan_product action: it has no controlled executor and used
     // to leave Greenfield runs in a no-input state with no runnable next step.
     if (state.track === 'existing') actions.add('collect_existing_baseline');
+    // The new model prepares product facts internally before asking for one combined plan approval.
+    if (usesCombinedPlan(state) && runDir && checkpointReady(state, runDir, 'gate1')) { actions.add('plan_visual'); actions.add('revoke_visual'); if (visualPlanReady(state, runDir)) actions.add('request_visual_plan_approval'); }
   }
   const existingBaseline = runDir ? existingVisualBaselineStatus(runDir, state) : { ready: state.track !== 'existing', reason: 'run directory is required to verify Existing baseline' };
   if (gate1 && !gate2 && !existingBaseline.ready) {
@@ -1320,14 +1934,18 @@ function allowedActions(state, runDir = null) {
       if (state.pendingDeliveryRoute === 'direct-code') actions.add('select_delivery_route');
       if (runtimeDemoRegistrationReady(state, runDir)) actions.add('register_runtime_demo');
     }
+    else if (interactiveDemoRefreshRequired(state, runDir)) actions.add('revoke_visual');
+    else if (!runtimeDemoPresentationReadyForState(state, runDir)) ['present_runtime_demo', 'revoke_visual'].forEach(action => actions.add(action));
+    else if (usesCombinedPlan(state) && !confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state)) { actions.add('revoke_visual'); if (!state.deliveryRoute && !state.locks?.stitchApproved && !state.locks?.stitchSkipped && demoConfirmationReferences({ runDir, runId: state.runId }, state)) actions.add('confirm_runtime_demo'); }
     else if (!state.locks?.stitchApproved && !state.locks?.stitchSkipped && !state.deliveryRoute) ['select_delivery_route', 'revoke_visual'].forEach(action => actions.add(action));
+    else if (currentStitchDifference(state, runDir)) { actions.add('select_delivery_route'); actions.add('revoke_visual'); }
     else if (!state.locks?.stitchApproved && !state.locks?.stitchSkipped && state.deliveryRoute === 'stitch') {
       ['sync_stitch', 'observe_stitch', 'validate_stitch', 'revoke_visual'].forEach(action => actions.add(action));
       if (checkpointReady(state, runDir, 'stitch')) actions.add('request_stitch_approval');
     } else if (!state.locks?.stitchCurrent && !state.locks?.stitchSkipped) ['sync_stitch', 'revoke_visual'].forEach(action => actions.add(action));
     else if (!state.locks?.implementationApproved) {
       ['compile_visual_bundle', 'revoke_visual'].forEach(action => actions.add(action));
-      if (checkpointReady(state, runDir, 'implementation')) actions.add('request_implementation_approval');
+      if (checkpointReady(state, runDir, 'implementation')) actions.add(usesCombinedPlan(state) ? 'open_gate2' : 'request_implementation_approval');
     }
     else ['compile_visual_bundle', 'open_gate2', 'revoke_visual'].forEach(action => actions.add(action));
   }
@@ -1337,10 +1955,10 @@ function allowedActions(state, runDir = null) {
   if (gate2 && !gate3) {
     actions.add('revoke_visual');
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
-    if (!state.artifacts?.pageDelta || provenance.needsImplementation) ['prepare_workspace', 'implement'].forEach(action => actions.add(action));
-    else if ((provenance.enforce && !provenance.ready) || !state.artifacts?.verificationBundle) actions.add('verify');
+    if (!state.artifacts?.pageDelta || !implementationRegistrationCurrent(runDir, state, path.dirname(path.dirname(path.dirname(runDir)))) || provenance.needsImplementation) ['prepare_workspace', 'implement'].forEach(action => actions.add(action));
+    else if ((provenance.enforce && !provenance.ready) || !gate3VerificationBundleReady(state, runDir) || !formalPageEvidenceReady(state, runDir) || !roleStageReady(state, runDir, 'verify') || (usesCombinedPlan(state) && (!gate3ProvenanceReady(state, runDir) || !gate3IndustryEvidenceReady(state, runDir)))) actions.add('verify');
     else if (!['passed', 'not-required'].includes(state.gates?.proof?.status)) actions.add('pass_proof');
-    else if (!gate3IndustryEvidenceReady(state, runDir)) actions.add('verify');
+    else if (!gate3ProvenanceReady(state, runDir) || !gate3IndustryEvidenceReady(state, runDir) || !roleStageReady(state, runDir, 'verify')) actions.add('verify');
     else actions.add('open_gate3');
   }
   if (gate3) actions.add('read_delivery_evidence');
@@ -1350,6 +1968,17 @@ function allowedActions(state, runDir = null) {
   return [...actions].sort();
 }
 function nextRequiredAction(state, runDir = null) {
+  if (runDir) {
+    try {
+      if (reconcileRun(runDir).status !== 'consistent') return 'recover';
+    } catch {
+      return 'recover';
+    }
+  }
+  if (state.lifecycle === 'active' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed && usesCombinedPlan(state) && !postGateImplementationCurrent(state, runDir)) {
+    const approval = runDir && confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+    return approval ? 'recover' : 'revoke_visual';
+  }
   if (state.lifecycle === 'active' && state.gates?.gate1?.status !== 'passed') {
     const existingBaseline = runDir ? existingVisualBaselineStatus(runDir, state) : { ready: state.track !== 'existing' };
     if (state.track === 'existing' && !existingBaseline.ready) return 'collect_existing_baseline';
@@ -1360,6 +1989,7 @@ function nextRequiredAction(state, runDir = null) {
     const baselineRoles = state.track === 'existing' ? roleStageState(state, runDir, 'baseline') : 'not-required';
     if (baselineRoles !== 'ready' && baselineRoles !== 'not-required') return 'collect_existing_baseline';
     if (!checkpointReady(state, runDir, 'gate1')) return 'analyze_requirement';
+    if (usesCombinedPlan(state) && !visualPlanReady(state, runDir)) return 'plan_visual';
   }
   // Existing evidence remains a hard dependency until Gate 2 opens.  A
   // visual-plan revocation can make the protected change-scope complement
@@ -1379,6 +2009,11 @@ function nextRequiredAction(state, runDir = null) {
   // The host must obtain authorization and run the existing generation chain
   // before it can expose the Stitch/direct-code route decision.
   if (state.lifecycle === 'active' && state.gates?.gate1?.status === 'passed' && state.gates?.gate2?.status !== 'passed' && state.locks?.visualPlanApproved && !state.locks?.effectApproved) return runtimeDemoRegistrationReady(state, runDir) ? 'register_runtime_demo' : 'generate_visual';
+  if (state.lifecycle === 'active' && interactiveDemoRefreshRequired(state, runDir)) return 'revoke_visual';
+  if (state.lifecycle === 'active' && state.gates?.gate1?.status === 'passed' && state.gates?.gate2?.status !== 'passed' && state.locks?.effectApproved && !runtimeDemoPresentationReadyForState(state, runDir)) return 'present_runtime_demo';
+  if (state.lifecycle === 'active' && usesCombinedPlan(state) && state.locks?.effectApproved && runtimeDemoPresentationReadyForState(state, runDir) && !demoConfirmationReferences({ runDir, runId: state.runId }, state)) return 'revoke_visual';
+  if (state.lifecycle === 'active' && usesCombinedPlan(state) && state.locks?.effectApproved && (state.deliveryRoute || state.locks?.stitchSkipped || state.locks?.stitchApproved) && !confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state)) return 'revoke_visual';
+  if (currentStitchDifference(state, runDir)) return null;
   // Choosing a delivery route is the last user decision before the next
   // checkpoint.  The work that makes that checkpoint reviewable must not turn
   // into a silent no-input state: run it automatically and only then expose
@@ -1386,6 +2021,7 @@ function nextRequiredAction(state, runDir = null) {
   if (state.lifecycle === 'active' && state.gates?.gate1?.status === 'passed' && state.gates?.gate2?.status !== 'passed' && state.locks?.effectApproved) {
     if (state.deliveryRoute === 'stitch' && !checkpointReady(state, runDir, 'stitch')) return 'sync_stitch';
     if ((state.locks?.stitchSkipped || state.locks?.stitchApproved) && !checkpointReady(state, runDir, 'implementation')) return 'compile_visual_bundle';
+    if (usesCombinedPlan(state) && !state.locks?.implementationApproved && checkpointReady(state, runDir, 'implementation')) return 'open_gate2';
     if (state.locks?.implementationApproved && state.gates?.gate2?.status !== 'passed') return 'open_gate2';
   }
   // Implementation approval is not an endpoint.  Once Gate 2 is open, keep
@@ -1394,12 +2030,12 @@ function nextRequiredAction(state, runDir = null) {
   // no-input state with no delivery action.
   if (state.lifecycle === 'active' && state.gates?.gate2?.status === 'passed' && state.gates?.gate3?.status !== 'passed') {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
-    if (!state.artifacts?.pageDelta) return 'implement';
+    if (!state.artifacts?.pageDelta || !implementationRegistrationCurrent(runDir, state, path.dirname(path.dirname(path.dirname(runDir)))) ) return 'implement';
     if (provenance.needsImplementation) return 'implement';
     if (provenance.enforce && !provenance.ready) return 'verify';
-    if (!state.artifacts?.verificationBundle || !roleStageReady(state, runDir, 'verify')) return 'verify';
+    if (!gate3VerificationBundleReady(state, runDir) || !formalPageEvidenceReady(state, runDir) || !roleStageReady(state, runDir, 'verify') || (usesCombinedPlan(state) && (!gate3ProvenanceReady(state, runDir) || !gate3IndustryEvidenceReady(state, runDir)))) return 'verify';
     if (!['passed', 'not-required'].includes(state.gates?.proof?.status)) return 'pass_proof';
-    if (!gate3IndustryEvidenceReady(state, runDir)) return 'verify';
+    if (!gate3ProvenanceReady(state, runDir) || !gate3IndustryEvidenceReady(state, runDir)) return 'verify';
     return 'open_gate3';
   }
   return null;
@@ -1407,13 +2043,27 @@ function nextRequiredAction(state, runDir = null) {
 function responsePolicy(state, runDir = null) {
   return nextRequiredAction(state, runDir) ? 'complete-required-action-before-user-response' : 'decision-only-user-response';
 }
+function runtimeDemoPresentationReadyForState(state, runDir) {
+  if (!runDir) return false;
+  return runtimeDemoPresentationReady(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+}
 function executionDirective(state, runDir = null) {
   const action = nextRequiredAction(state, runDir);
-  if (!['analyze_requirement', 'collect_existing_baseline', 'plan_visual', 'generate_visual', 'revoke_visual', 'repair_visual_source_identity', 'register_runtime_demo', 'sync_stitch', 'compile_visual_bundle', 'open_gate2', 'implement', 'verify', 'pass_proof', 'open_gate3'].includes(action)) return null;
+  if (!['recover', 'analyze_requirement', 'collect_existing_baseline', 'plan_visual', 'generate_visual', 'revoke_visual', 'repair_visual_source_identity', 'register_runtime_demo', 'present_runtime_demo', 'sync_stitch', 'compile_visual_bundle', 'open_gate2', 'implement', 'verify', 'pass_proof', 'open_gate3'].includes(action)) return null;
   const requiresApiContracts = action === 'analyze_requirement' && deliveryRequiresApiContracts(state, runDir);
   // This is deliberately structured rather than prose.  A host must not turn
   // a confirmed visual plan into a generic chat "continue" affordance.
   const currentStep = automaticWorkStep(state, runDir, action);
+  if (usesCombinedPlan(state) && currentStep) {
+    const details = {
+      'register-runtime-demo': '登记当前 Run 的完整 Demo、来源与浏览器证据；随后展示 Demo 并请求明确确认，再选择路线。',
+      'present-run-local-runtime-demo': '展示当前 Run 的交互式 Demo 并登记展示回执；展示不等于确认。随后依 Router 请求用户确认 Demo。',
+      'verify-stitch-candidate-parity': '采集 Stitch 候选与确认 Demo 的结构和视觉证据；一致时继续机器冻结，实际差异须交由用户决策。',
+      'compile-visual-bundle-and-implementation-map': '按确认的 Demo 与产品方案编译实施包和映射；完成后继续内部验证和机器 Gate 2，不新增实施确认。',
+      'compile-implementation-confirmation-presentation': '生成来源绑定的实施准备记录供内部验证；机器 Gate 2 不要求新的用户确认。'
+    };
+    if (details[currentStep.id]) currentStep.details = details[currentStep.id];
+  }
   // An automatic action without a next operation is a Router programming
   // error, not a user-visible waiting state.  Fail the contract immediately
   // during development instead of emitting a terminal-forbidden response that
@@ -1454,6 +2104,8 @@ function executionDirective(state, runDir = null) {
       ? { action, required: true, runner: 'apex-action.mjs + apex-router.mjs', command: 'register-gate1-presentation', mode: 'run-complete-gate1-chain-then-register-before-presentation', ...(requiresApiContracts ? { internalSubActions: [{ action: 'record_context', script: 'contract-recorder.mjs', command: 'domain', requiredArtifact: 'domain-model.json' }, { action: 'record_context', script: 'contract-recorder.mjs', command: 'api', requiredArtifact: 'api-contract.json' }] } : {}) }
       : action === 'register_runtime_demo'
       ? { action, required: true, runner: 'apex-router.mjs', command: 'register-runtime-demo', mode: 'run-after-router-authorize' }
+      : action === 'present_runtime_demo'
+      ? { action, required: true, runner: 'apex-router.mjs', command: 'present-runtime-demo', mode: 'emit-verified-chat-fragment-in-final-or-open-run-http-fallback', forbiddenTargets: ['file-url', 'formal-project-service', 'other-run-demo'] }
       : ['open_gate2', 'pass_proof', 'open_gate3', 'revoke_visual', 'repair_visual_source_identity'].includes(action)
         ? { action, required: true, runner: 'apex-router.mjs', command: `transition ${action === 'revoke_visual' ? 'revoke-stitch' : action === 'repair_visual_source_identity' ? 'repair-visual-source-identity' : action.replaceAll('_', '-')}`, mode: 'run-after-router-authorize' }
         : action === 'implement'
@@ -1477,11 +2129,11 @@ function executionDirective(state, runDir = null) {
       terminalRule: 'progress is commentary only; continue the chain until a complete presentation, route decision, or observed blocking report is available',
       forbiddenDuringProgress: ['confirmation-button', 'generic-continue', 'file-card-only-terminal-response']
     },
-    afterSuccess: action === 'collect_existing_baseline' ? 'analyze_requirement_and_present_complete_gate1_confirmation' : action === 'analyze_requirement' ? 'present_complete_gate1_direction_and_delivery_confirmation' : action === 'plan_visual' ? 'present_complete_visual_plan_and_request_visual_plan_confirmation' : action === 'revoke_visual' ? 'rebuild_complete_visual_plan_with_page_skeleton_mapping' : action === 'repair_visual_source_identity' ? 'continue_existing_visual_plan_without_reconfirmation' : action === 'generate_visual' ? 'register_runtime_demo' : action === 'register_runtime_demo' ? 'present_runtime_demo_and_request_delivery_route' : action === 'sync_stitch' ? 'present_complete_stitch_candidate_and_request_stitch_confirmation' : action === 'compile_visual_bundle' ? 'present_complete_implementation_freeze_and_request_implementation_confirmation' : action === 'open_gate2' ? 'continue_to_controlled_implementation' : action === 'implement' ? 'run_full_verification_chain' : action === 'verify' ? 'pass_proof_with_controlled_evidence' : action === 'pass_proof' ? 'open_gate3' : 'present_delivery_evidence',
+    afterSuccess: action === 'collect_existing_baseline' ? (usesCombinedPlan(state) ? 'analyze_requirement_then_prepare_visual_plan' : 'analyze_requirement_and_present_complete_gate1_confirmation') : action === 'analyze_requirement' ? (usesCombinedPlan(state) ? 'continue_to_visual_plan_without_separate_product_confirmation' : 'present_complete_gate1_direction_and_delivery_confirmation') : action === 'plan_visual' ? 'present_complete_visual_plan_and_request_visual_plan_confirmation' : action === 'revoke_visual' ? 'rebuild_complete_visual_plan_with_page_skeleton_mapping' : action === 'repair_visual_source_identity' ? 'continue_existing_visual_plan_without_reconfirmation' : action === 'generate_visual' ? 'register_runtime_demo' : action === 'register_runtime_demo' ? 'render_and_record_current_run_runtime_demo' : action === 'present_runtime_demo' ? (usesCombinedPlan(state) ? 'request_explicit_demo_confirmation_before_route_choice' : 'request_delivery_route_after_verified_demo_presentation') : action === 'sync_stitch' ? (usesCombinedPlan(state) ? 'seal_unchanged_candidate_or_request_difference_decision' : 'present_complete_stitch_candidate_and_request_stitch_confirmation') : action === 'compile_visual_bundle' ? (usesCombinedPlan(state) ? 'validate_and_machine_seal_implementation_then_open_gate2' : 'present_complete_implementation_freeze_and_request_implementation_confirmation') : action === 'open_gate2' ? 'continue_to_controlled_implementation' : action === 'implement' ? 'run_full_verification_chain' : action === 'verify' ? 'pass_proof_with_controlled_evidence' : action === 'pass_proof' ? 'open_gate3' : 'present_delivery_evidence',
     requiredChain: action === 'collect_existing_baseline'
-      ? ['scan_formal_project_inventory', 'freeze_code_reference_and_page_skeleton', 'capture_real_browser_baseline', 'bind_existing_baseline', 'select_and_run_baseline_role_advisories', 'analyze_requirement_and_emit_complete_gate1_presentation']
+      ? ['scan_formal_project_inventory', 'freeze_code_reference_and_page_skeleton', 'capture_real_browser_baseline', 'bind_existing_baseline', 'freeze_change_scope', 'compile_functional_freeze', 'select_and_run_baseline_role_advisories', 'analyze_requirement_and_emit_complete_gate1_presentation']
       : action === 'analyze_requirement'
-      ? ['derive_requirement_and_delivery_contract', ...(requiresApiContracts ? ['derive_and_record_domain_model_from_current_scope', 'derive_and_record_api_contract_from_current_scope'] : []), 'evaluate_experience_strategy', 'select_and_run_gate1_role_advisories', 'synthesize_role_decisions_into_gate1_presentation', 'emit_complete_8_section_gate1_presentation', 'register_complete_gate1_presentation', 'render_chat_orientation_and_full_eight_section_plan', 'request_named_gate1_confirmation']
+      ? ['derive_requirement_and_delivery_contract', ...(requiresApiContracts ? ['derive_and_record_domain_model_from_current_scope', 'derive_and_record_api_contract_from_current_scope'] : []), 'evaluate_experience_strategy', 'select_and_run_gate1_role_advisories', 'synthesize_role_decisions_into_gate1_presentation', 'emit_complete_8_section_gate1_presentation', 'register_complete_gate1_presentation', ...(usesCombinedPlan(state) ? ['continue_to_visual_plan_without_separate_product_confirmation'] : ['render_chat_orientation_and_full_eight_section_plan', 'request_named_gate1_confirmation'])]
       : action === 'plan_visual'
       ? ['analyze_requirement_and_platform_constraints', 'select_and_run_visual_role_advisories', 'compare_real_layout_style_component_icon_chart_motion_sources', 'synthesize_role_decisions_into_visual_presentation', 'emit_visual_execution_plan', 'emit_10_section_visual_plan_presentation']
       : action === 'revoke_visual'
@@ -1491,24 +2143,26 @@ function executionDirective(state, runDir = null) {
       : action === 'generate_visual'
       ? ['compile_demo_source_manifest', 'materialize_run_local_demo_code', 'start_run_local_demo', 'capture_browser_and_motion_evidence', 'freeze_runtime_visual_baseline', 'emit_visual_reference', 'register_runtime_demo']
       : action === 'register_runtime_demo'
-      ? ['register_runtime_demo', 'present_runtime_demo_and_request_delivery_route']
+      ? ['register_runtime_demo', 'render_current_run_visual_sandbox_demo', 'record_runtime_demo_presentation']
+      : action === 'present_runtime_demo'
+      ? ['read_runtime_demo_url', 'render_only_current_run_visual_sandbox_http_url', 'record_runtime_demo_presentation', ...(usesCombinedPlan(state) ? ['request_explicit_demo_confirmation_before_route_choice'] : ['then_expose_delivery_route_or_apply_previously_queued_direct_code'])]
       : action === 'sync_stitch'
-      ? ['submit_or_resume_same_stitch_job', 'capture_strict_export_and_parity_evidence', 'compile_receipt_bound_stitch_confirmation_body', 'present_complete_stitch_candidate_and_request_stitch_confirmation']
+      ? (usesCombinedPlan(state) ? ['submit_or_resume_same_stitch_job', 'capture_strict_export_and_parity_evidence', 'automatically_seal_only_unchanged_stitch_or_expose_verified_difference'] : ['submit_or_resume_same_stitch_job', 'capture_strict_export_and_parity_evidence', 'compile_receipt_bound_stitch_confirmation_body', 'present_complete_stitch_candidate_and_request_stitch_confirmation'])
       : action === 'compile_visual_bundle'
-      ? ['derive_and_record_site_contract_from_locked_visual_plan', 'select_and_run_implementation_role_advisories', 'compile_visual_bundle', 'materialize_only_selected_sources', 'emit_implementation_map', 'compile_receipt_bound_implementation_confirmation_body', 'present_complete_implementation_freeze_and_request_implementation_confirmation']
+      ? ['derive_and_record_site_contract_from_locked_visual_plan', 'freeze_visual_source_manifest', 'resolve_visual_dependencies', 'compile_visual_bundle_and_implementation_map', 'select_and_run_implementation_role_advisories', 'materialize_only_selected_sources', 'compile_receipt_bound_implementation_confirmation_body', ...(usesCombinedPlan(state) ? ['validate_and_machine_seal_implementation_without_extra_user_confirmation'] : ['present_complete_implementation_freeze_and_request_implementation_confirmation'])]
       : action === 'open_gate2'
       ? ['run_pre_gate2_machine_validation', 'open_gate2', 'continue_to_controlled_implementation']
       : action === 'implement'
       ? ['acquire_project_mutation_lease', 'materialize_selected_dependencies', 'apply_approved_implementation_map', 'emit_page_delta']
       : action === 'verify'
-      ? ['capture_runtime_state_matrix', 'run_declared_project_checks', 'emit_verification_bundle_and_proof_evidence', 'select_and_run_verification_role_advisories', 'synthesize_evidence_and_reality_check', 'compile_evidence_bound_industry_review', 'verify_industry_benchmark_evidence']
+      ? ['capture_formal_page_and_confirmed_demo_parity', 'capture_runtime_state_matrix', 'scan_current_verification_inventory', 'compile_verification_plan', 'measure_required_quality_and_record_evidence', 'run_declared_project_checks', 'emit_verification_bundle_and_proof_evidence', 'seal_verification_evidence', 'compile_evidence_bound_industry_review', 'verify_industry_benchmark_evidence', 'select_and_run_verification_role_advisories', 'synthesize_evidence_and_reality_check']
       : action === 'pass_proof'
       ? ['pass_proof', 'open_gate3']
       : ['open_gate3', 'present_delivery_evidence'],
-    completionEvidence: action === 'collect_existing_baseline' ? ['project-inventory.json', 'code-reference.json', 'page-skeleton.json', 'existing-baseline.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'analyze_requirement' ? ['intent-brief.json', 'delivery-contract.json', ...(requiresApiContracts ? ['domain-model.json', 'api-contract.json'] : []), 'experience-strategy.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'plan_visual' || action === 'revoke_visual' ? ['visual-execution-plan.json', 'visual-plan-presentation.md'] : action === 'generate_visual' ? ['runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json'] : action === 'register_runtime_demo' ? ['registrations/runtime-demo-*.json'] : action === 'sync_stitch' ? ['stitch-freeze.json', 'stitch-parity-evidence.json', 'stitch-presentation.md', 'stitch-presentation-manifest.json'] : action === 'compile_visual_bundle' ? ['site-contract.json', 'visual-bundle.json', 'implementation-map.json', 'implementation-presentation.md', 'implementation-presentation-manifest.json'] : action === 'open_gate2' ? ['Gate 2 passed machine evidence'] : action === 'implement' ? ['page-delta.json'] : action === 'verify' ? ['verification-bundle.json', 'proof evidence', 'industry-benchmark-review.json', 'industry-benchmark-evidence.json'] : action === 'pass_proof' ? ['passed proof evidence'] : ['Gate 3 delivery evidence'],
-    userVisibleResults: action === 'collect_existing_baseline' || action === 'analyze_requirement' ? ['full-gate1-presentation-and-confirmation', 'blocking-report'] : action === 'plan_visual' ? ['full-visual-plan-presentation-and-confirmation', 'blocking-report'] : action === 'generate_visual' || action === 'register_runtime_demo' ? ['runtime-demo', 'blocking-report'] : action === 'sync_stitch' ? ['full-stitch-presentation-and-confirmation', 'blocking-report'] : action === 'compile_visual_bundle' ? ['full-implementation-freeze-presentation-and-confirmation', 'blocking-report'] : action === 'open_gate3' ? ['delivery-evidence', 'blocking-report'] : ['automatic-chain-progress', 'blocking-report'],
+    completionEvidence: action === 'collect_existing_baseline' ? ['project-inventory.json', 'code-reference.json', 'page-skeleton.json', 'existing-baseline.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'analyze_requirement' ? ['intent-brief.json', 'delivery-contract.json', ...(requiresApiContracts ? ['domain-model.json', 'api-contract.json'] : []), 'experience-strategy.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'plan_visual' || action === 'revoke_visual' ? ['visual-execution-plan.json', 'visual-plan-presentation.md'] : action === 'generate_visual' ? ['runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json'] : action === 'register_runtime_demo' ? ['registrations/runtime-demo-*.json'] : action === 'present_runtime_demo' ? ['presentations/runtime-demo-*.json'] : action === 'sync_stitch' ? ['stitch-freeze.json', 'stitch-parity-evidence.json', 'stitch-presentation.md', 'stitch-presentation-manifest.json'] : action === 'compile_visual_bundle' ? ['site-contract.json', 'visual-bundle.json', 'implementation-map.json', 'implementation-presentation.md', 'implementation-presentation-manifest.json'] : action === 'open_gate2' ? ['Gate 2 passed machine evidence'] : action === 'implement' ? ['page-delta.json'] : action === 'verify' ? ['verification-bundle.json', 'proof evidence', 'industry-benchmark-review.json', 'industry-benchmark-evidence.json'] : action === 'pass_proof' ? ['passed proof evidence'] : ['Gate 3 delivery evidence'],
+    userVisibleResults: action === 'collect_existing_baseline' || action === 'analyze_requirement' ? (usesCombinedPlan(state) ? ['combined-visual-plan-confirmation', 'blocking-report'] : ['full-gate1-presentation-and-confirmation', 'blocking-report']) : action === 'plan_visual' ? ['full-visual-plan-presentation-and-confirmation', 'blocking-report'] : action === 'generate_visual' || action === 'register_runtime_demo' || action === 'present_runtime_demo' ? ['runtime-demo', 'blocking-report'] : action === 'sync_stitch' ? (usesCombinedPlan(state) ? ['stitch-difference-decision-if-needed', 'blocking-report'] : ['full-stitch-presentation-and-confirmation', 'blocking-report']) : action === 'compile_visual_bundle' ? (usesCombinedPlan(state) ? ['automatic-gate2-and-implementation', 'blocking-report'] : ['full-implementation-freeze-presentation-and-confirmation', 'blocking-report']) : action === 'open_gate3' ? ['delivery-evidence', 'blocking-report'] : ['automatic-chain-progress', 'blocking-report'],
     forbiddenTerminalResults: ['stage-status-only', 'generation-progress-only', 'artifact-file-list-only', ...(action === 'plan_visual' ? ['one-sentence-plan-summary'] : [])],
-    prohibitedUserPrompts: ['continue', 'confirm-runtime-demo', 'poll-for-progress', ...(action === 'plan_visual' ? ['generate-visual-plan', 'report-missing-visual-execution-plan-before-attempt'] : []), ...(action === 'sync_stitch' ? ['confirm-stitch-before-candidate-is-ready'] : []), ...(action === 'compile_visual_bundle' ? ['confirm-implementation-before-freeze-is-ready'] : [])]
+    prohibitedUserPrompts: ['continue', ...(!usesCombinedPlan(state) ? ['confirm-runtime-demo'] : []), 'poll-for-progress', ...(action === 'plan_visual' ? ['generate-visual-plan', 'report-missing-visual-execution-plan-before-attempt'] : []), ...(action === 'sync_stitch' ? ['confirm-stitch-before-candidate-is-ready'] : []), ...(action === 'compile_visual_bundle' ? ['confirm-implementation-before-freeze-is-ready'] : [])]
   };
 }
 function terminalResponseContract(state, runDir = null) {
@@ -1535,15 +2189,15 @@ function terminalResponseContract(state, runDir = null) {
     forbiddenClaims: ['已开始改造', '已进入代码改造', '已进入实施冻结', '下一步将生成', '等待用户继续'],
     reason: `the authorized ${automatic.action} chain has not produced its required user-visible result`
   };
-  const decision = nextRequiredDecision(state);
+  const decision = nextRequiredDecision(state, runDir);
   if (decision) return {
     allowed: true,
-    allowedKinds: ['delivery-route-choice'],
+    allowedKinds: [decision.id === 'demo-confirmation' ? 'demo-confirmation' : decision.id === 'stitch-difference' ? 'stitch-difference-choice' : 'delivery-route-choice'],
     exactLabels: Object.values(decision.optionLabels),
     recheckRouterBeforeEndingTurn: true,
-    requiredPresentation: 'runtime-demo-before-complete-route-choice',
+    requiredPresentation: decision.id === 'demo-confirmation' ? 'runtime-demo-before-explicit-confirmation' : decision.id === 'stitch-difference' ? 'show-evidence-bound-stitch-differences-and-confirmed-demo' : 'runtime-demo-before-complete-route-choice',
     forbiddenLabels: ['确认', '继续'],
-    reason: 'the registered runtime Demo must be shown with both complete route choices'
+    reason: decision.id === 'demo-confirmation' ? 'the current interactive Demo must be shown before explicit confirmation' : decision.id === 'stitch-difference' ? 'show the actual difference and the available user decisions' : 'the registered runtime Demo must be shown with both complete route choices'
   };
   const interaction = userInteractionDirective(state, runDir);
   if (interaction.confirmation?.presentation?.contentRequiredInUserMessage && !String(interaction.confirmation.presentation.content || '').trim()) return {
@@ -1576,13 +2230,43 @@ function terminalResponseContract(state, runDir = null) {
     reason: 'no generated and validated user decision is available'
   };
 }
-function nextRequiredDecision(state) {
-  if (state.lifecycle === 'active' && state.locks?.effectApproved && !state.locks?.stitchApproved && !state.locks?.stitchSkipped && !state.deliveryRoute) {
+function currentStitchDifference(state, runDir) {
+  if (!runDir || !usesCombinedPlan(state) || state.lifecycle !== 'active' || state.deliveryRoute !== 'stitch' || state.locks?.stitchApproved || state.locks?.stitchSkipped) return null;
+  try {
+    const root = path.dirname(path.dirname(path.dirname(runDir))), run = { runDir, runId: state.runId };
+    if (!confirmedDemoReceipt(root, run, state)) return null;
+    const evidenceFile = artifactFile(runDir, state.artifacts.stitchParityEvidence), freezeFile = artifactFile(runDir, state.artifacts.stitchFreeze), referenceFile = artifactFile(runDir, state.artifacts.visualReference);
+    if (!evidenceFile || !freezeFile || !referenceFile) return null;
+    const receipt = operationRecords(runDir).filter(item => item.receipt?.action === 'sync_stitch' && ['failed', 'succeeded'].includes(item.receipt.status)).sort((a, b) => String(b.receipt.finishedAt || '').localeCompare(String(a.receipt.finishedAt || '')))[0];
+    if (!receipt || receipt.receipt.status !== 'failed' || path.basename(receipt.receipt.script || '') !== 'strict-replica.mjs' || receipt.receipt.outputFileHashes?.[path.relative(runDir, evidenceFile)] !== sha256File(evidenceFile)) return null;
+    const evidence = read(evidenceFile), freeze = read(freezeFile);
+    const screen = freeze.approvedScreens?.find(item => item.imageHash === evidence.stitchImageHash && (!evidence.screenId || item.screenId === evidence.screenId));
+    const reference = freeze.approvedScreens?.length > 1 && screen ? resolveStitchScreenReference(runDir, state, screen).visual : read(referenceFile);
+    if (evidence.status !== 'failed' || !Array.isArray(evidence.unmatched) || !evidence.unmatched.length || evidence.unmatched.some(item => ['content-verification', 'structure-contract', 'structure-source', 'structure-extraction', 'structure-image-hash'].includes(item.kind)) || evidence.referenceImageHash !== reference.referenceImage?.sha256) return null;
+    const image = screen && artifactFile(runDir, screen.imagePath), original = artifactFile(runDir, reference.referenceImage?.path), contract = artifactFile(runDir, evidence.structuralVerification?.contractPath);
+    if (!image || !original || !contract || sha256File(image) !== evidence.stitchImageHash || sha256File(original) !== evidence.referenceImageHash || sha256File(contract) !== evidence.structuralVerification.contractHash) return null;
+    const structure = read(contract);
+    const structurePassed = structure.verification?.status === 'passed';
+    const structureDiffers = structure.verification?.status === 'failed' && evidence.unmatched.some(item => item.kind === 'structure-difference');
+    if (structure.source !== 'stitch-screen-export' || structure.sourceImageHash !== evidence.stitchImageHash || (!structurePassed && !structureDiffers)) return null;
+    if (structureDiffers) {
+      const html = artifactFile(runDir, screen.htmlPath);
+      if (!html || sha256File(html) !== screen.htmlHash || structure.verification?.inputs?.htmlHash !== screen.htmlHash || structure.verification?.inputs?.screenId !== screen.screenId) return null;
+    }
+    return { evidence: state.artifacts.stitchParityEvidence, candidateImage: screen.imagePath, referenceImage: reference.referenceImage.path, differences: evidence.unmatched, receipt: path.relative(runDir, receipt.path) };
+  } catch { return null; }
+}
+function nextRequiredDecision(state, runDir = null) {
+  const difference = currentStitchDifference(state, runDir);
+  if (difference) return { id: 'stitch-difference', title: 'Stitch 结果与已确认 Demo 存在差异', purpose: '选择保留已确认 Demo 并直接落地，或提出调整后重新设计确认。', presentation: difference, options: ['direct-code', 'revise'], optionLabels: { 'direct-code': '保留已确认 Demo，直接落地代码', revise: '调整方案并重新确认' }, unselectedInputPolicy: 'revise-current-visual-plan-and-regenerate-runtime-demo' };
+  if (state.lifecycle === 'active' && state.locks?.effectApproved && runtimeDemoPresentationReadyForState(state, runDir) && !state.locks?.stitchApproved && !state.locks?.stitchSkipped && !state.deliveryRoute) {
+    if (usesCombinedPlan(state) && !confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state)) return { id: 'demo-confirmation', title: '确认交互式 Demo', purpose: '确认当前可操作 Demo 符合预期后，再选择是否进入 Stitch', presentation: { ...demoPresentation(runDir, read(artifactFile(runDir, state.artifacts.runtimeDemo))), openPreviewBeforeChoice: true }, options: ['confirm-demo'], optionLabels: { 'confirm-demo': '确认交互式 Demo' }, unselectedInputPolicy: 'revise-current-visual-plan-and-regenerate-runtime-demo' };
     return {
       id: 'delivery-route',
-      title: '运行时 Demo 已生成，请确认后续路线',
-      purpose: '审阅当前可访问 Demo；选择任一路线即接受该 Demo 作为后续实施基线',
-      reviewBeforeChoice: ['实际页面布局与内容', '关键交互与状态', '响应式表现', '组件、图标、图表和动效来源摘要'],
+      title: '可交互 UI 原型（前端 Demo）已生成，请确认后续路线',
+      purpose: usesCombinedPlan(state) ? '已确认当前 Demo；选择是否进入 Stitch' : '审阅当前可访问 Demo；选择任一路线即接受该 Demo 作为后续实施基线',
+      presentation: { ...demoPresentation(runDir, read(artifactFile(runDir, state.artifacts.runtimeDemo))), openPreviewBeforeChoice: true },
+      reviewBeforeChoice: ['亲自操作主要任务与重置示例状态', '实际页面布局与内容', '关键交互与状态', '响应式表现', '组件、图标、图表和动效来源摘要'],
       options: ['stitch', 'direct-code'],
       optionLabels: {
         stitch: '继续执行流程（进入 Stitch）',
@@ -1594,10 +2278,30 @@ function nextRequiredDecision(state) {
       },
       formalCodeDetection: 'Only formal project files outside .apex count as production code. Runtime Demo and visual-sandbox files never mean that production code already exists.',
       unselectedInputPolicy: 'revise-current-visual-plan-and-regenerate-runtime-demo',
-      noSeparateDemoConfirmation: true
+      noSeparateDemoConfirmation: !usesCombinedPlan(state)
     };
   }
   return null;
+}
+function combinedPlanPresentation(state, runDir) {
+  const visualFile = artifactFile(runDir, state.artifacts?.visualPlanPresentation);
+  const productFile = artifactFile(runDir, state.artifacts?.gate1Presentation);
+  if (!visualFile || !productFile) return null;
+  const scopeFile = artifactFile(runDir, state.artifacts?.changeScope);
+  if (state.track === 'existing' && !scopeFile) return null;
+  const scope = scopeFile && read(scopeFile);
+  const localized = state.track === 'existing' && scope.mode !== 'sitewide';
+  if (!localized) return { content: `${fs.readFileSync(productFile, 'utf8')}\n\n${fs.readFileSync(visualFile, 'utf8')}`, renderPolicy: 'complete-product-and-visual-plan', requiredSections: [...gate1PresentationSections, ...visualPlanPresentationSections], localized };
+  const planFile = artifactFile(runDir, state.artifacts?.visualExecutionPlan);
+  if (!planFile) return null;
+  const plan = read(planFile), changes = plan.deliveryNarrative?.changes || [];
+  const sources = new Map((plan.sourceSelections || []).map(item => [item.id, item]));
+  if (!changes.length || changes.some(item => !item.scope || !item.currentIssue || !item.change || !item.why || !item.sourceSelectionIds?.length || item.sourceSelectionIds.some(id => !sources.has(id)))) return null;
+  const lines = changes.map(item => {
+    const choices = item.sourceSelectionIds.map(id => { const source = sources.get(id); return [source.sourceId, source.resourceId, source.version].filter(Boolean).join(' / '); });
+    return `### ${item.scope}\n\n- **问题**：${item.currentIssue}\n- **改法**：${item.change}；${item.why}\n- **样式来源**：${[...new Set(choices)].join('；')}`;
+  });
+  return { content: `# 本次视觉改造方案\n\n${lines.join('\n\n')}\n`, renderPolicy: 'concise-issues-changes-and-style-sources', requiredSections: ['问题', '改法', '样式来源'], localized };
 }
 function userInteractionDirective(state, runDir = null) {
   const approvalBlock = approvalRecoveryBlock(state);
@@ -1618,10 +2322,10 @@ function userInteractionDirective(state, runDir = null) {
           : automatic.action === 'compile_visual_bundle' ? 'implementation' : null;
     return { mode: 'no-user-input', allowed: [], checkpoint, confirmation: null, genericContinueForbidden: true, terminalUserResponseAllowed: false, requiredTerminalResult: automatic.userVisibleResults, reason: `complete ${automatic.action} before asking the user anything; progress text cannot end the turn` };
   }
-  const decision = nextRequiredDecision(state);
-  if (decision) return { mode: 'required-choice', allowed: decision.options, genericContinueForbidden: true, decisionId: decision.id, decision, renderPolicy: 'show-runtime-demo-first-then-title-purpose-review-points-and-both-labelled-options', selectionEffect: 'accept-current-runtime-demo-as-implementation-baseline-and-enter-selected-route' };
+  const decision = nextRequiredDecision(state, runDir);
+  if (decision) return { mode: 'required-choice', allowed: decision.options, genericContinueForbidden: true, decisionId: decision.id, decision, renderPolicy: decision.id === 'demo-confirmation' ? 'show-runtime-demo-and-request-explicit-confirmation' : decision.id === 'stitch-difference' ? 'show-evidence-bound-differences-and-confirmed-demo-with-both-options' : 'show-runtime-demo-first-then-title-purpose-review-points-and-both-labelled-options', selectionEffect: decision.id === 'demo-confirmation' ? 'record-current-demo-as-approved-baseline' : decision.id === 'stitch-difference' ? 'direct-code-keeps-confirmed-demo; revise-reopens-affected-design' : (usesCombinedPlan(state) ? 'enter-selected-route-for-confirmed-demo' : 'accept-current-runtime-demo-as-implementation-baseline-and-enter-selected-route') };
   const checkpoint = state.lifecycle !== 'active' ? null
-    : state.gates?.gate1?.status !== 'passed' ? 'gate1'
+    : state.gates?.gate1?.status !== 'passed' && !usesCombinedPlan(state) ? 'gate1'
     : !state.locks?.visualPlanApproved ? 'visual-plan'
     : !state.locks?.stitchApproved && !state.locks?.stitchSkipped ? 'stitch'
     : !state.locks?.implementationApproved ? 'implementation'
@@ -1647,11 +2351,17 @@ function userInteractionDirective(state, runDir = null) {
         confirmationContent: scope.presentationPolicy?.confirmationContent,
         unchangedContent: scope.presentationPolicy?.unchangedContent
       };
-      confirmation.presentation.renderPolicy = 'chat-orientation-then-complete-affected-closure-only-never-republish-unchanged-site-content';
-      confirmation.presentation.chatOrientation.confirming = checkpoint === 'gate1'
-        ? '仅确认本次局部变更闭包、交付边界和验收；未列入变更闭包的页面、区域、组件与数据展示沿用冻结基线'
-        : '仅确认本次受影响节点的布局、数据展示、视觉 Token 差异、组件、动效、来源与落地方式；不重新确认全站内容';
-      confirmation.presentation.chatOrientation.reviewFocus = ['本次要调整的节点是否完整且没有扩大范围', '每项改动、原因与验收是否明确', '明确保护的未调整内容是否保持不变', '是否存在必要且已说明的跨组件影响'];
+      if (scope.mode === 'sitewide') {
+        confirmation.presentation.renderPolicy = 'chat-orientation-then-complete-existing-site-redesign';
+        confirmation.presentation.chatOrientation.confirming = '结合现有网站确认整站问题、改造范围、目标效果与保留的功能和内容';
+        confirmation.presentation.chatOrientation.reviewFocus = ['现状和问题是否有真实网站依据', '页面、交互和视觉改法及目标效果是否明确', '保留内容、业务行为和受影响组件是否完整', '样式来源与验收是否明确'];
+      } else {
+        confirmation.presentation.renderPolicy = 'chat-orientation-then-complete-affected-closure-only-never-republish-unchanged-site-content';
+        confirmation.presentation.chatOrientation.confirming = checkpoint === 'gate1'
+          ? '仅确认本次局部变更闭包、交付边界和验收；未列入变更闭包的页面、区域、组件与数据展示沿用冻结基线'
+          : '仅确认本次受影响节点的布局、数据展示、视觉 Token 差异、组件、动效、来源与落地方式；不重新确认全站内容';
+        confirmation.presentation.chatOrientation.reviewFocus = ['本次要调整的节点是否完整且没有扩大范围', '每项改动、原因与验收是否明确', '明确保护的未调整内容是否保持不变', '是否存在必要且已说明的跨组件影响'];
+      }
     }
   }
   if (confirmation?.presentation && checkpoint === 'gate1' && gate1File) {
@@ -1669,14 +2379,26 @@ function userInteractionDirective(state, runDir = null) {
     };
   }
   if (confirmation?.presentation && checkpoint === 'visual-plan' && visualPlanFile) {
-    confirmation.presentation.content = fs.readFileSync(visualPlanFile, 'utf8');
-    confirmation.presentation.sha256 = sha256File(visualPlanFile);
+    const visualContent = fs.readFileSync(visualPlanFile, 'utf8');
+    let combinedContent = visualContent;
+    let localized = false;
+    if (usesCombinedPlan(state)) {
+      confirmation.label = '确认视觉改造方案';
+      confirmation.presentation.chatOrientation.afterApproval = '自动生成并展示可交互 Demo；用户确认 Demo 后选择是否进入 Stitch。';
+      const combined = combinedPlanPresentation(state, runDir);
+      if (!combined) return { mode: 'no-user-input', allowed: [], confirmation: null, terminalUserResponseAllowed: false, reason: 'combined presentation cannot be reconstructed from current source artifacts' };
+      localized = combined.localized; combinedContent = combined.content;
+      confirmation.presentation.renderPolicy = combined.renderPolicy;
+      confirmation.presentation.requiredSections = combined.requiredSections;
+    }
+    confirmation.presentation.content = combinedContent;
+    confirmation.presentation.sha256 = sha256Text(combinedContent);
     confirmation.presentation.contentRequiredInUserMessage = true;
     confirmation.presentation.streaming = {
-      enabled: true,
-      mode: 'progressive-section-render',
+      enabled: !localized,
+      mode: localized ? 'concise-scope-presentation' : 'progressive-section-render',
       start: '正在整理完整的视觉实施方案，将按章节持续输出并校验。',
-      sections: visualPlanPresentationSections,
+      sections: usesCombinedPlan(state) && !localized ? [...gate1PresentationSections, ...visualPlanPresentationSections] : visualPlanPresentationSections,
       progressFormat: '正在生成并校验第 {current}/{total} 节：{title}',
       terminalRule: 'stream chat orientation and every section in order; render the exact confirmation label only after all sections, source binding, and final validation complete',
       forbiddenDuringStream: ['confirmation-button', 'generic-continue', 'partial-approval', 'file-card-only']
@@ -1712,9 +2434,9 @@ function capabilityExecutionDirective() {
     rule: 'Capability setup, missing project-context files, candidate research, and plan generation are automatic internal work. Only Router userInteraction or nextRequiredDecision may be presented to the user.'
   };
 }
-function operatingConstraints() {
+function operatingConstraints(state) {
   return {
-    strictFlow: 'only Router actions, decisions, and four named confirmations may advance the run',
+    strictFlow: usesCombinedPlan(state) ? 'only Router actions and decisions may advance; confirm the combined product and visual plan, then the interactive Demo, before choosing a route' : 'only Router actions, decisions, and four named confirmations may advance the run',
     completeArtifacts: 'a confirmation is unavailable until its complete user-readable and machine-readable artifact set exists',
     continuousExecution: 'all work between confirmation gates runs automatically without continue, progress-poll, or setup prompts',
     efficientExecution: 'reuse context, source-integrity, and operation indexes; perform full cryptographic verification only at defined trust boundaries',
@@ -1724,8 +2446,10 @@ function operatingConstraints() {
 function routerState(root, run, sessionId) {
   const state = reconcileGateDependencyState(run.runDir, run.state || stateOf(run.runDir));
   const baseline = existingVisualBaselineStatus(run.runDir, state);
+  let integrity; try { integrity = reconcileRun(run.runDir); } catch (error) { integrity = { status: 'repair-required', issues: [{ type: 'reconciliation-unavailable', error: error.message }] }; }
   const sessionContext = sessionContextStatus(root, sessionId);
-  return { schemaVersion: '3.4', apexVersion: apexVersion(), bridgeHash: hashFile(bridgeSource), projectId: projectId(root), projectRoot: root, runId: run.runId, runDir: run.runDir, sessionId: sessionId || null, sessionContext, track: state.track, scope: state.scope, authorization: state.authorization, lifecycle: state.lifecycle || 'active', phase: state.phase, gates: Object.fromEntries(Object.entries(state.gates || {}).map(([key, value]) => [key, value.status])), handoff: state.handoff || null, existingVisualBaseline: state.track === 'existing' ? baseline : null, allowedActions: allowedActions(state, run.runDir), nextRequiredAction: nextRequiredAction(state, run.runDir), nextRequiredDecision: nextRequiredDecision(state), responsePolicy: responsePolicy(state, run.runDir), executionDirective: executionDirective(state, run.runDir), terminalResponseContract: terminalResponseContract(state, run.runDir), capabilityExecution: capabilityExecutionDirective(), operatingConstraints: operatingConstraints(), userInteraction: userInteractionDirective(state, run.runDir), nextRequiredGate: ['cancelled', 'handed-off'].includes(state.lifecycle) ? null : state.gates?.gate1?.status !== 'passed' ? 'gate1' : state.gates?.gate2?.status !== 'passed' ? 'gate2' : state.gates?.gate3?.status !== 'passed' ? 'gate3' : null };
+  let agentRuntime = null; try { agentRuntime = agentRuntimeStatus(run.runDir); } catch (error) { agentRuntime = { status: 'unavailable', error: error.message }; }
+  return { schemaVersion: '3.5', apexVersion: apexVersion(), bridgeHash: hashFile(bridgeSource), projectId: projectId(root), projectRoot: root, runId: run.runId, runDir: run.runDir, sessionId: sessionId || null, sessionContext, track: state.track, scope: state.scope, authorization: state.authorization, confirmationModel: state.roleChain?.confirmationModel || 'gate-summary-only', lifecycle: state.lifecycle || 'active', phase: state.phase, gates: Object.fromEntries(Object.entries(state.gates || {}).map(([key, value]) => [key, value.status])), handoff: state.handoff || null, integrity, agentRuntime, existingVisualBaseline: state.track === 'existing' ? baseline : null, allowedActions: allowedActions(state, run.runDir), nextRequiredAction: nextRequiredAction(state, run.runDir), nextRequiredDecision: nextRequiredDecision(state, run.runDir), responsePolicy: responsePolicy(state, run.runDir), executionDirective: executionDirective(state, run.runDir), terminalResponseContract: terminalResponseContract(state, run.runDir), capabilityExecution: capabilityExecutionDirective(), operatingConstraints: operatingConstraints(state), userInteraction: userInteractionDirective(state, run.runDir), nextRequiredGate: ['cancelled', 'handed-off'].includes(state.lifecycle) ? null : state.gates?.gate1?.status !== 'passed' ? 'gate1' : state.gates?.gate2?.status !== 'passed' ? 'gate2' : state.gates?.gate3?.status !== 'passed' ? 'gate3' : null };
 }
 function leaseDirectory(root) { return path.join(root, '.apex', 'locks', 'project-mutation.lock'); }
 function leaseFile(root) { return path.join(leaseDirectory(root), 'lease.json'); }
@@ -1777,13 +2501,24 @@ function verifyAuthorization(root, run, sessionId, reference, action) {
   if (token.schemaVersion !== '3.0' || token.projectId !== projectId(root) || token.runId !== run.runId || token.sessionId !== sessionId || token.action !== action) fail('authorization receipt does not match this project, run, session, or action');
   if (Date.parse(token.expiresAt) <= Date.now()) fail('authorization receipt has expired');
   if (token.stateHash !== hashFile(path.join(run.runDir, 'state.json'))) fail('authorization receipt is stale because the run state changed');
-  if (!allowedActions(stateOf(run.runDir), run.runDir).includes(action)) fail(`action ${action} is no longer allowed by the current run state`);
+  const allowed = allowedActions(stateOf(run.runDir), run.runDir);
+  // apex-action creates a durable `running` receipt before starting the
+  // child. That receipt intentionally makes the external Router terminal
+  // non-interactive; it must not invalidate the very token the child needs
+  // to prove its authorization. Accept only the exact current running receipt
+  // created by this gateway, never a caller-provided bypass.
+  const activeReceiptRef = process.env.APEX_ROUTER_OPERATION_RECEIPT;
+  const activeReceipt = activeReceiptRef && artifactFile(run.runDir, activeReceiptRef);
+  const activeMatches = Boolean(activeReceipt && activeReceipt.startsWith(`${path.join(run.runDir, 'operations')}${path.sep}`) && (() => { try { const receipt = read(activeReceipt); return receipt.status === 'running' && receipt.authorizationRef === reference && receipt.action === action; } catch { return false; } })());
+  const currentState = stateOf(run.runDir);
+  if (activeMatches && ['verify', 'implement', 'prepare_workspace', 'pass_proof', 'open_gate3'].includes(action) && currentState.gates?.gate2?.status === 'passed' && currentState.locks?.implementationAllowed && usesCombinedPlan(currentState) && !postGateImplementationCurrent(currentState, run.runDir)) fail('the confirmed Demo or implementation machine seal is no longer current');
+  if (!allowed.includes(action) && !activeMatches) fail(`action ${action} is no longer allowed by the current run state`);
   appendEvent(run.runDir, { type: 'action-verified', sessionId, action, tokenId: token.tokenId });
   return token;
 }
 const approvalControllerCommand = gate => ({ gate1: 'pass-gate1', 'visual-plan': 'confirm-visual-plan', stitch: 'confirm-stitch', implementation: 'confirm-implementation' }[gate]);
 function recoverRecordedApproval(root, run, sessionId) {
-  let state = stateOf(run.runDir);
+  let state = reconcileGateDependencyState(run.runDir, stateOf(run.runDir));
   const approvals = path.join(run.runDir, 'approvals');
   if (!fs.existsSync(approvals) || ['cancelled', 'handed-off'].includes(state.lifecycle)) return null;
   // A prior recovery error suppresses the duplicate UI, not recovery itself:
@@ -1796,7 +2531,13 @@ function recoverRecordedApproval(root, run, sessionId) {
     .filter(name => name.endsWith('.json'))
     .map(name => ({ relative: path.join('approvals', name), file: path.join(approvals, name) }))
     .map(item => ({ ...item, receipt: (() => { try { return read(item.file); } catch { return null; } })() }))
-    .filter(item => item.receipt?.status === 'approved' && item.receipt?.gate === pendingGate && item.receipt?.runId === state.runId && item.receipt?.sessionId === sessionId)
+    .filter(item => item.receipt?.status === 'approved' && item.receipt?.gate === pendingGate && item.receipt?.runId === state.runId && item.receipt?.sessionId === sessionId && Number(item.receipt?.confirmationEpoch || 0) === confirmationEpoch(state, pendingGate))
+    // Superseded approvals are audit records, not recoverable decisions.
+    // Never let a stale hash suppress a current user confirmation forever.
+    .filter(item => Array.isArray(item.receipt.artifactHashes) && item.receipt.artifactHashes.length && item.receipt.artifactHashes.every(hash => {
+      const artifact = path.resolve(run.runDir, hash.path || '');
+      return artifact.startsWith(`${path.resolve(run.runDir)}${path.sep}`) && fs.existsSync(artifact) && hashFile(artifact) === hash.sha256;
+    }))
     .sort((left, right) => String(right.receipt.approvedAt || '').localeCompare(String(left.receipt.approvedAt || '')));
   if (!candidates.length) return null;
   const candidate = candidates[0];
@@ -1822,11 +2563,23 @@ function recoverRecordedApproval(root, run, sessionId) {
 function approvalReceipt(root, run, sessionId, gate, approvalId, references) {
   if (!['gate1', 'visual-plan', 'stitch', 'implementation'].includes(gate) || !approvalId || !references.length) fail('approval requires gate1|visual-plan|stitch|implementation, an approval id, and at least one run-relative artifact');
   const recovered = recoverRecordedApproval(root, run, sessionId);
-  const state = stateOf(run.runDir);
+  // Recovery may archive stale receipts or reconcile dependent artifacts.
+  // Re-read through the same dependency reconciler used by status before
+  // deciding whether the current confirmation is available.
+  let state = reconcileGateDependencyState(run.runDir, stateOf(run.runDir));
+  // An explicit fresh approval supersedes a recovery failure only when the
+  // current checkpoint is otherwise ready. The failed receipt remains on
+  // disk for audit, but must not permanently disable the named gate.
+  if (state.approvalRecovery?.status === 'failed' && state.approvalRecovery?.gate === gate && checkpointReady({ ...state, approvalRecovery: null }, run.runDir, gate)) {
+    state.approvalRecovery = null;
+    state.revision = Number(state.revision || 0) + 1;
+    state.updatedAt = now();
+    write(path.join(run.runDir, 'state.json'), state);
+  }
   if (recovered && !recovered.error && !checkpointIsAwaitingDecision(state, gate)) return { receipt: recovered.receipt, recoveredApprovalTransition: true, ...routerState(root, { ...run, state }, sessionId) };
   if (recovered?.error) fail(`recorded ${gate} approval could not be committed; duplicate confirmation is suppressed until recovery succeeds: ${recovered.error}`);
   if (!checkpointIsAwaitingDecision(state, gate) || !checkpointReady(state, run.runDir, gate)) fail(`${gate} confirmation is unavailable until its complete generated artifacts are ready`);
-  if (gate === 'visual-plan' && state.gates?.gate1?.status !== 'passed') fail('Gate 1 must pass before a visual plan approval can be recorded');
+  if (gate === 'visual-plan' && state.gates?.gate1?.status !== 'passed' && !(usesCombinedPlan(state) && checkpointReady(state, run.runDir, 'gate1'))) fail('a current product plan is required before a visual plan approval can be recorded');
   if (gate === 'gate1') {
     const presentation = state.artifacts?.gate1Presentation;
     if (!presentation || !references.includes(presentation) || !gate1PresentationReady(state, run.runDir)) fail('Gate 1 approval requires the chat-oriented, source-bound, complete eight-section direction and delivery presentation');
@@ -1853,16 +2606,21 @@ function approvalReceipt(root, run, sessionId, gate, approvalId, references) {
     if (validation.status !== 0) fail((validation.stderr || validation.stdout).trim());
   }
   const rootDir = path.resolve(run.runDir);
-  const artifactHashes = references.map(reference => {
+  const productArtifacts = ['intentBrief', 'deliveryContract', 'experienceStrategy', 'experienceQualityEvidence', 'gate1Presentation', 'gate1PresentationManifest', 'gate1PresentationRegistration', 'projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton', 'functionalFreeze', 'changeScope', 'domainModel', 'apiContract'];
+  const boundReferences = gate === 'visual-plan' && usesCombinedPlan(state) ? [...new Set([...references, ...productArtifacts.map(name => state.artifacts?.[name])].filter(Boolean))] : references;
+  const artifactHashes = boundReferences.map(reference => {
     const target = path.resolve(run.runDir, reference);
     if (!target.startsWith(`${rootDir}${path.sep}`) || !fs.existsSync(target) || !fs.statSync(target).isFile()) fail(`approval artifact is missing or outside the run: ${reference}`);
     return { path: path.relative(run.runDir, target), sha256: hashFile(target) };
   });
-  const scopes = { gate1: 'requirements-and-delivery-contract', 'visual-plan': 'pre-image-visual-execution-plan', stitch: 'stitch-candidate', implementation: 'pre-implementation-freeze' }; const receipt = { schemaVersion: '3.0', approvalId, gate, status: 'approved', projectId: projectId(root), runId: run.runId, sessionId, scope: scopes[gate], approvedAt: now(), artifactHashes };
+  const rendered = gate === 'visual-plan' && usesCombinedPlan(state) ? combinedPlanPresentation(state, run.runDir) : null;
+  if (gate === 'visual-plan' && usesCombinedPlan(state) && !rendered) fail('combined product and visual presentation cannot be reconstructed');
+  const presentation = rendered ? { sha256: sha256Text(rendered.content), renderPolicy: rendered.renderPolicy } : undefined;
+  const scopes = { gate1: 'requirements-and-delivery-contract', 'visual-plan': 'pre-image-visual-execution-plan', stitch: 'stitch-candidate', implementation: 'pre-implementation-freeze' }; const receipt = { schemaVersion: '3.0', approvalId, gate, status: 'approved', projectId: projectId(root), runId: run.runId, sessionId, scope: gate === 'visual-plan' && usesCombinedPlan(state) ? 'requirements-and-visual-plan' : scopes[gate], confirmationEpoch: confirmationEpoch(state, gate), ...(presentation ? { presentation } : {}), approvedAt: now(), artifactHashes };
   const safeId = approvalId.replace(/[^A-Za-z0-9._-]/g, '_');
   const relative = path.join('approvals', `${gate}-${safeId}.json`);
   write(path.join(run.runDir, relative), receipt);
-  appendEvent(run.runDir, { type: 'approval-recorded', sessionId, gate, approvalId, artifactCount: artifactHashes.length });
+  appendEvent(run.runDir, { type: 'approval-recorded', sessionId, gate, approvalId, scope: receipt.scope, artifactCount: artifactHashes.length });
   const command = approvalControllerCommand(gate);
   const result = runControllerCommand(command, [run.runDir, relative]);
   if (result.status !== 0) fail((result.stderr || result.stdout).trim());
@@ -1871,8 +2629,8 @@ function approvalReceipt(root, run, sessionId, gate, approvalId, references) {
 
 function checkpointIsAwaitingDecision(state, checkpoint) {
   if (state.approvalRecovery?.status === 'failed' && state.approvalRecovery?.gate === checkpoint) return false;
-  if (checkpoint === 'gate1') return state.gates?.gate1?.status !== 'passed';
-  if (checkpoint === 'visual-plan') return state.gates?.gate1?.status === 'passed' && !state.locks?.visualPlanApproved;
+  if (checkpoint === 'gate1') return !usesCombinedPlan(state) && state.gates?.gate1?.status !== 'passed';
+  if (checkpoint === 'visual-plan') return (state.gates?.gate1?.status === 'passed' || usesCombinedPlan(state)) && !state.locks?.visualPlanApproved;
   if (checkpoint === 'stitch') return state.locks?.effectApproved === true && state.deliveryRoute === 'stitch' && !state.locks?.stitchApproved;
   if (checkpoint === 'implementation') return (state.locks?.stitchCurrent === true || state.locks?.stitchSkipped === true) && !state.locks?.implementationApproved;
   return false;
@@ -1943,12 +2701,17 @@ function skipStitchStage(root, run, sessionId, decisionId, reason, references) {
   const state = stateOf(run.runDir);
   if (!decisionId || !reason) fail('skip-stage stitch requires a decision id and reason');
   if (state.lifecycle !== 'active' || !state.locks?.effectApproved || state.locks?.stitchApproved || state.locks?.stitchSkipped) fail('Stitch stage is not available for an explicit stage skip');
+  if (!runtimeDemoPresentationReady(root, run, state, sessionId)) fail('Stitch cannot be skipped before the current run-local runtime Demo has been presented');
+  if (usesCombinedPlan(state) && !confirmedDemoReceipt(root, run, state, sessionId)) fail('the current Demo must be explicitly confirmed before selecting a delivery route');
   const required = [state.artifacts?.runtimeDemo, state.artifacts?.visualReference, state.artifacts?.gate1VisualOutput, state.artifacts?.designCandidates];
+  const difference = currentStitchDifference(state, run.runDir);
+  if (difference) required.push(difference.evidence, difference.receipt);
   if (required.some(reference => !reference)) fail('a runtime Demo baseline, selected candidate, and generated visual source evidence are required before skipping Stitch');
   const artifactHashes = decisionArtifactHashes(run, references, required);
   const safeId = decisionId.replace(/[^A-Za-z0-9._-]/g, '_'); const relative = path.join('decisions', `skip-stage-stitch-${safeId}.json`);
   const receipt = { schemaVersion: '3.0', decisionId, type: 'stage-skip', checkpoint: 'stitch', outcome: 'continued-with-runtime-demo-baseline', projectId: projectId(root), runId: run.runId, sessionId, reason, decidedAt: now(), effects: ['preserve-user-input-and-deliverables', 'skip-stitch-generation-and-human-confirmation', 'require-runtime-demo-source-lock-gate2-and-gate3'], artifactHashes };
   write(path.join(run.runDir, relative), receipt);
+  if (usesCombinedPlan(state)) state.deliveryRoute = 'direct-code';
   state.locks.stitchSkipped = true; state.locks.stitchApproved = true; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.pendingDeliveryRoute = null; state.pendingDeliveryRouteReceipt = null; state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(path.join(run.runDir, 'state.json'), state);
   appendEvent(run.runDir, { type: 'stitch-stage-skipped-by-user', sessionId, decisionId, reason, receipt: relative });
   return { receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
@@ -1958,7 +2721,7 @@ function selectDeliveryRoute(root, run, sessionId, route, decisionId, reason, re
   const state = stateOf(run.runDir);
   const normalizedRoute = ['直接代码', '直接生成代码', '直接生成生产代码', '跳过 Stitch 生成代码'].includes(route) ? 'direct-code' : ['继续执行流程', '进入 Stitch', '走 Stitch'].includes(route) ? 'stitch' : route;
   if (!['stitch', 'direct-code'].includes(normalizedRoute) || !decisionId || !reason) fail('select-route requires stitch|direct-code (or its declared Chinese utterance), a decision id, and a reason');
-  if (normalizedRoute === 'direct-code' && state.lifecycle === 'active' && state.locks?.visualPlanApproved && !state.locks?.effectApproved && !state.locks?.stitchApproved && !state.locks?.stitchSkipped) {
+  if (!usesCombinedPlan(state) && normalizedRoute === 'direct-code' && state.lifecycle === 'active' && state.locks?.visualPlanApproved && !state.locks?.effectApproved && !state.locks?.stitchApproved && !state.locks?.stitchSkipped) {
     const safeId = decisionId.replace(/[^A-Za-z0-9._-]/g, '_');
     const relative = path.join('decisions', `delivery-route-intent-${safeId}.json`);
     const receipt = { schemaVersion: '3.0', decisionId, type: 'delivery-route-intent', route: 'direct-code', userUtterance: route, projectId: projectId(root), runId: run.runId, sessionId, reason, decidedAt: now(), effects: ['preserve-the-confirmed-visual-plan', 'wait-for-runtime-demo-registration', 'skip-stitch-after-the-same-demo-is-registered'] };
@@ -1968,6 +2731,8 @@ function selectDeliveryRoute(root, run, sessionId, route, decisionId, reason, re
     return { selectedRoute: normalizedRoute, userUtterance: route, disposition: 'queued-until-runtime-demo-registration', productionCodeStatus: 'not-inferred-from-runtime-demo', receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
   }
   if (state.lifecycle !== 'active' || !state.locks?.effectApproved || !state.artifacts?.runtimeDemo || state.locks?.stitchApproved || state.locks?.stitchSkipped) fail('delivery route is unavailable until the runtime Demo is registered and before Stitch is confirmed');
+  if (!runtimeDemoPresentationReady(root, run, state, sessionId)) fail('delivery route is unavailable until the current run-local runtime Demo presentation is recorded');
+  if (usesCombinedPlan(state) && !confirmedDemoReceipt(root, run, state, sessionId)) fail('the current Demo must be explicitly confirmed before selecting a delivery route');
   if (normalizedRoute === 'direct-code') return { selectedRoute: normalizedRoute, userUtterance: route, productionCodeStatus: 'not-inferred-from-runtime-demo', ...skipStitchStage(root, run, sessionId, decisionId, reason, references) };
   const required = [state.artifacts.runtimeDemo, state.artifacts.visualReference, state.artifacts.gate1VisualOutput, state.artifacts.designCandidates];
   if (required.some(reference => !reference)) fail('runtime Demo source evidence is incomplete; cannot select Stitch');
@@ -2018,7 +2783,7 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
   const state = stateOf(run.runDir);
   const allowed = ['gate1', 'visual-plan', 'visual', 'stitch', 'implementation'];
   if (!allowed.includes(checkpoint) || !['visible', 'implementation-only', 'non-baseline'].includes(impact) || !reason) fail('revision requires gate1|visual-plan|visual|stitch|implementation, visible|implementation-only|non-baseline, and a reason');
-  if (['visual-plan', 'visual'].includes(checkpoint) && state.gates?.gate1?.status !== 'passed') fail('visual prompt revision requires Gate 1');
+  if (['visual-plan', 'visual'].includes(checkpoint) && state.gates?.gate1?.status !== 'passed' && !(usesCombinedPlan(state) && checkpointReady(state, run.runDir, 'gate1'))) fail('visual prompt revision requires a current product plan');
   if (checkpoint === 'stitch' && !state.locks?.effectApproved) fail('Stitch prompt revision requires confirmed effect image');
   if (checkpoint === 'implementation' && !state.locks?.stitchCurrent && !state.locks?.stitchSkipped) fail('implementation prompt revision requires sealed or explicitly skipped Stitch');
   const gate2Open = state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed === true;
@@ -2028,6 +2793,7 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
     appendEvent(run.runDir, { type: 'prompt-revision-no-baseline-change', sessionId, checkpoint, reason, preserved: ['approvals', 'gate2', 'implementation-authority'] });
     revisionOutcome = { kind: 'non-baseline-clarification', checkpoint, impact, reopenedApprovedCheckpoints: [], message: '该补充未改变已冻结字段；已记录，不解锁任何已确认方案。' };
   } else if (checkpoint === 'gate1') {
+    invalidateConfirmationEpochs(state, ['gate1', 'visual-plan', 'demo', 'stitch', 'implementation']);
     const previouslyApproved = state.gates?.gate1?.status === 'passed';
     const invalidated = invalidateVisualIntermediates(run.runDir, 'prompt-revision-gate1');
     const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['baseline', 'gate1', 'visual', 'implementation', 'verify'], 'prompt-revision-gate1');
@@ -2049,12 +2815,15 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
     appendEvent(run.runDir, { type: 'gate1-reopened-for-material-revision', sessionId, reason, previouslyApproved, preserved: state.track === 'existing' ? ['projectInventory', 'existingBaseline', 'codeReference', 'pageSkeleton'] : [], cleared, invalidated, invalidatedRoles, revoked });
     revisionOutcome = { kind: previouslyApproved ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: ['gate1', 'visual-plan', 'stitch', 'implementation'].filter(item => approvalsBefore[item]), requiredNextConfirmation: '确认需求与交付方案', message: previouslyApproved ? '此调整改变了已确认的需求与交付边界；已解锁 Gate 1，并撤销其派生方案。APEX 将自动重建完整需求与交付方案，随后请重新确认“确认需求与交付方案”。' : '调整只影响当前需求与交付方案；将自动重建后回到同一确认点。' };
   } else if (checkpoint === 'visual-plan' || checkpoint === 'visual' || (checkpoint === 'implementation' && impact === 'visible')) {
+    invalidateConfirmationEpochs(state, ['visual-plan', 'demo', 'stitch', 'implementation']);
     const invalidated = invalidateVisualIntermediates(run.runDir, `prompt-revision-${checkpoint}`); const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['visual', 'implementation', 'verify'], `prompt-revision-${checkpoint}`); state.locks.visualPlanApproved = false; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.gates.gate2 = { status: 'revoked', at: now(), evidence: [`prompt-revision:${checkpoint}`] }; const cleared = clearArtifactReferences(state, visualAndImplementationArtifacts); const revoked = revokeDownstreamDeliveryState(state, `prompt-revision:${checkpoint}`); state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; appendEvent(run.runDir, { type: 'visual-reset', reason: `prompt-revision:${checkpoint}`, invalidated, invalidatedRoles, cleared, revoked });
     revisionOutcome = { kind: approvalsBefore['visual-plan'] ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: ['visual-plan', 'stitch', 'implementation'].filter(item => approvalsBefore[item]), requiredNextConfirmation: '确认视觉方案', message: approvalsBefore['visual-plan'] ? '此调整改变了已确认的视觉方案；已解锁视觉方案及其派生 Demo、路线、Stitch 和实施冻结。APEX 将自动重建完整视觉方案，随后请重新确认“确认视觉方案”。' : '调整只影响当前未确认的视觉方案；将自动重建后回到“确认视觉方案”。' };
   } else if (checkpoint === 'stitch') {
+    invalidateConfirmationEpochs(state, ['stitch', 'implementation']);
     const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['implementation', 'verify'], 'prompt-revision-stitch'); state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:stitch'] }; const revoked = revokeDownstreamDeliveryState(state, 'prompt-revision:stitch'); state.phase = state.track === 'greenfield' ? 'G-06 SYNC_FREEZE' : 'E-08 SYNC_FREEZE'; appendEvent(run.runDir, { type: 'role-advisories-reset-after-stitch-revision', invalidatedRoles, revoked });
     revisionOutcome = { kind: approvalsBefore.stitch ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: ['stitch', 'implementation'].filter(item => approvalsBefore[item]), requiredNextConfirmation: '确认 Stitch 内容', message: approvalsBefore.stitch ? '此调整改变了已确认的 Stitch 内容；已解锁 Stitch 与实施冻结。APEX 将自动重建并回到“确认 Stitch 内容”。' : '调整只影响当前未确认的 Stitch 工件；将自动重建后回到“确认 Stitch 内容”。' };
   } else if (checkpoint === 'implementation' && !gate2Open) {
+    invalidateConfirmationEpochs(state, ['implementation']);
     const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['implementation', 'verify'], 'prompt-revision-implementation'); state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:implementation'] }; const revoked = revokeDownstreamDeliveryState(state, 'prompt-revision:implementation'); appendEvent(run.runDir, { type: 'role-advisories-reset-after-implementation-revision', invalidatedRoles, revoked });
     revisionOutcome = { kind: approvalsBefore.implementation ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: approvalsBefore.implementation ? ['implementation'] : [], requiredNextConfirmation: '确认实施冻结', message: approvalsBefore.implementation ? '此调整改变了已确认的实施冻结；已解锁实施冻结。APEX 将自动重建并回到“确认实施冻结”。' : '调整只影响当前未确认的实施冻结；将自动重建后回到“确认实施冻结”。' };
   } else if (checkpoint === 'implementation') {
@@ -2164,6 +2933,7 @@ try {
       json({ status: 'cancelled', idempotent: false, recoveredCancellation: true, cancellation, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
     }
     else {
+      fenceRunCancellation(run.runDir, sessionId, reason);
       const releasedLease = releaseLeaseForRun(root, run, sessionId, 'run-cancelled');
       appendEvent(run.runDir, { type: 'run-cancelled', sessionId, reason, releasedLease });
       const cancellation = reclaimCancelledRun(root, run, sessionId, `${cancellationIntent}:${reason}`);
@@ -2179,16 +2949,31 @@ try {
     if (!projectArg || !requestedRunId || !sessionId || stage !== 'stitch' || !decisionId || !reason) fail('usage: skip-stage <project-root> <run-id> <session-id> stitch <decision-id> <reason> [run-relative-artifact ...]');
     const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
     json({ status: 'continued-with-stitch-stage-skip', ...skipStitchStage(root, run, sessionId, decisionId, reason, references) });
+  } else if (command === 'confirm-demo') {
+    const [projectArg, requestedRunId, sessionId, confirmationId, utterance] = args;
+    if (!projectArg || !requestedRunId || !sessionId || !confirmationId || !utterance) fail('usage: confirm-demo <project-root> <run-id> <session-id> <confirmation-id> <explicit-user-utterance>');
+    const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
+    json({ status: 'runtime-demo-confirmed', ...confirmRuntimeDemo(root, run, sessionId, confirmationId, utterance) });
   } else if (command === 'select-route') {
     const [projectArg, requestedRunId, sessionId, route, decisionId, reason, ...references] = args;
     if (!projectArg || !requestedRunId || !sessionId || !route || !decisionId || !reason) fail('usage: select-route <project-root> <run-id> <session-id> <stitch|direct-code> <decision-id> <reason> [run-relative-artifact ...]');
     const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
     json({ status: 'delivery-route-selected', ...selectDeliveryRoute(root, run, sessionId, route, decisionId, reason, references) });
+  } else if (command === 'register-implementation') {
+    const [projectArg, requestedRunId, sessionId, authorizationRef, leaseId, deltaReference] = args;
+    if (!projectArg || !requestedRunId || !sessionId || !authorizationRef || !leaseId || !deltaReference) fail('usage: register-implementation <project-root> <run-id> <session-id> <authorization-ref> <lease-id> <page-delta-relative>');
+    const root = projectRoot(projectArg), run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
+    json({ status: 'registered', ...registerImplementation(root, run, sessionId, authorizationRef, leaseId, deltaReference) });
   } else if (command === 'register-runtime-demo') {
     const [projectArg, requestedRunId, sessionId, authorizationRef] = args;
     if (!projectArg || !requestedRunId || !sessionId || !authorizationRef) fail('usage: register-runtime-demo <project-root> <run-id> <session-id> <authorization-ref>');
     const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
     json({ status: 'runtime-demo-registered', ...registerRuntimeDemo(root, run, sessionId, authorizationRef) });
+  } else if (command === 'present-runtime-demo') {
+    const [projectArg, requestedRunId, sessionId, authorizationRef, presentationId, surface, fallbackReason] = args;
+    if (!projectArg || !requestedRunId || !sessionId || !authorizationRef || !presentationId) fail('usage: present-runtime-demo <project-root> <run-id> <session-id> <authorization-ref> <presentation-id> [chat-inline|browser-panel] [fallback-reason]');
+    const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
+    json({ status: 'runtime-demo-presented', ...presentRuntimeDemo(root, run, sessionId, authorizationRef, presentationId, surface, fallbackReason) });
   } else if (command === 'register-gate1-presentation') {
     const [projectArg, requestedRunId, sessionId, authorizationRef] = args;
     if (!projectArg || !requestedRunId || !sessionId || !authorizationRef) fail('usage: register-gate1-presentation <project-root> <run-id> <session-id> <authorization-ref>');
@@ -2273,5 +3058,5 @@ try {
     if (result.status !== 0) fail((result.stderr || result.stdout).trim());
     appendEvent(run.runDir, { type: 'state-transition', sessionId, transition });
     json({ status: 'transitioned', transition, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) });
-  } else fail('commands: intake | restart | reinvoke | revise | cancel | skip | skip-stage | register-gate1-presentation | register-runtime-demo | select-route | handoff | resume-handoff | queue-mutation | claim-mutation | review | resume | status | lease | authorize | approve | verify-authorization | transition');
+  } else fail('commands: intake | restart | reinvoke | revise | cancel | skip | skip-stage | register-gate1-presentation | register-runtime-demo | register-implementation | present-runtime-demo | confirm-demo | select-route | handoff | resume-handoff | queue-mutation | claim-mutation | review | resume | status | lease | authorize | approve | verify-authorization | transition');
 } catch (error) { fail(error.message); }

@@ -11,13 +11,37 @@ function die(message) { console.error(`Asset resolution failed: ${message}`); pr
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
 function write(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function exact(version) { return version && !/^(latest|next|current|\^|~|>|<|\*)/i.test(version); }
+function npmRegistries() {
+  // npmjs can be unreachable in restricted or regional desktop networks.  The
+  // resolver must not make an already available package unverifiable merely
+  // because one registry hostname cannot resolve.  Keep the candidates
+  // explicit, HTTPS-only and deterministic so the chosen registry remains
+  // part of the auditable dependency lock.
+  const configured = [process.env.APEX_NPM_REGISTRY, process.env.npm_config_registry]
+    .filter(Boolean)
+    .map(value => value.replace(/\/+$/, ''));
+  const defaults = ['https://registry.npmmirror.com', 'https://registry.npmjs.org'];
+  const candidates = [...new Set([...configured, ...defaults])];
+  for (const registry of candidates) {
+    let url;
+    try { url = new URL(registry); } catch { die(`invalid npm registry: ${registry}`); }
+    if (url.protocol !== 'https:') die(`npm registry must use HTTPS: ${registry}`);
+  }
+  return candidates;
+}
 
 async function resolveNpm(item) {
   if (!exact(item.version)) die(`${item.assetRef}: npm version must be exact`);
-  const url = `https://registry.npmjs.org/${encodeURIComponent(item.source)}/${encodeURIComponent(item.version)}`;
-  const response = await fetch(url, { headers: { accept: 'application/json' } });
-  if (!response.ok) die(`${item.assetRef}: npm registry HTTP ${response.status}`);
-  const meta = await response.json();
+  let meta, resolvedUrl, lastError;
+  for (const registry of npmRegistries()) {
+    const url = `${registry}/${encodeURIComponent(item.source)}/${encodeURIComponent(item.version)}`;
+    try {
+      const response = await fetch(url, { headers: { accept: 'application/json' } });
+      if (!response.ok) { lastError = new Error(`HTTP ${response.status} from ${registry}`); continue; }
+      meta = await response.json(); resolvedUrl = url; break;
+    } catch (error) { lastError = error; }
+  }
+  if (!meta) die(`${item.assetRef}: npm metadata unavailable from configured registries (${lastError?.message || 'unknown failure'})`);
   return {
     assetRef: item.assetRef,
     source: item.source,
@@ -26,10 +50,11 @@ async function resolveNpm(item) {
     peers: Object.entries(meta.peerDependencies || {}).map(([name, range]) => ({ name, range })),
     sidecars: item.sidecars || [],
     runtime: item.runtime,
-    license: { expression: typeof meta.license === 'string' ? meta.license : meta.license?.type || item.license?.expression, source: meta.homepage || meta.repository?.url || url },
+    license: { expression: typeof meta.license === 'string' ? meta.license : meta.license?.type || item.license?.expression, source: meta.homepage || meta.repository?.url || resolvedUrl },
     integrity: meta.dist?.integrity || meta.dist?.shasum,
     fallback: item.fallback,
-    smokeTest: meta.version === item.version ? 'passed' : 'failed'
+    smokeTest: meta.version === item.version ? 'passed' : 'failed',
+    registry: new URL(resolvedUrl).origin
   };
 }
 async function resolveRemote(item) {

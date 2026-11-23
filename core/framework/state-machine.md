@@ -12,16 +12,16 @@
 2. `APEX-02 CLASSIFY`：确定轨道、范围、授权、页面族和任务边界。
 3. `APEX-03 PREFLIGHT`：验证 APEX、宿主、项目入口、在线素材注册表和必要工具。
 
-在两个轨道进入正式视觉前，均须先完成需求分析拆解与视觉效果描述。Gate 1 与视觉实施方案确认通过后，Router 必须直接授权生成严格运行时效果图；效果图是可审阅工件而非第二个人工确认。生成工件完整登记后，用户才选择进入 Stitch 或直接代码。Stitch 是路线选择后的独立后续流，另有自己的确认；路线选择不能由“继续”推断，也不减少任何 Gate。
+新 Run 先完成产品需求和角色结论，再由设计师产出视觉方案。用户确认视觉方案后自动生成并展示可交互 Demo；用户确认 Demo 后才可选择 Stitch 或直接代码。Stitch 一致时自动封存，差异需要明确选择保留 Demo 直接落地或调整重确认。路线选择不得由“继续”推断。旧 Run 按创建时的确认模型恢复。
 
 ## Greenfield 轨道
 
 4. `G-01 PRODUCT`：产品目标、角色、任务流、页面地图和数据实体。
 5. `G-02 ARCHITECTURE`：技术栈、路由、状态、API、权限、组件与错误恢复。
 6. `G-03 SITE_CONTRACT`：建立整站设计与产品契约。
-7. `G-04 GATE_1`：确认产品、架构、范围、风险与验收边界。
-8. `G-05 VISUAL`：展示需求拆解、视觉效果描述和视觉实施方案；方案确认后直接生成并登记严格运行时效果图。
-9. `G-06 SYNC_FREEZE`：效果图工件登记后，用户选择进入独立的 Stitch 生成与 Stitch 确认，或直接代码；前者确认后暂存并 Seal 最新 Stitch 画布、HTML、完整截图与内容指纹，后者冻结效果图、代码目标和直接代码实施方案。
+7. `G-04 GATE_1`：校验产品、架构、范围、风险与验收边界，汇入视觉方案确认。
+8. `G-05 VISUAL`：确认视觉方案，生成、展示并确认可交互 Demo。
+9. `G-06 SYNC_FREEZE`：Demo 确认后选择 Stitch 或直接代码；前者验证候选与 Demo 一致并封存，后者冻结 Demo 和代码目标。
 10. `G-07 COMPILE`：编译与所选路线一致的 Visual Bundle、Implementation Map、Data / Motion / Responsive Contract 和依赖锁。
 11. `G-08 GATE_2`：机器校验后确认实现权限。
 12. `G-09 PROOF_IMPLEMENT`：先实现代表页。
@@ -37,9 +37,9 @@
 6. `E-03 SITE_CONTRACT`：读取或提取整站契约，区分正式标准与历史遗留。
 7. `E-04 FUNCTIONAL_FREEZE`：冻结必须保留、允许重排、允许调整、待确认删除和新增的功能链。
 8. `E-05 IMPACT`：识别目标页、页面族、共享组件、CSS、API、角色和回归消费者。
-9. `E-06 GATE_1`：确认改造范围、功能边界、整站约束和风险。
-10. `E-07 VISUAL`：在 Site Contract 和功能保护下展示需求拆解、视觉效果描述和视觉实施方案；方案确认后直接生成并登记严格运行时效果图。
-11. `E-08 SYNC_FREEZE`：效果图工件登记后，用户选择进入独立的 Stitch 生成与 Stitch 确认，或直接代码；前者确认后暂存并 Seal 用户编辑后的最新 Stitch 画布、HTML 与完整截图，后者冻结效果图、代码目标和直接代码实施方案。
+9. `E-06 GATE_1`：校验改造范围、功能边界、整站约束和风险，汇入视觉方案确认。
+10. `E-07 VISUAL`：在现有功能保护下确认视觉方案，生成、展示并确认可交互 Demo。
+11. `E-08 SYNC_FREEZE`：Demo 确认后选择 Stitch 或直接代码；前者验证候选与 Demo 一致并封存，后者冻结 Demo 和代码目标。
 12. `E-09 COMPILE`：编译与所选路线一致的 Visual Bundle、Page Delta / Rewrite、Implementation Map 和依赖锁。
 13. `E-10 GATE_2`：机器校验后确认实现权限。
 14. `E-11 IMPLEMENT`：按确认画布完整改造，禁止自行改版。
@@ -51,8 +51,8 @@
 ## 状态约束
 
 - 状态真相源为 `.apex/runs/<run-id>/state.json`，结构见 `core/runtime/schemas/run-state.schema.json`。
-- 未通过 Gate 1，不得生成供确认的正式视觉方案。
-- 未完成全部共同确认、严格运行时效果图登记、所选后续路线的必要冻结、Visual Bundle 编译和 Gate 2，不得设置 implementationAllowed=true。所有路线必须依次完成视觉实施方案确认与效果图生成；Stitch 路线还必须完成 Stitch 确认、严格效果图→Stitch 校验与 Seal，直接代码路线还必须完成直接代码实施方案确认。
+- 新 Run 的产品方案及所选角色结论完成后才能生成视觉方案；Gate 1 在合并视觉方案确认时完成。
+- 新 Run 未完成视觉方案与交互式 Demo 两次确认、路线选择、必要冻结、Visual Bundle 编译及机器 Gate 2，不得设置 implementationAllowed=true。Stitch 路线还须验证与已确认 Demo 的一致性；有差异时由用户作明确选择。
 - Stitch、视觉描述、直接代码实施方案或 Site Contract 在确认后变化时，必须撤销 Gate 2 与实现权限，仅回退受影响阶段。
 - 不再要求每一步向用户大段展示。完整轨迹进入运行产物；用户默认只看阶段、关键结论、风险、确认项和下一步。
 - 恢复按有效 Checkpoint 继续，不得无条件从 APEX-01 重跑。

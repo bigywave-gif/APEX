@@ -57,35 +57,27 @@ APEX 必须在 Gate 1 前将其归类为：
 
 裁决优先级为：法律/安全/权限与真实事实 > 已确认业务合同 > Existing 保护边界 > 最新视觉冻结 > 项目工程规范 > 默认增强 Skill > 未确认偏好。
 
-## 4. 三个确认 Gate
+## 4. 用户确认与机器 Gate
 
-| Gate | 用户确认内容 | 机器前置 | 通过后的效果 |
-| --- | --- | --- | --- |
-| Gate 1 | 目标、范围、数据、风险、质量与假设 | Intent Brief、Delivery Contract；Existing 还需 Inventory、Baseline、Functional Freeze | 允许进入正式视觉设计 |
-| Gate 2 | 所选视觉基线、DESIGN.md、依赖和实现映射 | 效果图路线：已确认效果图后的独立 Stitch Freeze；直接代码路线：已确认视觉描述与实施方案；两者均须有 Site Contract、Visual Bundle、Implementation Map、Dependency Lock | 允许实施代码 |
-| Gate 3 | 真实交付结果 | Proof、Verification Bundle、合同要求的证据 | 允许完成交付 |
+新 Run 首先由产品角色完成需求、范围、功能和验收，再由设计师结合产品方案及 Existing 真实现状制定视觉方案。用户确认视觉方案后生成可交互 Demo；用户确认 Demo 后选择是否进入 Stitch。局部改造的确认内容聚焦问题、改法和样式来源；整站改造逐项说明现状问题、改法和目标效果。
 
-任一冻结后变化均按变化类型处理：Stitch 或效果图变化会撤销旧 Gate 2；接口/领域变化回到 Gate 1；实现或运行时变化必须重新形成 Gate 3 证据。
+| 机器 Gate | 核验内容 | 通过后的效果 |
+| --- | --- | --- |
+| Gate 1 | 产品、基线、需求和视觉方案来源 | 允许生成已确认方案的 Demo |
+| Gate 2 | 已确认 Demo、可选 Stitch、设计规范、依赖和实现映射 | 开放代码实现权限 |
+| Proof / Gate 3 | 代表页与实际交付的功能、视觉及回归证据 | 验证并完成交付 |
 
-## 5. 视觉真相源与设计师协作
+用户确认、路线选择和机器 Gate 不是同一操作。旧 Run 保留其创建时的确认模型。摘要或已确认来源发生变化时，旧授权失效并按实际影响重建；受控回执可恢复的中断不重复索要同一确认。
 
-视觉基线依交付路线组成：
+## 5. 视觉基线与角色协作
 
-```text
-效果图路线：效果图定义整体审美、叙事、氛围、光影、动效意图的上限；Stitch 定义可编辑结构、尺寸、间距、颜色、字体、组件和内容节点
-直接代码路线：已确认视觉效果描述、代码目标、组件/样式/动效来源和直接代码实施方案共同构成冻结基线
-DESIGN.md：可复用 token、响应式、无障碍、交互与禁止模式
-```
+设计师必须实际读取并应用 taste-skill；其他视觉、交互和动效技能按场景使用，设计决定写入绑定哈希的 DESIGN.md。已确认的可交互 Demo 是直接代码路线的视觉、内容与交互基线，前端工程师据此实现并通过浏览器验证。
 
-设计师可以直接调整 Stitch。APEX 必须同步最新画布、生成与已冻结版本的差异，并判断是否影响效果图；若改变整体风格、叙事、光影或动效方向，必须同步更新效果图并重新确认。仅凭截图不允许推断像素参数；仅凭 Stitch 不允许抹除效果图的艺术与体验判断。
-
-### 严格 1:1 自动复刻
-
-Gate 1 后先确认需求拆解、视觉效果描述与视觉实施方案；方案确认后直接生成并登记严格运行时效果图与参数合同，不增加效果图人工确认。工件齐全后，用户才选择 Stitch 或直接代码。选择 Stitch 时，Stitch 才采用效果图加 Prompt 生成候选，Stitch 内容与保真证据再由用户作一次独立确认，确认后 Freeze 才暂存 HTML、完整截图和哈希，自动编排器完成效果图→Stitch 的零像素及语义合同校验后才 Seal。选择直接代码时，不生成 Stitch，但必须将已登记效果图、来源、代码目标和实施方案与同一实现映射一起冻结。两条路线的运行时浏览器均自动采集 DOM 和截图，并以合同锁中文内容、表格、布局节点顺序、图表编码、组件和 token；缺少 data-apex 标记、合同哈希不一致或任何差异均不得进入下一 Gate。详细运行规范见 core/runtime/strict-replica.md。
+Stitch 是用户在确认 Demo 后选择的可选路线。候选与 Demo 一致时由机器验证并封存；存在差异时，展示差异并由用户选择保留已确认 Demo 直接落地，或调整方案并重新确认。两条路线均冻结来源、结构、依赖和实现映射，并验证正式页面及任务交互。详细运行规范见 core/runtime/strict-replica.md。
 
 ## 6. 工程实施与追踪
 
-`implementation-map.json` 是设计到代码的追踪矩阵。每项必须连接 Stitch 节点、运行目标、token、数据/API、事件、权限、响应式、测试选择器与验收条件。Existing 还必须通过 `implementation-audit.mjs`，验证基线入口和实施目标真实存在。
+`implementation-map.json` 是设计到代码的追踪矩阵。每项必须连接已确认 Demo 的对应节点、运行目标、token、数据/API、事件、权限、响应式、测试选择器与验收条件；选择 Stitch 时还须绑定相应 Stitch 节点。Existing 还必须通过 `implementation-audit.mjs`，验证基线入口和实施目标真实存在。
 
 后端或接口范围必须有 `domain-model.json` 与 `api-contract.json`；真实样本由 `contract-verifier.mjs` 校验。前端基础交互库由项目和 Gate 2 决定，Radix、shadcn/ui、HeroUI 是可选实现路线，不是全局强制依赖。
 
@@ -120,8 +112,8 @@ APEX Bridge Skill 负责在 Codex 中命中 APEX；`apex-router.mjs` 是项目 r
 1. 初始化运行态并判断 Greenfield / Existing。
 2. 解析用户规范，产出 Intent Brief、Delivery Contract 与待确认项。
 3. Existing 运行 `project-intake.mjs` 与 `baseline-collector.mjs`；后端范围补齐领域/接口合同。
-4. 通过 Gate 1 后确认需求拆解、视觉效果描述和视觉实施方案；方案确认后直接生成并确认效果图，再由用户选择 Stitch 或直接代码。
-5. Stitch 路线在独立的 Stitch 确认后、直接代码路线在直接实施方案确认后，冻结视觉事实，编译 Visual Bundle 和 Implementation Map，通过 Gate 2。
+4. 产品角色与设计师完成方案后，请用户确认视觉方案；生成并展示可交互 Demo，再请用户确认 Demo 并选择是否使用 Stitch。
+5. 所选路线冻结已确认视觉事实，编译 Visual Bundle 和 Implementation Map，通过机器 Gate 2；Stitch 存在差异时先按用户选择处理。
 6. 实施前后端，运行实现映射、接口与质量审计。
 7. 生成 Verification Plan，采集浏览器、视觉、无障碍、性能、功能与回归证据，通过 Gate 3。
 8. 建立 checkpoint 和可恢复的运行记忆。

@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { bindStitchScreen, autoBindStitchScreens } from './stitch-screen-binding.mjs';
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-screen-binding-'));
+const artifact = (name, bytes) => { fs.writeFileSync(path.join(root, name), bytes); return { path: name, sha256: `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}` }; };
+try {
+  const browserCapture = artifact('browser.json', 'browser');
+  const screenshot = artifact('screen.png', 'screenshot');
+  const dom = artifact('screen.html', '<main>captured</main>');
+  const capture = { id: 'reports', url: 'http://localhost:4173/reports', viewport: '1440x900', screenshot, dom };
+  const journey = { id: 'filter', finalUrl: 'http://localhost:4173/reports?filter=active', viewport: '390x844', screenshot, dom };
+  const baseline = { browserCapture, screenCaptures: [capture], journeyCaptures: [journey] };
+  const screen = { screenId: 'one', route: '/reports', viewport: 'desktop', state: 'default', demoCapture: { kind: 'screen', id: 'reports' } };
+  assert.equal(bindStitchScreen(root, screen, baseline).screenshot.sha256, screenshot.sha256);
+  const journeyScreen = { ...screen, route: '/reports?filter=active', viewport: 'mobile', state: 'journey:filter', demoCapture: { kind: 'journey', id: 'filter' } };
+  assert.equal(bindStitchScreen(root, journeyScreen, baseline).id, 'filter');
+  assert.throws(() => bindStitchScreen(root, { ...screen, route: '/wrong' }, baseline), /route/);
+  assert.throws(() => bindStitchScreen(root, { ...screen, viewport: 'mobile' }, baseline), /viewport/);
+  assert.throws(() => bindStitchScreen(root, { ...screen, state: 'selected' }, baseline), /post-interaction/);
+  assert.throws(() => bindStitchScreen(root, { ...journeyScreen, state: 'journey:other' }, baseline), /exact captured journey/);
+  assert.throws(() => bindStitchScreen(root, screen, { ...baseline, screenCaptures: [capture, capture] }), /ambiguous/);
+  assert.throws(() => bindStitchScreen(root, { ...screen, demoCapture: null }, baseline), /explicit/);
+  const inferred = autoBindStitchScreens(root, baseline, [{ ...screen, demoCapture: undefined }, { ...journeyScreen, screenId: 'two', demoCapture: undefined }]);
+  assert.deepEqual(inferred.map(item => item.demoCapture), [{ kind: 'screen', id: 'reports' }, { kind: 'journey', id: 'filter' }]);
+  assert.throws(() => autoBindStitchScreens(root, { ...baseline, screenCaptures: [capture, { ...capture, id: 'another' }] }, [{ ...screen, demoCapture: undefined }]), /unambiguous/);
+  assert.throws(() => autoBindStitchScreens(root, baseline, [{ ...screen, demoCapture: undefined, route: '/missing' }]), /found 0/);
+  assert.throws(() => autoBindStitchScreens(root, baseline, [screen, screen]), /duplicated/);
+  assert.throws(() => autoBindStitchScreens(root, baseline, [{ ...screen, demoCapture: { kind: 'journey', id: 'filter' } }]), /exact captured journey/);
+  fs.writeFileSync(path.join(root, 'screen.png'), 'changed');
+  assert.throws(() => bindStitchScreen(root, screen, baseline), /missing, changed/);
+  console.log(JSON.stringify({ status: 'passed', checks: 14 }));
+} finally { fs.rmSync(root, { recursive: true, force: true }); }

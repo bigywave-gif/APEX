@@ -2,11 +2,13 @@
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { assertAffectedOnlyPresentation } from './scope-boundary.mjs';
+import { commitRunState, readRunState } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
@@ -15,11 +17,6 @@ function die(message) { console.error(`Contract record failed: ${message}`); pro
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
 function write(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function assertCanonicalRoot() { if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`); }
-function validate(schema, file) {
-  const result = spawnSync(process.execPath, [validator, 'validate', schema, file], { encoding: 'utf8' });
-  if (result.status !== 0) die((result.stderr || result.stdout).trim());
-}
-
 const [command, runArg, inputArg] = process.argv.slice(2);
 assertCanonicalRoot();
 const contracts = { intent: { target: 'intent-brief.json', schema: 'intent-brief.schema.json', artifact: 'intentBrief' }, delivery: { target: 'delivery-contract.json', schema: 'delivery-contract.schema.json', artifact: 'deliveryContract' }, scope: { target: 'change-scope.json', schema: 'change-scope.schema.json', artifact: 'changeScope' }, domain: { target: 'domain-model.json', schema: 'domain-model.schema.json', artifact: 'domainModel' }, api: { target: 'api-contract.json', schema: 'api-contract.schema.json', artifact: 'apiContract' }, site: { target: 'site-contract.json', schema: 'site-contract.schema.json', artifact: 'siteContract' } };
@@ -55,8 +52,7 @@ const runDir = path.resolve(runArg);
 const permittedActions = command === 'gate1-presentation' ? ['record_context', 'analyze_requirement'] : command === 'site' ? 'compile_visual_bundle' : 'record_context';
 let authorizationStatus;
 try { authorizationStatus = requireRouterAction(runDir, permittedActions); } catch (error) { die(error.message); }
-const stateFile = path.join(runDir, 'state.json');
-const state = read(stateFile);
+const state = readRunState(runDir);
 function authorizedExistingScopeRecovery() {
   // Gate 1 freezes the user-approved requirement and delivery contract.  It
   // does not freeze the mechanical protected-file complement used to prove an
@@ -114,7 +110,7 @@ if (command === 'gate1-presentation') {
   const output = path.join(runDir, 'gate1-presentation.md'); fs.writeFileSync(output, content.endsWith('\n') ? content : `${content}\n`);
   const manifest = { schemaVersion: '3.0', kind: 'gate1-direction-presentation', track: state.track, presentation: 'gate1-presentation.md', presentationSha256: sha256(output), requiredSections: gate1PresentationSections, ...(presentationScopeValidation ? { presentationScopeValidation } : {}), sources, status: 'ready-for-user-confirmation' };
   write(path.join(runDir, 'gate1-presentation-manifest.json'), manifest);
-  state.artifacts.gate1Presentation = 'gate1-presentation.md'; state.artifacts.gate1PresentationManifest = 'gate1-presentation-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+  state.artifacts.gate1Presentation = 'gate1-presentation.md'; state.artifacts.gate1PresentationManifest = 'gate1-presentation-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'gate1-presentation-recorded' });
   console.log(JSON.stringify({ artifact: 'gate1Presentation', path: output, manifest: path.join(runDir, 'gate1-presentation-manifest.json') })); process.exit(0);
 }
 const { target, schema, artifact } = contracts[command];
@@ -145,10 +141,18 @@ if (command === 'scope') {
   if ([...(value.affected?.routes || [])].some(item => !(baseline.routes || []).includes(item))) die('affected routes must be part of the frozen Existing baseline');
 }
 const output = path.join(runDir, target);
+const candidateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-contract-validation-'));
+let validationFailure = '';
+try {
+  const candidate = path.join(candidateDir, target);
+  write(candidate, value);
+  const result = spawnSync(process.execPath, [validator, 'validate', schema, candidate], { encoding: 'utf8' });
+  if (result.status !== 0) validationFailure = (result.stderr || result.stdout || result.error?.message || 'validator failed').trim();
+} finally { fs.rmSync(candidateDir, { recursive: true, force: true }); }
+if (validationFailure) die(validationFailure);
 write(output, value);
-validate(schema, output);
 state.artifacts[artifact] = target;
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
-write(stateFile, state);
+commitRunState(runDir, state, { reason: `contract-recorded:${command}` });
 console.log(JSON.stringify({ artifact, path: output }));

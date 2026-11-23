@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { controlledOutput } from './verification-policy.mjs';
+import { assessMeasuredQuality, measurementMatchesRegistration, qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
+import { visualQualityEvidence } from './visual-quality-evidence.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Quality evidence failed: ${message}`); process.exit(1); }
@@ -35,4 +39,19 @@ function evidence(kind, input, contract, projectRoot, runDir) {
 const [command, runArg, kind, inputArg, projectArg] = process.argv.slice(2);
 canonical();
 if (command !== 'verify' || !runArg || !kind || !inputArg) die('usage: verify <run-dir> <visual|accessibility|performance> <input.json> [project-root]');
-const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); } const projectRoot = path.resolve(projectArg || path.join(runDir, '..', '..', '..')); const state = read(path.join(runDir, 'state.json')); const contract = read(path.join(runDir, state.artifacts.deliveryContract || 'delivery-contract.json')); const result = evidence(kind, read(path.resolve(inputArg)), contract, projectRoot, runDir); const output = path.join(runDir, 'evidence', `${kind}-verification.json`); write(output, result); console.log(JSON.stringify({ evidence: output, status: result.status })); if (result.status !== 'passed') process.exitCode = 2;
+const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); } const projectRoot = path.resolve(projectArg || path.join(runDir, '..', '..', '..')); const state = read(path.join(runDir, 'state.json')); const contract = read(path.join(runDir, state.artifacts.deliveryContract || 'delivery-contract.json')); const input = read(path.resolve(inputArg));
+let result;
+if (state.roleChain?.confirmationModel === 'two-confirmations' && kind === 'visual') result = visualQualityEvidence(runDir, state);
+else if (state.roleChain?.confirmationModel === 'two-confirmations' && ['accessibility', 'performance'].includes(kind)) {
+  const reference = input.measurementPath;
+  if (!reference || !controlledOutput(runDir, reference, ['quality-measurement.mjs'])) result = { status: 'unverified', evidence: [], reason: 'actual controlled measurement is missing or stale', checkedAt: new Date().toISOString() };
+  else {
+    const measurement = read(path.join(runDir, reference));
+    if (measurement.kind !== kind || !measurementMatchesRegistration(runDir, state, measurement) || measurement.projectRoot !== fs.realpathSync(projectRoot) || fs.realpathSync(projectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) result = { status: 'unverified', evidence: [], reason: 'measurement is not bound to the authorized project and kind', checkedAt: new Date().toISOString() };
+    else {
+      result = { ...assessMeasuredQuality(kind, measurement.report, contract), measurementPath: reference, measurementSha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(runDir, reference))).digest('hex')}` };
+      if (result.status === 'passed' && !qualityEvidenceCurrent(runDir, state, result, kind, contract, projectRoot)) result = { status: 'unverified', evidence: [], reason: 'measurement context is stale', checkedAt: new Date().toISOString() };
+    }
+  }
+} else result = evidence(kind, input, contract, projectRoot, runDir);
+const output = path.join(runDir, 'evidence', `${kind}-verification.json`); write(output, result); console.log(JSON.stringify({ evidence: output, status: result.status })); if (result.status !== 'passed') process.exitCode = 2;

@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+/** Read-only run metrics. Recorded Agent use is not whole-host token usage. */
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+
+export function readRunMetrics(runDirectory) {
+  const root = fs.realpathSync(runDirectory);
+  const ledgerFile = path.join(root, 'run-ledger.sqlite');
+  if (!fs.existsSync(ledgerFile)) throw new Error('run ledger is missing');
+  const db = new DatabaseSync(ledgerFile, { readOnly: true });
+  try {
+    db.exec('BEGIN');
+    const snapshot = db.prepare('SELECT state_json, state_hash FROM state_snapshots ORDER BY id DESC LIMIT 1').get();
+    if (!snapshot) throw new Error('run ledger has no durable state snapshot');
+    const state = JSON.parse(snapshot.state_json);
+    let projection = 'unreadable';
+    try {
+      const diskState = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
+      const diskHash = `sha256:${crypto.createHash('sha256').update(JSON.stringify(diskState)).digest('hex')}`;
+      projection = diskHash === snapshot.state_hash ? 'consistent' : 'diverged';
+    } catch {}
+    const start = db.prepare('SELECT created_at FROM state_snapshots ORDER BY id LIMIT 1').get()?.created_at || null;
+    const rows = db.prepare('SELECT stage, agent_id, input_tokens, output_tokens, total_tokens, metadata_json FROM token_usage').all();
+    const jobRows = db.prepare('SELECT status, attempt FROM agent_jobs').all();
+    const coverage = { providerReported: 0, estimated: 0, unknown: 0, unverified: 0 };
+    const byStage = {};
+    const sourceTotals = { providerReported: null, estimated: null, unverified: null };
+    const attribution = Object.fromEntries(['agent', 'independentHost', 'unattributed'].map(name => [name, { recordedTotal: null, unknownRecords: 0 }]));
+    const agentTotals = new Map(), attemptUsage = [];
+    for (const row of rows) {
+      let metadata; try { metadata = JSON.parse(row.metadata_json || '{}'); } catch { metadata = {}; }
+      const source = metadata?.usageSource;
+      const key = source === 'provider-reported' ? 'providerReported' : source === 'estimated' ? 'estimated' : source === 'unknown' ? 'unknown' : 'unverified'; coverage[key]++;
+      const category = metadata?.kind === 'independent-host-call' && !row.agent_id ? 'independentHost' : row.agent_id ? 'agent' : 'unattributed';
+      if (key === 'unknown') attribution[category].unknownRecords++;
+      else attribution[category].recordedTotal = (attribution[category].recordedTotal ?? 0) + Number(row.total_tokens);
+      if (row.agent_id) {
+        const agent = agentTotals.get(row.agent_id) || { agentId: row.agent_id, sourceTotals: { providerReported: null, estimated: null, unverified: null }, unknownRecords: 0 };
+        if (key === 'unknown') agent.unknownRecords++;
+        else agent.sourceTotals[key] = (agent.sourceTotals[key] ?? 0) + Number(row.total_tokens);
+        agentTotals.set(row.agent_id, agent);
+      }
+      if (typeof metadata?.jobId === 'string' && Number.isInteger(metadata?.attempt) && metadata.attempt > 0) attemptUsage.push({ jobId: metadata.jobId, attempt: metadata.attempt, agentId: row.agent_id, stage: row.stage, outcome: typeof metadata.outcome === 'string' ? metadata.outcome : null, source: key, input: key === 'unknown' ? null : Number(row.input_tokens), output: key === 'unknown' ? null : Number(row.output_tokens), total: key === 'unknown' ? null : Number(row.total_tokens) });
+      if (key !== 'unknown') sourceTotals[key] = (sourceTotals[key] ?? 0) + Number(row.total_tokens);
+      const entry = byStage[row.stage] ||= { input: null, output: null, total: null, records: 0, unknownRecords: 0 };
+      entry.records++;
+      if (key === 'unknown') entry.unknownRecords++;
+      else {
+        entry.input = (entry.input ?? 0) + Number(row.input_tokens);
+        entry.output = (entry.output ?? 0) + Number(row.output_tokens);
+        entry.total = (entry.total ?? 0) + Number(row.total_tokens);
+      }
+    }
+    const opsDir = path.join(root, 'operations'), receipts = [], unreadable = [];
+    if (fs.existsSync(opsDir)) for (const name of fs.readdirSync(opsDir).filter(name => name.endsWith('.json'))) {
+      try {
+        const receipt = JSON.parse(fs.readFileSync(path.join(opsDir, name), 'utf8'));
+        if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || !['running', 'succeeded', 'failed'].includes(receipt.status)) throw new Error('invalid operation receipt');
+        receipts.push(receipt);
+      } catch { unreadable.push(name); }
+    }
+    const durations = receipts.map(receipt => receipt.durationMs).filter(value => Number.isFinite(value) && value >= 0);
+    let contract = null;
+    if (state.artifacts?.deliveryContract) {
+      const file = path.resolve(root, state.artifacts.deliveryContract);
+      if (file.startsWith(`${root}${path.sep}`) && fs.existsSync(file) && fs.realpathSync(file).startsWith(`${root}${path.sep}`)) contract = JSON.parse(fs.readFileSync(file, 'utf8'));
+    }
+    const finished = state.gates?.gate3?.status === 'passed' ? state.gates.gate3.at : null;
+    const elapsed = start && finished && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(finished)) && Date.parse(finished) >= Date.parse(start) ? Date.parse(finished) - Date.parse(start) : null;
+    return {
+      runId: state.runId, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
+      capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
+      elapsedWallMs: elapsed, elapsedBasis: 'first-ledger-snapshot-to-passed-gate3-including-user-wait',
+      operations: { recorded: receipts.length, failed: receipts.filter(x => x.status === 'failed').length, running: receipts.filter(x => x.status === 'running').length, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: receipts.length - durations.length, unreadable: unreadable.length },
+      manualInterventions: null, // No complete host/user-intervention counter is available.
+      agents: { jobs: jobRows.length, retries: jobRows.reduce((n, x) => n + Math.max(0, Number(x.attempt) - 1), 0), running: jobRows.filter(x => x.status === 'running').length, deadLetters: jobRows.filter(x => x.status === 'dead-letter').length },
+      tokens: { recordedTotal: Object.values(sourceTotals).some(x => x !== null) ? Object.values(sourceTotals).reduce((n, x) => n + (x ?? 0), 0) : null, sourceTotals, attribution, byStage, byAgent: [...agentTotals.values()], attemptUsage, attemptAttribution: { attributedRecords: attemptUsage.length, unattributedRecords: rows.length - attemptUsage.length }, coverage, scope: 'recorded-agent-and-independent-host-usage', completeHostUsage: false, note: 'Recorded total combines sources and is not total actual usage. Unknown and unrecorded host calls are not represented by a zero.' }
+    };
+  } finally { db.close(); }
+}
+export function compareRuns(before, after) {
+  const reasons = [];
+  if (before.gate3 !== 'passed' || after.gate3 !== 'passed') reasons.push('both runs need passed Gate 3');
+  if (before.track !== after.track || before.scope !== after.scope) reasons.push('track or scope differs');
+  if (!before.capabilities || !after.capabilities || JSON.stringify(before.capabilities) !== JSON.stringify(after.capabilities)) reasons.push('capability sets are missing or differ');
+  if (before.operations.unreadable || after.operations.unreadable) reasons.push('operation receipts are unreadable');
+  if (before.stateProjection !== 'consistent' || after.stateProjection !== 'consistent') reasons.push('state projection is missing, unreadable or diverged from the durable ledger');
+  const eligible = reasons.length === 0;
+  return { status: eligible ? 'eligible-for-review' : 'not-comparable', reasons, note: 'Matching metadata does not prove task, content, quality or host conditions are equivalent; review before drawing conclusions.', changes: eligible ? { elapsedWallMs: before.elapsedWallMs === null || after.elapsedWallMs === null ? null : after.elapsedWallMs - before.elapsedWallMs, recordedTotalTokens: before.tokens.recordedTotal == null || after.tokens.recordedTotal == null ? null : after.tokens.recordedTotal - before.tokens.recordedTotal, recordedAgentTokens: before.tokens.attribution?.agent?.recordedTotal == null || after.tokens.attribution?.agent?.recordedTotal == null ? null : after.tokens.attribution.agent.recordedTotal - before.tokens.attribution.agent.recordedTotal, recordedIndependentHostTokens: before.tokens.attribution?.independentHost?.recordedTotal == null || after.tokens.attribution?.independentHost?.recordedTotal == null ? null : after.tokens.attribution.independentHost.recordedTotal - before.tokens.attribution.independentHost.recordedTotal, providerReportedTokens: before.tokens.sourceTotals?.providerReported == null || after.tokens.sourceTotals?.providerReported == null ? null : after.tokens.sourceTotals.providerReported - before.tokens.sourceTotals.providerReported, estimatedTokens: before.tokens.sourceTotals?.estimated == null || after.tokens.sourceTotals?.estimated == null ? null : after.tokens.sourceTotals.estimated - before.tokens.sourceTotals.estimated, agentRetries: after.agents.retries - before.agents.retries, failedOperations: after.operations.failed - before.operations.failed } : null, tokenComparisonScope: 'recorded Agent, independent host, and unattributed usage only; deltas may mix sources and are not total host tokens; coverage can differ' };
+}
+const invoked = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invoked) {
+  try {
+    const [command, ...args] = process.argv.slice(2);
+    if (command === 'inspect' && args.length === 1) console.log(JSON.stringify(readRunMetrics(args[0]), null, 2));
+    else if (command === 'compare' && args.length === 2) { const before = readRunMetrics(args[0]), after = readRunMetrics(args[1]); console.log(JSON.stringify({ before, after, comparison: compareRuns(before, after) }, null, 2)); }
+    else throw new Error('usage: inspect <run-dir> | compare <before-run-dir> <after-run-dir>');
+  } catch (error) { console.error(`APEX run metrics failed: ${error.message}`); process.exitCode = 1; }
+}

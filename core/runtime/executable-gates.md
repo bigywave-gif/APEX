@@ -25,6 +25,7 @@ node scripts/apex-router.mjs skip <project-root> <run-id> <session-id> <gate1|vi
 node scripts/apex-router.mjs handoff <project-root> <run-id> <session-id> <gate1|visual-plan|stitch|implementation> <decision-id> <reason> [run-relative-artifact ...]
 node scripts/apex-router.mjs select-route <project-root> <run-id> <session-id> <stitch|direct-code> <decision-id> <reason> [run-relative-artifact ...]
 node scripts/apex-router.mjs register-runtime-demo <project-root> <run-id> <session-id>
+node scripts/apex-router.mjs present-runtime-demo <project-root> <run-id> <session-id> <authorization-ref> <presentation-id>
 node scripts/apex-router.mjs resume-handoff <project-root> <run-id> <session-id> [reason]
 node scripts/apex-router.mjs transition <project-root> <run-id> <session-id> <authorization-ref> <open-gate2|pass-proof|open-gate3|revoke-stitch|checkpoint> [args...]
 ```
@@ -80,17 +81,19 @@ strict-replica 自动调用 structure-contract 与 visual-parity，生成合同�
 
 ## 交付路线选择 Gate
 
-Gate 1 与 `visual-execution-plan.json` 通过用户确认后，Router 必须直接授权 `generate_visual`，生成并登记严格运行时 Demo；不得在方案确认与 Demo 生成之间等待路线选择、追加静态效果图确认，或把生成工作渲染为“继续”按钮。此时 Router 返回结构化 `executionDirective`：`kind: must-complete-before-user-response`、`automatic: true`、`userInput: forbidden-until-action-settles`，并锁定 `requiredChain`：在 run-local `visual-sandbox` 实际物化和启动 Demo 代码 → 浏览器/动效采集 → 运行时基线冻结 → Visual Reference → Demo 登记。生成前 `allowedActions` 只有 `generate_visual`；只有成功动作回执逐文件匹配四项 Demo 输出后，才自动切换为 `register_runtime_demo`。宿主必须完成生成与登记后才能再次向用户发言。Demo URL、DOM 与来源锁完整登记后，必须展示标题“运行时 Demo 已生成，请确认后续路线”、审阅要点和两个完整路线标签；选择任一路线表示接受当前 Demo作为实施基线。用户提出修改则重建 Demo，不能默认选路或卡住。此选择是确认点，不是 `skip`。
+新 Run 用户确认产品与视觉合并方案后，Router 自动授权 `generate_visual`，物化并启动当前 Run 的 Demo、执行浏览器任务交互并冻结运行时基线，再登记和展示 Demo。宿主必须完整执行这些受控步骤，不能要求用户点击“继续”。展示后用户明确确认交互式 Demo，再选择 Stitch 或直接代码；用户提出修改则重建并重新确认受影响内容。旧 Run 按其原确认模型恢复。
 
-`generate_visual` 必须通过受控动作分别产出 `runtimeDemo`、`designCandidates`、`visualReference` 与 `gate1VisualOutput`。四项输出完成后，宿主必须调用 `register-runtime-demo`；Router 会逐文件核验 SHA-256 与成功 `generate_visual` operation receipt，再一次性登记 Demo 基线。没有该登记，`select-route`、Stitch、实施冻结和 Gate 2 均保持关闭；手填文件、旧文件或非该动作输出一律拒绝。
+`generate_visual` 必须通过受控动作分别产出 `runtimeDemo`、`designCandidates`、`visualReference` 与 `gate1VisualOutput`。四项输出完成后，宿主必须调用 `register-runtime-demo`；Router 会逐文件核验 SHA-256 与成功 `generate_visual` operation receipt，再一次性登记 Demo 基线。登记不是展示：宿主必须只打开当前 Run 的 `visual-sandbox-runtime.json` 与 `runtime-demo.json` 精确一致的 `http://127.0.0.1:<port>/` URL，再以 `present-runtime-demo` 写入展示回执。`file://`、正式项目服务地址、项目根页面或其他 Run 的 URL 一律拒绝。没有该展示回执，`select-route`、Stitch、实施冻结和 Gate 2 均保持关闭；手填文件、旧文件或非该动作输出一律拒绝。
 
 Demo 源码必须先形成 run 内 source manifest，再由 `visual-sandbox-writer.mjs materialize` 写入当前 `<project-root>/.apex/runs/<run-id>/visual-sandbox`。写入器拒绝绝对路径、`..` 越界、符号链接逃逸、外部 manifest、孤立 `.apex` 和非当前 Router run。`apex-action` 在每个 `generate_visual` 动作前后比较排除 `.apex/.git/node_modules/dist/build` 后的正式项目文件 SHA-256；正式树变化则动作失败。Demo代码不属于正式项目代码，不得触发“代码已存在”。
 
-路线选择必须调用 Router 的 `select-route`，不能把 UI 按钮、聊天文本或内部 `skip-stage` 当作状态变更。“直接代码”“直接生成代码”“直接生成生产代码”均规范化为 `direct-code`。`select-route ... direct-code` 只受控地跳过 Stitch 阶段，立即开放既有 `compile_visual_bundle` → `implementation` 确认 → `open_gate2` 链；它不会跳过实施冻结、Gate 2、依赖物化或 Gate 3。`select-route ... stitch` 登记选择并保留既有 Stitch 同步、校验和确认链。
-
-Visual 流依次执行 Runtime Visual Baseline Gate 与运行时 Demo 登记；视觉实施方案是唯一视觉人工确认。登记完成后，才可进入独立的 Stitch 流，生成、严格校验并确认 Stitch；Stitch 确认不得被折叠进视觉方案确认。`direct-code` 路线不生成 Stitch，但必须将已登记 Demo 与代码目标、组件/样式/动效来源、Implementation Map 和直接代码实施方案一起冻结；随后照常通过 Visual Bundle、依赖锁和 Gate 2，实施后照常通过 Proof、Gate 3 与运行时证据。两条路线均不得跳过确认或实现权限锁。
+新 Run 的路线选择必须在 Demo 确认后调用 Router 的 `select-route`，不得从普通聊天或 `skip-stage` 推断。`direct-code` 跳过 Stitch，但保留已确认 Demo、Visual Bundle、Implementation Map、依赖锁、机器 Gate 2 和实施后的验证。`stitch` 路线核验候选与已确认 Demo 的一致性；一致时自动封存，存在差异时向用户呈现差异，并提供保留 Demo 直接落地或调整方案的选择。实施冻结是内部机器操作，不新增独立确认。
 
 ## Runtime Visual Baseline Gate
+
+## 正式实施登记
+
+新 Run 的正式目标由已审核的 Implementation Map 确定。Gate 2 后先持有效项目 mutation lease 和 `implement` 授权完成代码，再以 Router `register-implementation` 登记 Run 内 page delta、实施映射和正式文件哈希。注册拒绝 Run 沙箱、构建目录、项目外路径与失效租约；Existing 同时检查受保护文件。正式文件、映射或 delta 发生变化时，登记不再有效；重新登记后须重新采集受影响的正式浏览器证据和验证结果，不得复用旧交付结论。
 
 ## 证据与溯源 Gate
 
@@ -155,6 +158,6 @@ Gate 3 前，浏览器规格可在 screen 中声明 `motionSamples: [{ id, times
     recover -> apex-recover.mjs <run-dir>
     node scripts/release-audit.mjs
 
-`stitch-sync capabilities` 必须在需要图文生成的 Visual 阶段先运行；若没有原生图片输入能力，记录 Stitch UI 导入路径，不得静默调用文本生成。UI 导入先做不超过 15 秒的浏览器桥健康检查，失败时不得开始上传；优先使用已缓存的 Playwright CLI。UI 提交成功后写入 `stitch-job.json`；恢复时先绑定实际 Screen，默认只做一次短观察，未就绪即返回 `pending`，下一次只观察而不得再次提交。需要更长观察时才显式传入 attempts（上限 3）。`stitch-sync check`必须在实现前、恢复时、Proof前和Gate 3前运行。验证计划的八类证据缺少任意一类时，Gate 3保持失败。
+`stitch-sync capabilities` 必须在需要图文生成的 Visual 阶段先运行；若没有原生图片输入能力，记录 Stitch UI 导入路径，不得静默调用文本生成。UI 导入先做不超过 15 秒的浏览器桥健康检查，失败时不得开始上传；优先使用已缓存的 Playwright CLI。UI 点击提交前先持久化 `submission-uncertain` 与 `stitch-job.json`；超时或中断时只能观察并绑定远端结果，不得重复提交。提交确认后更新作业状态；恢复时先绑定实际 Screen，默认只做一次短观察，未就绪即返回 `pending`，下一次只观察而不得再次提交。需要更长观察时才显式传入 attempts（上限 3）。`stitch-sync check`必须在实现前、恢复时、Proof前和Gate 3前运行。验证计划的八类证据缺少任意一类时，Gate 3保持失败。
 
 每个 `apex-action` 回执都会记录 `durationMs`。性能诊断应据此区分本地执行、浏览器桥、远端 Stitch 和恢复等待；不得把未就绪任务统一报为“重新连接”。

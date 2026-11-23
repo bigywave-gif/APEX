@@ -2,22 +2,17 @@
 
 ## 状态与边界
 
-本文件记录 APEX 对 `agency-agents` 的受控集成规范和验收基线。Core 已提供角色注册表、结构化 advisory Schema、受 Router action 授权的记录器，以及 Gate/验证的就绪校验；现有四个 Gate、Demo 路线选择和正式代码授权不变。
+本文件记录 APEX 对 `agency-agents` 的受控集成规范和验收基线。Core 已提供角色注册表、结构化 advisory Schema、受 Router action 授权的记录器，以及 Gate/验证的就绪校验；具体确认流程由 Router 依据 Run 的确认模型裁决。
 
 APEX 只吸收 `agency-agents` 的专业职责、交接格式和证据优先理念；不导入其自由 Agent 派生、独立流程控制、角色级用户确认、任务级 Dev↔QA 循环或自动重试。Router 继续是项目 Run、状态、动作授权、Gate 与正式代码变更的唯一裁决者。
 
 上游参考：<https://github.com/msitarzewski/agency-agents>（MIT；当前固定 commit `3c9588880b7cafaec325a104899fd8bbe27e7d72`，适配版本由 `registry/agency-role-registry.json` 管理）。
 
-## 固定确认模型
+## 用户确认与兼容模型
 
-角色完成后自动交接。用户只在 Router 既有阀门查看汇总结果并确认：
+新 Run 的 `two-confirmations` 模型：产品角色先形成方案，设计师据此形成视觉方案；用户确认视觉改造方案后，自动生成并展示可交互 Demo。用户明确确认 Demo 后，再选择进入 Stitch 或直接落地前端代码。选择 Stitch 时，已确认 Demo 是基线，超出基线的变化须由用户决定；内部来源锁、机器 Gate 和实现准备不另设默认用户确认。产品、设计、前端在最终验收中分别核对功能、设计和实际运行行为。
 
-1. `确认需求与交付方案`
-2. `确认视觉方案`
-3. `确认 Stitch 内容`（仅选择 Stitch 路线时）
-4. `确认实施冻结`
-
-Runtime Demo 是视觉方案确认后的自动产物。展示 Demo 后仅要求用户选择“继续执行流程（进入 Stitch）”或“直接代码”；它不是新的确认 Gate。任何角色不得显示“继续”、泛化“确认”、轮询、角色级按钮或自行结束自动链。
+旧 Run 的 `gate-summary-only` 模型保留其既有的需求与交付方案、视觉方案、按需 Stitch 内容和实施冻结确认，按原 Run 状态和 Router 的决定继续，不把旧确认套用于新 Run。无论模型如何，角色只提供专业判断和证据；Router 负责阶段、授权及用户交互。不得以泛化“继续”、进度轮询或角色级按钮代替明确决策。
 
 ## 角色链
 
@@ -32,11 +27,13 @@ Runtime Demo 是视觉方案确认后的自动产物。展示 Demo 后仅要求�
 | 7 | UI Designer | Visual | UX 架构、真实候选与规范 | 布局、层级、Token、组件状态、候选比较 | 专项审查 |
 | 8 | Data Visualization Engineer（按需） | Visual | 数据模型、用户问题、图表候选 | 问题→指标→编码→图表→交互→来源→回退 | Brand / Visual Compiler |
 | 9 | Brand Guardian + UI Finish-Gate Reviewer（按需） | Visual | 视觉候选、styleBaseline、品牌规则 | 整体性、品牌、密度、反模板审查 | Visual Compiler |
-| 10 | Frontend Implementation Planner | 实施冻结 | Demo、来源锁、代码闭包 | Implementation Map、数据绑定、最小依赖物化计划 | Code Reviewer |
-| 11 | Code Reviewer | 实施冻结 | 实施映射、保护补集、依赖清单 | 越界、性能、维护性、安全和回归审查 | Implementation Compiler |
-| 12 | Frontend Developer | Gate 2 后 | 批准映射、mutation lease | 仅范围内的正式代码与 `page-delta` | Evidence Collector |
-| 13 | Evidence Collector | Gate 3 | 真实运行页面、验证计划 | 截图、DOM、交互 trace、状态矩阵、性能原始证据 | Reality Checker |
-| 14 | Reality Checker | Gate 3 | 原始证据、冻结方案、实现差异 | `passed` / `failed` / `unverified` 的事实核验 | Gate 3 Validator |
+| 10 | Backend Architect（按需） | Gate 1 | 产品范围、领域/API/权限约束 | 领域、API、失败与数据完整性风险 | Gate 1 Compiler |
+| 11 | Frontend Implementation Planner | 实施冻结 | Demo、来源锁、代码闭包 | Implementation Map、数据绑定、最小依赖物化计划 | Code Reviewer |
+| 12 | Frontend Engineer | 实施冻结 | 批准映射、状态/响应式合同 | 正式前端任务可执行性与风险 | Gate 2 实施 |
+| 13 | Code Reviewer | 实施冻结 | 实施映射、保护补集、依赖清单 | 越界、性能、维护性、安全和回归审查 | Implementation Compiler |
+| 14 | QA Test Engineer | Gate 3 | 交付契约、验证计划、负向状态 | 功能、契约、回归与覆盖缺口裁决 | Evidence Collector |
+| 15 | Evidence Collector | Gate 3 | 真实运行页面、验证计划 | 截图、DOM、交互 trace、状态矩阵、性能原始证据 | Reality Checker |
+| 16 | Reality Checker | Gate 3 | 原始证据、冻结方案、实现差异 | `passed` / `failed` / `unverified` 的事实核验 | Gate 3 Validator |
 
 条件角色仅在需求匹配时启用：Motion Specialist（动效/3D）、Accessibility Auditor（无障碍）、API/Backend Architect（契约或权限）、Performance Benchmarker（性能敏感）、Internationalization Engineer（多语言/RTL）。未满足适用条件时必须记录“不适用”及原因，禁止编造结论。
 
@@ -90,8 +87,13 @@ Gate 1 的八节方案与视觉阶段的十节方案必须完整呈现，不能�
 
 ## 效率、失败与发布
 
-- 默认每阶段最多启用 3 个角色；仅相互独立的专项角色可受控并行，最大并发为 2。
+- 每阶段的全部核心角色与命中触发条件的专项角色都必须入队；不得以角色数上限静默省略专业审查。仅相互独立的 Job 可受控并行，最大并发为 2。
+- 每次视觉阶段必须向 UI Designer 实际提供当前安装的 `taste-skill` 内容；Job 绑定路径与内容哈希，领取时加载并输出内容，advisory 记录采用的规则及不适用规则，不能将登记或绑定本身视为设计质量证明。 两次确认模型下，视觉方案的 `designCapabilities` 必须列出 `taste-skill` 及设计师实际采用的专项 Skill；未加载或被判定不适用的 Skill 不得列为已采用。该声明与已完成的设计师 Job、advisory 哈希、当前尝试及成功的受控 Skill 加载回执核对；按需引用的其他 Skill 同样验证对应尝试、租约、内容哈希和回执。回执证明内容已返回角色，不证明模型实际理解或审美达标；仍须由设计师审查并由用户确认 Demo。
+- 每个选中角色必须生成独立 Agent、持久 Job、输入哈希、Token 用量和 trace span；Job 仅在 advisory 通过 Schema 与输入绑定后成功。进程中断的运行中 Job 会受控回队，达到最大尝试次数则进入死信队列。
 - advisory 以输入工件 SHA-256 作为缓存键；未变化的上游工件只复用当前 Run 内的结果，不跨项目或跨 session 污染。
 - 已选角色失败时记录 operation receipt 并在当前 Gate 阻断；只有未被当前阶段选择的条件角色才是“不适用”，而不是降级成功。恢复只能在输入、环境证据或状态实际改变后进行。
 - 不得因角色失败而输出“继续”、让用户修复内部 JSON、反复扫描、自动批准或静默中断。
-- 发布采用影子 advisory → Gate 1/Visual 可见摘要 → 实施冻结/Gate 3 审查的分阶段启用。关闭角色适配后必须完全回退至现有 APEX 功能、四个 Gate 和使用方式。
+- 角色结果须经受控 advisory、阶段摘要与 Gate 验证；兼容和回退行为按当前 Run 的确认模型、Router 状态及实际测试证据判断，不得跳过用户已确认的基线。
+
+
+两次确认模型的视觉方案必须引用当前 Run 或项目内真实设计规范文件及其 SHA-256。编译、用户确认、视觉来源冻结和 Gate 2 会检查内容；确认后发生变化时，原方案不可继续生成 Demo 或授权实施。路径指向多个不同文件或越出当前项目时不得通过。

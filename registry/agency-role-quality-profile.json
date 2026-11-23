@@ -3,8 +3,8 @@
   "title": "APEX Role Quality Profile",
   "minimumScore": 85,
   "scenarios": [
-    { "id": "existing-local-change", "requiredRoles": ["codebase-onboarding-engineer", "existing-baseline-analyst", "minimal-change-engineer", "product-manager", "senior-project-manager"], "assertions": ["formal-code-and-browser-evidence", "affected-closure-only", "protected-complement"] },
-    { "id": "data-dense-product-visual", "requiredRoles": ["ux-architect", "ui-designer", "data-visualization-engineer"], "assertions": ["task-led-chart-choice", "source-bound-chart-system", "responsive-accessible-density"] },
-    { "id": "implementation-and-verification", "requiredRoles": ["frontend-implementation-planner", "code-reviewer", "evidence-collector", "reality-checker"], "assertions": ["minimal-source-materialization", "scope-review", "evidence-before-claim"] }
+    { "id": "existing-local-change", "activationContext": { "track": "existing", "capabilities": [] }, "requiredRoles": ["codebase-onboarding-engineer", "existing-baseline-analyst", "minimal-change-engineer", "product-manager", "senior-project-manager"], "assertions": ["formal-code-and-browser-evidence", "affected-closure-only", "protected-complement"] },
+    { "id": "data-dense-product-visual", "activationContext": { "track": "greenfield", "capabilities": ["chart"] }, "requiredRoles": ["ux-architect", "ui-designer", "data-visualization-engineer"], "assertions": ["task-led-chart-choice", "source-bound-chart-system", "responsive-accessible-density"] },
+    { "id": "full-stack-implementation-and-verification", "activationContext": { "track": "greenfield", "capabilities": ["backend", "api-contract", "chart", "motion"] }, "requiredRoles": ["product-manager", "backend-architect", "frontend-implementation-planner", "frontend-engineer", "code-reviewer", "qa-test-engineer", "evidence-collector", "reality-checker"], "assertions": ["api-and-data-contract", "minimal-source-materialization", "scope-review", "negative-state-coverage", "evidence-before-claim"] }
   ]
 }

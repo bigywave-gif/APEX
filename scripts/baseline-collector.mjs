@@ -2,6 +2,7 @@
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +16,12 @@ function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } 
 function write(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function assertCanonicalRoot() { if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`); }
 function requireProjectFile(projectRoot, reference, label) {
+  if (typeof reference !== 'string' || !reference) die(`${label} is missing`);
   const file = path.resolve(projectRoot, reference);
-  if (!fs.existsSync(file)) die(`${label} does not exist: ${reference}`);
+  try {
+    const root = fs.realpathSync(projectRoot), realFile = fs.realpathSync(file);
+    if (!realFile.startsWith(`${root}${path.sep}`) || !fs.statSync(realFile).isFile()) throw new Error('outside project or not a file');
+  } catch { die(`${label} must be an existing file inside the project: ${reference}`); }
 }
 function hash(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
 function fingerprint(file) { const stat = fs.statSync(file); return { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs }; }
@@ -28,6 +33,7 @@ if (command !== 'capture' || !runArg || !inputArg) die('usage: capture <run-dir>
 const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'collect_existing_baseline'); } catch (error) { die(error.message); }
 const projectRoot = path.resolve(projectArg || path.join(runDir, '..', '..', '..'));
+if (fs.realpathSync(projectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('baseline must use the Router-authorized project');
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
 if (state.track !== 'existing') die('Existing Baseline can only be captured for an existing run');
@@ -66,7 +72,17 @@ baseline.schemaVersion = '3.0';
 baseline.capturedAt = new Date().toISOString();
 baseline.codeReference = { path: state.artifacts.codeReference, sourceTreeHash: codeReference.sourceTreeHash, sourceFileCount: codeReference.sourceFileCount, complete: true, pageSkeletonPath: state.artifacts.pageSkeleton, pageSkeletonHash: pageSkeleton.skeletonHash };
 baseline.displayEvidence = { path: path.relative(runDir, displayPath), hash: hash(fs.readFileSync(displayPath)), capturedRoutes: display.evidence.map(item => item.route) };
-for (const screen of baseline.screens || []) requireProjectFile(projectRoot, screen.path, `screen evidence for ${screen.viewport}`);
+for (const screen of baseline.screens || []) {
+  requireProjectFile(projectRoot, screen.path, `screen evidence for ${screen.viewport}`);
+  const actual = fs.realpathSync(path.resolve(projectRoot, screen.path));
+  const captured = display.evidence.find(item => {
+    try {
+      const file = fs.realpathSync(path.resolve(runDir, item.screenshot));
+      return item.viewport === screen.viewport && file.startsWith(`${fs.realpathSync(runDir)}${path.sep}`) && file === actual && item.screenshotSha256 === hash(fs.readFileSync(file));
+    } catch { return false; }
+  });
+  if (!captured) die(`screen evidence must match a current captured screenshot and viewport: ${screen.viewport}`);
+}
 for (const entry of baseline.codeEntrypoints || []) requireProjectFile(projectRoot, entry, 'code entrypoint');
 for (const sample of baseline.apiSamples || []) {
   requireProjectFile(projectRoot, sample.request, `API request sample for ${sample.endpoint}`);
@@ -78,9 +94,16 @@ for (const source of baseline.styleBaseline.sources) {
   if (!source.sha256 || hash(fs.readFileSync(path.resolve(projectRoot, source.path))) !== source.sha256) die(`style baseline source hash does not match: ${source.path}`);
 }
 const output = path.join(runDir, 'existing-baseline.json');
+const candidateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-baseline-validation-'));
+let validationFailure = '';
+try {
+  const candidate = path.join(candidateDir, 'existing-baseline.json');
+  write(candidate, baseline);
+  const result = spawnSync(process.execPath, [validator, 'validate', 'existing-baseline.schema.json', candidate], { encoding: 'utf8' });
+  if (result.status !== 0) validationFailure = (result.stderr || result.stdout || result.error?.message || 'validator failed').trim();
+} finally { fs.rmSync(candidateDir, { recursive: true, force: true }); }
+if (validationFailure) die(validationFailure);
 write(output, baseline);
-const result = spawnSync(process.execPath, [validator, 'validate', 'existing-baseline.schema.json', output], { encoding: 'utf8' });
-if (result.status !== 0) die((result.stderr || result.stdout).trim());
 state.artifacts.existingBaseline = 'existing-baseline.json';
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();

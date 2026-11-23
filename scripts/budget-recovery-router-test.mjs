@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, rebudgetAgentJobs, agentRuntimeStatus } from './run-ledger.mjs';
+const scripts = path.dirname(fileURLToPath(import.meta.url));
+const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-budget-router-'));
+const run = (name, args) => spawnSync(process.execPath, [path.join(scripts, name), ...args], { encoding: 'utf8', timeout: 30000 });
+try {
+  let r = run('apex-router.mjs', ['intake', project, 'test', 'greenfield', 'standard', 'interactive', 'session', '确认调用 APEX']);
+  assert.equal(r.status, 0, r.stderr); const dir = path.join(project, '.apex/runs/test');
+  registerAgent(dir, { agentId: 'test-role', vocation: 'test', stage: 'gate1' });
+  const job = enqueueAgentJob(dir, { agentId: 'test-role', stage: 'gate1', inputHash: 'test', maxAttempts: 1 });
+  const claim = claimAgentJob(dir, job.jobId);
+  settleAgentJob(dir, job.jobId, { status: 'failed', leaseToken: claim.leaseToken, error: 'fixture failure' });
+  r = run('apex-router.mjs', ['authorize', project, 'test', 'session', 'recover']); assert.equal(r.status, 0, r.stderr); const auth = JSON.parse(r.stdout).authorizationRef;
+  r = run('apex-action.mjs', ['run', project, 'test', 'session', auth, 'recover', 'role-advisory.mjs', 'select', dir, 'gate1']);
+  assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /Router authorization is required/);
+  r = run('apex-router.mjs', ['authorize', project, 'test', 'session', 'recover']); assert.equal(r.status, 0, r.stderr); const auth2 = JSON.parse(r.stdout).authorizationRef;
+  r = run('apex-action.mjs', ['run', project, 'test', 'session', auth2, 'recover', 'role-advisory.mjs', 'rebudget', dir, 'gate1']);
+  assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /select roles for gate1 before recording/);
+  // A second isolated run exercises a budget failure followed by Router-
+  // authorized recovery. The reduced original budget and usage are fixtures.
+  const p2 = path.join(project, 'recovery-project'); fs.mkdirSync(p2);
+  r = run('apex-router.mjs', ['intake', p2, 'budget', 'greenfield', 'standard', 'interactive', 'budget-session', '确认调用 APEX']); assert.equal(r.status, 0, r.stderr);
+  const d2 = path.join(p2, '.apex/runs/budget');
+  const authorize = action => { const value = run('apex-router.mjs', ['authorize', p2, 'budget', 'budget-session', action]); assert.equal(value.status, 0, value.stderr || value.stdout); return JSON.parse(value.stdout).authorizationRef; };
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'role-advisory.mjs', 'select', d2, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout);
+  const selection = JSON.parse(fs.readFileSync(path.join(d2, 'advisories/gate1/selection.json')));
+  const role = selection.selectedRoles[0], jobId = selection.agentJobs[role];
+  rebudgetAgentJobs(d2, { stage: 'gate1', jobIds: [jobId], perAgentBudget: 100, stageBudget: selection.tokenBudget.stage });
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout); const oldLease = JSON.parse(r.stdout).leaseToken;
+  const jobInfo = agentRuntimeStatus(d2, jobId).jobs[0];
+  const advisory = { schemaVersion: '1.0', roleId: role, stage: 'gate1', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'fixture', classification: 'fact', statement: 'Review the bound inputs.', evidence: selection.inputBindings.map(item => item.path) }], execution: { inputTokens: 100, outputTokens: 1, usageSource: 'provider-reported', model: 'fixture', sessionId: jobInfo.payload.agentSessionId, skillBindings: jobInfo.payload.skillBindings, leaseToken: oldLease }, recommendations: [{ id: 'fixture', choice: 'Keep the scope.', rationale: 'The task must be reviewed.', alternatives: ['Expand'], acceptance: ['Reviewed'] }], status: 'ready' };
+  const inputFile = path.join(d2, 'over-budget-advisory.json'); fs.writeFileSync(inputFile, JSON.stringify(advisory));
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'role-advisory.mjs', 'record', d2, 'gate1', inputFile]);
+  assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /exceeds its per-Agent token budget/);
+  assert.equal(agentRuntimeStatus(d2, jobId).jobs[0].status, 'dead-letter');
+  assert.equal(agentRuntimeStatus(d2).tokenUsage.gate1, 101);
+  r = run('apex-router.mjs', ['status', p2, 'budget', 'budget-session']); assert.equal(JSON.parse(r.stdout).nextRequiredAction, 'recover');
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('recover'), 'recover', 'role-advisory.mjs', 'rebudget', d2, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout);
+  assert.equal(agentRuntimeStatus(d2, jobId).jobs[0].status, 'queued');
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout); const newLease = JSON.parse(r.stdout).leaseToken;
+  assert.throws(() => settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: oldLease }), /stale or missing/);
+  settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: newLease, usage: { inputTokens: 2, outputTokens: 1, usageSource: 'provider-reported' } });
+  assert.equal(agentRuntimeStatus(d2).tokenUsage.gate1, 104);
+  console.log(JSON.stringify({ status: 'passed', scope: 'Router-controlled role submission, simulated over-budget usage, policy rebudget, new lease and retained usage' }));
+} finally { fs.rmSync(project, { recursive: true, force: true }); }

@@ -5,7 +5,7 @@
 - 产品名称：APEX Agentic Delivery System
 - 正式简称：APEX
 - 展开名：Agentic Product EXperience
-- 当前版本：4.37.5
+- 当前版本：4.45.0
 - 文档类型：系统级产品主文档
 - 适用对象：产品、设计、研发、交付、平台治理人员
 
@@ -36,7 +36,7 @@ APEX 是一套通用的 Agentic Delivery System。
 
 - `Greenfield / Existing` 双轨：新项目从产品、技术和 Site Contract 建立起步；已有项目先核对真实基线、冻结功能并分析影响范围。
 - `Lite / Standard / Full` 范围与 `Interactive / Autonomous` 授权的正交分流。
-- 需求拆解与视觉效果描述后的固定 Visual 流：视觉方案确认后直接生成并确认严格运行时效果图；随后用户选择独立的 Stitch 确认或直接代码实施。两者均保留 Gate 与冻结。
+- 产品角色先明确需求与验收，设计师结合现状和必选 taste-skill 形成视觉方案；用户确认视觉方案后生成可交互 Demo，确认 Demo 后选择 Stitch 或直接代码。两条路线均受机器 Gate 与冻结约束。
 - Site Contract、Functional Freeze、Stitch Freeze、Visual Bundle、Implementation Map、Page Delta、Dependency Lock 与 Verification Bundle 等结构化交付物。
 - 可执行 Gate 2、实现权限锁、代表页 Proof、整站回归和 Gate 3 真实验收。
 - Checkpoint 与内容哈希驱动的增量恢复，避免中断后无条件重跑。
@@ -101,12 +101,12 @@ APEX 强制要求在实现前完成：
 
 ### 3. Gate 驱动交付
 
-APEX 不允许直接从需求跳到实现。无论选择效果图还是直接代码路线，都必须经过需求拆解、视觉效果描述、用户确认与以下 Gate：
+APEX 不允许直接从需求跳到实现。新 Run 依次要求用户确认视觉方案和交互式 Demo，之后选择是否使用 Stitch；以下机器 Gate 和验证独立于用户确认：
 
-- Gate 1：产品、基线、功能与改造边界确认
-- Gate 2：所选视觉基线、Visual Bundle编译和实现权限确认
-- Proof Gate：代表页真实可实现性确认
-- Gate 3：视觉、功能、运行时与整站真实落地确认
+- Gate 1：校验产品方案、基线、功能与改造边界，并绑定视觉方案确认
+- Gate 2：机器校验所选视觉基线、Visual Bundle 与实现映射，开放实现权限
+- Proof Gate：代表页真实可实现性验证
+- Gate 3：视觉、功能、运行时与适用范围的真实落地验证
 
 ### 4. 真实落地验证
 
@@ -283,3 +283,9 @@ APEX 支持持续更新，但更新只允许作用于增强层：
 - [technical-architecture.md](technical-architecture.md)
 - [deployment-and-integration.md](deployment-and-integration.md)
 - [../core/framework/APEX.md](../core/framework/APEX.md)
+
+## Demo 交付形式：可交互 UI 原型
+
+APEX Demo 统一为可交互 UI 原型，也称前端 Demo。按确认范围提供可操作的导航、关键任务、表单与状态反馈，使用明确标识的示例数据并提供重置入口；多角色任务支持切换预览视角。源码输入必须包含 `interactionContract`，浏览器实际执行全部任务并验证操作前后的可见变化；静态截图、自动播放动画和无效按钮不能替代交互验收。详情及字段格式见 `core/runtime/interactive-demo-contract.md`。
+
+默认在聊天正文嵌入可直接使用的 Demo，支持页签、按钮、表单、状态反馈与重置。通过 `chatPreview.fragment` 指定自包含 HTML 片段，编译器从同一片段生成 HTTP 验收页；Router 校验哈希并返回 `presentation.contentReference`，宿主必须在本轮最终回复原样输出。不能用 localhost iframe、截图或链接代替聊天交互。仅宿主缺少能力或已选来源无法兼容片段时，说明具体原因并打开同一 Run 浏览器面板。保留来源锁、响应式要求和后续路线选择，不新增确认。

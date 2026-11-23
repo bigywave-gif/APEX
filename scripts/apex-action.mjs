@@ -6,6 +6,10 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readRunState, recordArtifact, agentRuntimeStatus, visualSkillLoads } from './run-ledger.mjs';
+import { requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
+import { recordLateCancelledOperation } from './cancelled-operation-finalizer.mjs';
+import { runControlledSubprocess } from './controlled-subprocess.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
@@ -14,19 +18,19 @@ const permitted = {
   // the recorder materializes the human-readable eight-section proposal.
   // Keeping the recorder on record_context only made the Router advertise an
   // automatic Gate 1 action that had no executor capable of finishing it.
-  analyze_requirement: new Set(['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs']),
-  plan_visual: new Set(['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs']),
+  analyze_requirement: new Set(['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
+  plan_visual: new Set(['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
   generate_visual: new Set(['demo-source-compiler.mjs', 'visual-sandbox-writer.mjs', 'visual-sandbox-runtime.mjs', 'browser-capture.mjs', 'runtime-visual-baseline.mjs', 'visual-reference-compiler.mjs', 'visual-sandbox-dependency.mjs', 'experience-evaluator.mjs']),
-  collect_existing_baseline: new Set(['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs', 'role-advisory.mjs']),
-  sync_stitch: new Set(['stitch-sync.mjs', 'stitch-ui-importer.mjs', 'strict-replica.mjs', 'confirmation-presentation.mjs']),
+  collect_existing_baseline: new Set(['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'functional-freeze-compiler.mjs', 'browser-capture.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
+  sync_stitch: new Set(['stitch-sync.mjs', 'stitch-ui-importer.mjs', 'strict-replica.mjs', 'visual-reference-compiler.mjs', 'confirmation-presentation.mjs']),
   observe_stitch: new Set(['stitch-sync.mjs']),
   validate_stitch: new Set(['strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs']),
   prepare_workspace: new Set(['apex-workspace.mjs']),
-  compile_visual_bundle: new Set(['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs', 'role-advisory.mjs', 'contract-recorder.mjs', 'confirmation-presentation.mjs']),
+  compile_visual_bundle: new Set(['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs', 'role-advisory.mjs', 'contract-recorder.mjs', 'confirmation-presentation.mjs', 'agent-runtime.mjs']),
   implement: new Set(['asset-materializer.mjs', 'runtime-materializer.mjs']),
-  verify: new Set(['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs']),
+  verify: new Set(['project-intake.mjs', 'browser-capture.mjs', 'visual-reference-compiler.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
   record_context: new Set(['contract-recorder.mjs', 'context-compiler.mjs', 'evidence-provenance.mjs']),
-  recover: new Set(['apex-recover.mjs', 'run-migrate.mjs'])
+  recover: new Set(['apex-recover.mjs', 'run-migrate.mjs', 'role-advisory.mjs'])
 };
 function fail(message) { console.error(`APEX action failed: ${message}`); process.exit(1); }
 if (!isCanonicalApexRoot(apexRoot)) fail(`APEX must run from canonical root: ${canonicalApexRoot}`);
@@ -35,8 +39,18 @@ if (command !== 'run' || !projectRoot || !runId || !sessionId || !authorizationR
 if (!permitted[action]?.has(script)) fail(`script ${script || '<none>'} is not registered for action ${action}`);
 const target = path.join(apexRoot, 'scripts', script);
 const runDirectory = path.resolve(projectRoot, '.apex', 'runs', runId);
+if (action !== 'recover' && fs.existsSync(path.join(runDirectory, 'state.json')) && readRunState(runDirectory).lifecycle === 'cancelled') fail('cancelled run cannot execute or replay this action');
 const operationDirectory = path.join(runDirectory, 'operations');
 const operationIndexFile = path.join(runDirectory, 'operations-index.json');
+const DEFAULT_EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
+function boundedTimeout(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 10_000 && parsed <= 30 * 60 * 1000 ? parsed : fallback;
+}
+// A runaway child used to leave an operation receipt permanently `running`.
+// Keep the limit local to the controlled runner, bounded, and recorded in the
+// receipt so recovery can distinguish a timeout from a script failure.
+const executionTimeoutMs = boundedTimeout(process.env.APEX_ACTION_TIMEOUT_MS, DEFAULT_EXECUTION_TIMEOUT_MS);
 function containsTemplatePlaceholder(value) {
   if (typeof value === 'string') return /(?:^|:)TO_REPLACE(?:$|[^A-Za-z0-9_-])/.test(value);
   if (Array.isArray(value)) return value.some(containsTemplatePlaceholder);
@@ -127,7 +141,10 @@ function runInputHashes() {
   // remediation can retry, while excluding receipts/cache so bookkeeping alone
   // cannot manufacture a different operation.
   const ignored = new Set(['operations', 'cache', 'authorizations']);
-  const ignoredFiles = new Set(['events.ndjson', 'operations-index.json']);
+  // Ledger files are control-plane durability data, not business/action
+  // inputs. Including WAL churn here makes an identical failed operation look
+  // different merely because authorization or recovery appended an event.
+  const ignoredFiles = new Set(['events.ndjson', 'operations-index.json', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal']);
   const hashes = {};
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -139,6 +156,22 @@ function runInputHashes() {
   };
   visit(runDirectory);
   return hashes;
+}
+function roleEvidenceInputs() {
+  if (script !== 'role-advisory.mjs' || scriptArgs[0] !== 'record' || !['baseline', 'gate1', 'visual', 'implementation', 'verify'].includes(scriptArgs[2])) return undefined;
+  try {
+    const stage = scriptArgs[2], input = path.resolve(scriptArgs[3] || ''), root = fs.realpathSync(runDirectory);
+    if (!fs.realpathSync(input).startsWith(`${root}${path.sep}`)) return undefined;
+    const advisory = JSON.parse(fs.readFileSync(input, 'utf8'));
+    const selection = JSON.parse(fs.readFileSync(path.join(root, 'advisories', stage, 'selection.json'), 'utf8'));
+    const jobId = selection.agentJobs?.[advisory.roleId], job = jobId && agentRuntimeStatus(root, jobId).jobs[0];
+    if (!job) return { status: 'job-unavailable' };
+    const required = job.payload?.tasteSkill ? requiredTasteLoadCurrent(root, jobId, job.attempt, advisory.execution?.leaseToken, job.payload.tasteSkill) : null;
+    const events = visualSkillLoads(root, jobId, job.attempt);
+    const loads = readRunState(root).roleChain?.confirmationModel === 'two-confirmations' ? events.filter(event => optionalSkillLoadCurrent(root, event, advisory.execution?.leaseToken)) : events;
+    const optional = [...new Set(loads.map(event => `${event.name}:${event.sha256}`))].sort();
+    return { jobId, attempt: job.attempt, status: job.status, required, optional };
+  } catch { return { status: 'evidence-unavailable' }; }
 }
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -154,7 +187,25 @@ function failedOperationWithSameKey(operationKey) {
   }
   return null;
 }
-function outputFileHashes(stdout) { const paths = new Set(); const collect = value => { if (typeof value === 'string') { const candidate = path.resolve(value); if (candidate.startsWith(`${runDirectory}${path.sep}`) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) paths.add(candidate); return; } if (Array.isArray(value)) value.forEach(collect); else if (value && typeof value === 'object') Object.values(value).forEach(collect); }; for (const line of String(stdout || '').split(/\r?\n/).reverse()) { try { collect(JSON.parse(line)); } catch {} } return Object.fromEntries([...paths].sort().map(file => [path.relative(runDirectory, file), fileHash(file)])); }
+function outputFileHashes(stdout) {
+  const runRoot = fs.realpathSync(runDirectory), paths = new Set();
+  const collect = value => {
+    if (typeof value === 'string') {
+      const candidate = path.resolve(value);
+      if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return;
+      const actual = fs.realpathSync(candidate);
+      // A valid run path may have a different spelling (e.g. /var versus
+      // /private/var on macOS); resolve both sides while rejecting symlink
+      // escapes out of the current run.
+      if (actual.startsWith(`${runRoot}${path.sep}`)) paths.add(actual);
+      return;
+    }
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === 'object') Object.values(value).forEach(collect);
+  };
+  for (const line of String(stdout || '').split(/\r?\n/).reverse()) { try { collect(JSON.parse(line)); } catch {} }
+  return Object.fromEntries([...paths].sort().map(file => [path.relative(runRoot, file), fileHash(file)]));
+}
 const currentInputHashes = inputFileHashes();
 const currentRunInputHashes = runInputHashes();
 const productionBefore = action === 'generate_visual' ? productionSnapshot() : null;
@@ -164,17 +215,17 @@ fs.mkdirSync(operationDirectory, { recursive: true });
 if (fs.existsSync(receiptFile)) {
   const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
   if (receipt.fingerprint !== fingerprint) fail('authorization receipt was already used for a different operation');
-  if (receipt.status === 'succeeded') { if (JSON.stringify(receipt.inputFileHashes || {}) !== JSON.stringify(currentInputHashes)) fail('authorized operation input files changed; obtain a new Router authorization before retrying'); process.stdout.write(receipt.stdout || ''); process.stderr.write(receipt.stderr || ''); process.exit(0); }
+  if (receipt.status === 'succeeded') { if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim') fail('agent claim replay requires a fresh Router authorization and the same claim key so the current lease is revalidated'); if (JSON.stringify(receipt.inputFileHashes || {}) !== JSON.stringify(currentInputHashes)) fail('authorized operation input files changed; obtain a new Router authorization before retrying'); process.stdout.write(receipt.stdout || ''); process.stderr.write(receipt.stderr || ''); process.exit(0); }
   fail(`operation receipt is ${receipt.status}; obtain a new Router authorization before retrying`);
 }
-const verification = spawnSync(process.execPath, [router, 'verify-authorization', projectRoot, runId, sessionId, authorizationRef, action], { encoding: 'utf8' });
+const verification = spawnSync(process.execPath, [router, 'verify-authorization', projectRoot, runId, sessionId, authorizationRef, action], { encoding: 'utf8', timeout: 30_000, killSignal: 'SIGTERM' });
 if (verification.status !== 0) fail((verification.stderr || verification.stdout).trim());
 let verificationResult;
 try { verificationResult = JSON.parse(verification.stdout); }
 catch { fail('Router authorization verification returned invalid JSON'); }
 const stateHash = verificationResult?.authorizationToken?.stateHash;
 if (!stateHash) fail('Router authorization verification did not return its bound state hash');
-const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes });
+const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs() });
 // An authorization is deliberately single-use, but a fresh authorization is
 // not evidence that the failed action now has different inputs.  Without this
 // operation key, hosts can create an infinite retry loop by asking Router for
@@ -184,15 +235,44 @@ const priorFailure = failedOperationWithSameKey(operationKey);
 if (priorFailure) fail(`an identical controlled operation already failed (${priorFailure}); change the observed cause, state, or input before requesting another retry`);
 const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, status: 'running', startedAt }, null, 2)}\n`, { flag: 'wx' });
-const execution = spawnSync(process.execPath, [target, ...scriptArgs], { encoding: 'utf8', env: { ...process.env, APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: authorizationRef, APEX_ROUTER_ACTION: action } });
+const execution = await runControlledSubprocess(process.execPath, [target, ...scriptArgs], {
+  timeoutMs: executionTimeoutMs, runDir: runDirectory,
+  env: { ...process.env, APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: authorizationRef, APEX_ROUTER_ACTION: action, APEX_ROUTER_OPERATION_RECEIPT: path.relative(runDirectory, receiptFile) }
+});
 const finishedAt = new Date().toISOString();
+if (recordLateCancelledOperation(runDirectory, { authorizationRef, action, script, startedAt, finishedAt, exitCode: execution.status, signal: execution.signal, interruptionRequested: execution.cancelled, timedOut: execution.error?.code === 'ETIMEDOUT' })) {
+  fail('the operation finished after cancellation; its result is not accepted and external side effects require verification');
+}
+// Most legacy scripts still project their final state directly to state.json.
+// They are never allowed to run outside this gateway, so immediately import
+// that projection into the durable ledger before declaring the operation
+// successful. This closes the migration window without turning every legacy
+// script into a different execution path in one risky release.
+let stateReconciliationError = null;
+try { readRunState(runDirectory); } catch (error) { stateReconciliationError = `run-state reconciliation failed: ${error.message}`; }
 const productionAfter = action === 'generate_visual' ? productionSnapshot() : null;
 const productionChangedFiles = productionBefore && productionAfter ? productionChanges(productionBefore, productionAfter) : [];
 const productionBoundaryError = productionChangedFiles.length ? `generate_visual modified formal project files outside .apex: ${productionChangedFiles.map(item => item.path).join(', ')}; Demo generation is restricted to the current run visual-sandbox` : null;
-const succeeded = execution.status === 0 && !productionBoundaryError;
-const outputHashes = succeeded ? outputFileHashes(execution.stdout) : {};
+const timedOut = execution.error?.code === 'ETIMEDOUT';
+const executionError = execution.error ? `${execution.error.code || 'spawn-error'}: ${execution.error.message}` : '';
+const succeeded = execution.status === 0 && !execution.error && !productionBoundaryError && !stateReconciliationError;
+// Failed operations may still emit useful evidence; hashes identify it without marking it as a successful artifact.
+const outputHashes = outputFileHashes(execution.stdout);
 const outputFingerprints = Object.fromEntries(Object.keys(outputHashes).map(relative => [relative, fileFingerprint(path.join(runDirectory, relative))]));
-const receipt = { schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, outputFileHashes: outputHashes, outputFileFingerprints: outputFingerprints, productionBoundary: action === 'generate_visual' ? { allowedRoot: path.join(runDirectory, 'visual-sandbox'), snapshotMode: productionBefore?.mode || null, protectedFiles: Object.keys(productionBefore?.files || {}), changedFiles: productionChangedFiles, formalProjectUnchanged: !productionBoundaryError } : null, status: succeeded ? 'succeeded' : 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), exitCode: succeeded ? 0 : (execution.status || 1), stdout: execution.stdout || '', stderr: `${execution.stderr || ''}${productionBoundaryError ? `${productionBoundaryError}\n` : ''}` };
+if (succeeded) {
+  try {
+    const parentArtifactIds = Object.entries(currentInputHashes).map(([reference, sha256]) => `input:${sha256}:${reference}`);
+    for (const [reference, sha256] of Object.entries(currentInputHashes)) recordArtifact(runDirectory, { artifactId: `input:${sha256}:${reference}`, reference, sha256, status: 'input', metadata: { action, authorizationRef, operationKey } });
+    for (const [reference, sha256] of Object.entries(outputHashes)) {
+      recordArtifact(runDirectory, { artifactId: `${authorizationRef}:${reference}`, reference, sha256, metadata: { action, script, authorizationRef, operationKey }, parentArtifactIds });
+    }
+  } catch (error) {
+    if (recordLateCancelledOperation(runDirectory, { authorizationRef, action, script, startedAt, finishedAt, exitCode: execution.status, stage: 'artifact-registration' })) fail('the operation was cancelled before its result could be registered; external side effects require verification');
+    throw error;
+  }
+}
+if (recordLateCancelledOperation(runDirectory, { authorizationRef, action, script, startedAt, finishedAt, exitCode: execution.status, stage: 'receipt-write' })) fail('the operation was cancelled before its receipt could be committed; external side effects require verification');
+const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, outputFileHashes: outputHashes, outputFileFingerprints: outputFingerprints, productionBoundary: action === 'generate_visual' ? { allowedRoot: path.join(runDirectory, 'visual-sandbox'), snapshotMode: productionBefore?.mode || null, protectedFiles: Object.keys(productionBefore?.files || {}), changedFiles: productionChangedFiles, formalProjectUnchanged: !productionBoundaryError } : null, status: succeeded ? 'succeeded' : 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut, exitCode: succeeded ? 0 : (execution.status || 1), stdout: execution.stdout || '', stderr: `${execution.stderr || ''}${executionError ? `${executionError}\n` : ''}${stateReconciliationError ? `${stateReconciliationError}\n` : ''}${timedOut ? `operation exceeded controlled timeout (${executionTimeoutMs}ms)\n` : ''}${productionBoundaryError ? `${productionBoundaryError}\n` : ''}` };
 fs.writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
 updateOperationIndex(receiptFile, receipt);
 process.stdout.write(receipt.stdout); process.stderr.write(receipt.stderr);

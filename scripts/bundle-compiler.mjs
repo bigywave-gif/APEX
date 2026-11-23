@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { validateImplementationCoverage } from './implementation-coverage.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -19,7 +20,9 @@ const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'compile_visual_bundle'); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
 const state = read(stateFile);
-if (state.roleChain?.enabled) {
+// New runs compile the proposed map first; implementation roles review that
+// exact map before Gate 2. Legacy runs keep their original ordering.
+if (state.roleChain?.enabled && state.roleChain?.confirmationModel !== 'two-confirmations') {
   const manifestRef = state.artifacts?.roleAdvisoryManifest, summaryRef = state.artifacts?.roleDecisionSummaries?.implementation;
   const manifestFile = manifestRef && path.resolve(runDir, manifestRef), summaryFile = summaryRef && path.resolve(runDir, summaryRef);
   if (!manifestFile || !summaryFile || !manifestFile.startsWith(`${runDir}${path.sep}`) || !summaryFile.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(manifestFile) || !fs.existsSync(summaryFile)) die('Visual Bundle requires a current controlled implementation role advisory summary');
@@ -32,6 +35,10 @@ const site = read(path.join(runDir, state.artifacts.siteContract || 'site-contra
 const freeze = state.locks.stitchSkipped ? null : read(path.join(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json'));
 const visualReference = state.locks.stitchSkipped ? read(path.join(runDir, state.artifacts.visualReference || 'visual-reference.json')) : null;
 const spec = read(path.resolve(specArg));
+if (state.roleChain?.confirmationModel === 'two-confirmations') {
+  const baseline = !freeze && state.artifacts.runtimeVisualBaseline ? read(path.join(runDir, state.artifacts.runtimeVisualBaseline)) : null;
+  try { validateImplementationCoverage({ baseline, stitch: freeze, entries: spec.components }); } catch (error) { die(error.message); }
+}
 const dependency = read(path.join(runDir, state.artifacts.dependencyLock || 'dependency-lock.json'));
 const motionContract = state.artifacts.motionContract ? read(path.join(runDir, state.artifacts.motionContract)) : null;
 const capabilitySelection = state.artifacts.motionCapabilitySelection ? read(path.join(runDir, state.artifacts.motionCapabilitySelection)) : null;
@@ -132,7 +139,9 @@ write(path.join(runDir, 'visual-bundle.json'), bundle);
 state.artifacts.visualBundle = 'visual-bundle.json';
 state.artifacts.implementationMap = 'implementation-map.json';
 state.artifacts.motionImplementationMap = motionImplementation ? 'motion-implementation-map.json' : null;
-state.phase = state.track === 'greenfield' ? 'G-08 GATE_2' : 'E-10 GATE_2';
+// Compiling a bundle freezes a proposal; it is not the user approval that
+// opens Gate 2.  Advancing here made Router deny the remaining implementation
+// presentation/repair chain and created an unrecoverable phase skip.
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
 write(stateFile, state);

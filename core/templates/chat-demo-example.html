@@ -1,0 +1,73 @@
+<div id="apex-chat-example" class="viz-dotted-background">
+  <style>
+    #apex-chat-example { color-scheme: light dark; padding: 28px 12px; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: light-dark(#20242c,#edf0f5); }
+    #apex-chat-example * { box-sizing: border-box; }
+    #apex-chat-example .demo-window { max-width: 460px; margin: auto; padding: 24px; border: 1px solid light-dark(#d9dde5,#414751); border-radius: 20px; background: light-dark(#ffffff,#272b33); box-shadow: 0 16px 40px #00000012; }
+    #apex-chat-example header, #apex-chat-example .demo-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    #apex-chat-example h2, #apex-chat-example p { margin: 0; }
+    #apex-chat-example h2 { font-size: 23px; font-weight: 600; }
+    #apex-chat-example .demo-muted { color: light-dark(#626b7b,#aab3c2); font-size: 13px; }
+    #apex-chat-example nav { display: flex; gap: 6px; padding: 5px; margin: 22px 0; background: light-dark(#f0f2f6,#20242b); border-radius: 12px; }
+    #apex-chat-example button, #apex-chat-example input { font: inherit; }
+    #apex-chat-example button { min-height: 44px; padding: 9px 15px; border: 1px solid light-dark(#d9dde5,#4b5260); border-radius: 9px; background: light-dark(#ffffff,#303642); color: inherit; }
+    #apex-chat-example button:focus-visible, #apex-chat-example input:focus-visible { outline: 3px solid #3293ff; outline-offset: 3px; }
+    #apex-chat-example nav button { flex: 1; border: 0; background: transparent; }
+    #apex-chat-example nav button[aria-pressed="true"] { background: light-dark(#ffffff,#3a424f); }
+    #apex-chat-example .demo-primary { background: #0875e8; color: #ffffff; border-color: #0875e8; }
+    #apex-chat-example .demo-field { display: grid; gap: 8px; margin: 20px 0 14px; }
+    #apex-chat-example input[type="text"] { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid light-dark(#cdd3dd,#525d6b); border-radius: 8px; background: light-dark(#fafbfc,#20242b); color: inherit; }
+    #apex-chat-example input[type="checkbox"] { width: 20px; height: 20px; accent-color: #0875e8; }
+    #apex-chat-example ul { padding: 0; margin: 16px 0; list-style: none; }
+    #apex-chat-example li { padding: 10px 0; border-bottom: 1px solid light-dark(#e5e8ee,#3b424e); overflow-wrap: anywhere; }
+    #apex-chat-example footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid light-dark(#e5e8ee,#3b424e); }
+    #apex-chat-example [hidden] { display: none; }
+    @media (max-width: 380px) { #apex-chat-example .demo-window { padding: 18px; } }
+  </style>
+  <section class="demo-window" aria-label="APEX 交互 Demo" data-apex-source-selection="layout-a chart-b style-a font-a content-a">
+    <header><div><h2>项目工作台</h2><p class="demo-muted" id="notice">交互预览 · 示例数据</p></div><button id="reset" type="button">重置</button></header>
+    <nav aria-label="预览页面"><button id="projects-tab" type="button" aria-pressed="true">项目</button><button id="settings-tab" type="button" aria-pressed="false">偏好设置</button></nav>
+    <div id="projects-panel">
+      <div class="demo-row"><strong>我的项目</strong><span><span id="count" aria-live="polite">0</span> 个项目</span></div>
+      <label class="demo-field">项目名称<input id="project-name" type="text" maxlength="40" placeholder="例如：产品原型" autocomplete="off"></label>
+      <button id="increment" type="button" class="demo-primary">添加项目</button>
+      <ul id="project-list" aria-label="项目列表"></ul>
+      <p id="empty" class="demo-muted">添加第一个项目，开始体验。</p>
+    </div>
+    <div id="settings-panel" hidden><label class="demo-row">完成提醒<input id="notifications" type="checkbox" checked></label><p id="notification-state" class="demo-muted" aria-live="polite">提醒已开启</p></div>
+    <footer><p id="demo-feedback" class="demo-muted" role="status">仅用于预览，不写入正式系统</p></footer>
+  </section>
+  <script>
+    (() => {
+      const root = document.getElementById('apex-chat-example');
+      const get = id => root.querySelector('#' + id);
+      let state = { projects: [], tab: 'projects', notifications: true };
+      function restore(snapshot) {
+        const saved = snapshot?.privateContent;
+        if (saved?.version !== 1 || !Array.isArray(saved.projects)) return;
+        state = { projects: saved.projects.filter(value => typeof value === 'string').slice(0, 20).map(value => value.slice(0, 40)), tab: saved.tab === 'settings' ? 'settings' : 'projects', notifications: saved.notifications !== false };
+      }
+      function render() {
+        get('count').textContent = String(state.projects.length);
+        get('empty').hidden = state.projects.length > 0;
+        get('project-list').replaceChildren(...state.projects.map(name => { const item = document.createElement('li'); item.textContent = name; return item; }));
+        get('notifications').checked = state.notifications;
+        get('notification-state').textContent = state.notifications ? '提醒已开启' : '提醒已关闭';
+        for (const tab of ['projects', 'settings']) { get(tab + '-tab').setAttribute('aria-pressed', String(state.tab === tab)); get(tab + '-panel').hidden = state.tab !== tab; }
+      }
+      function save() {
+        const host = window.openai;
+        if (typeof host?.setWidgetState === 'function') Promise.resolve(host.setWidgetState({ modelContent: { projectCount: state.projects.length, page: state.tab }, privateContent: { version: 1, ...state } })).catch(() => {});
+      }
+      for (const tab of ['projects', 'settings']) get(tab + '-tab').onclick = () => { state.tab = tab; render(); save(); };
+      get('increment').onclick = () => {
+        if (state.projects.length >= 20) { get('demo-feedback').textContent = '本预览最多保留 20 个示例项目'; return; }
+        state.projects.push(get('project-name').value.trim() || '新项目 ' + (state.projects.length + 1));
+        get('project-name').value = ''; get('demo-feedback').textContent = '项目已添加到当前预览'; render(); save();
+      };
+      get('notifications').onchange = event => { state.notifications = event.target.checked; render(); save(); };
+      get('reset').onclick = () => { state = { projects: [], tab: 'projects', notifications: true }; get('project-name').value = ''; get('demo-feedback').textContent = '已恢复初始状态'; render(); save(); };
+      restore(window.openai?.widgetState); render();
+      window.addEventListener('openai:set_globals', event => { if (event.detail?.globals?.widgetState) { restore(event.detail.globals.widgetState); render(); } });
+    })();
+  </script>
+</div>

@@ -23,7 +23,10 @@ const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'generate
 const projectRoot = path.resolve(process.env.APEX_ROUTER_PROJECT_ROOT || ''); if (!projectRoot || !fs.existsSync(projectRoot)) die('Router project root is required');
 const sandboxRoot = path.join(runDir, 'visual-sandbox'); const before = projectDependencySnapshot(projectRoot); const installed = packageFile(sandboxRoot, packageName);
 if (!fs.existsSync(installed) || read(installed).version !== version) {
-  const result = spawnSync('npm', ['install', '--prefix', sandboxRoot, '--no-save', '--package-lock=false', '--ignore-scripts', '--no-audit', '--no-fund', `${packageName}@${version}`], { encoding: 'utf8' });
+  // Keep a sandbox-local package manifest.  `--no-save` makes a later
+  // single-package install prune an earlier approved visual runtime, so a
+  // composed ECharts + Three.js scene can never be materialized together.
+  const result = spawnSync('npm', ['install', '--prefix', sandboxRoot, '--package-lock=false', '--ignore-scripts', '--no-audit', '--no-fund', `${packageName}@${version}`], { encoding: 'utf8' });
   if (result.status !== 0) die(`sandbox resolution failed: ${(result.stderr || result.stdout).trim()}`);
 }
 const after = projectDependencySnapshot(projectRoot); if (JSON.stringify(before) !== JSON.stringify(after)) die('visual sandbox must not modify project package.json or lockfiles');
