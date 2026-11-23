@@ -20,7 +20,8 @@ function health(cwd, runDir) { const cached = cachedCli(); const result = spawnS
 function authenticationProbe(session, cwd, runDir) { return call(session, cwd, ['run-code', 'async (page) => JSON.stringify({ top: page.url(), frames: page.frames().map(frame => frame.url()) })'], runDir); }
 function probeValue(output) { try { const match = output.match(/### Result\s*\n([\s\S]*?)\n### /); if (!match) return null; const value = JSON.parse(match[1]); return typeof value === 'string' ? JSON.parse(value) : value; } catch { return null; } }
 function stitchUrl(value) { try { const url = new URL(value); return url.origin === 'https://stitch.withgoogle.com' && !url.username && !url.password; } catch { return false; } }
-function verifyPageOrigin(session, runDir) { const probe = authenticationProbe(session, runDir, runDir); const value = probeValue(probe.output); return { command: ['validate-origin'], status: probe.status === 'passed' && stitchUrl(value?.top) ? 'passed' : 'failed', output: 'Stitch page origin checked before external action' }; }
+function authenticationRequired(value) { return Array.isArray(value?.frames) && [value.top, ...value.frames].some(item => { try { return new URL(item).hostname === 'accounts.google.com'; } catch { return false; } }); }
+function verifyPageOrigin(session, runDir) { const probe = authenticationProbe(session, runDir, runDir); const value = probeValue(probe.output); return { command: ['validate-origin'], status: probe.status === 'passed' && stitchUrl(value?.top) && !authenticationRequired(value) ? 'passed' : 'failed', output: 'Stitch page origin checked before external action' }; }
 const [command, runArg, planArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'import' || !runArg || !planArg) die('usage: import <run-dir> <stitch-ui-import-plan.json>');
@@ -78,13 +79,13 @@ else {
   logs.push(call(session, runDir, ['open', plan.url, '--headed'], runDir)); logs.push(call(session, runDir, ['snapshot'], runDir));
   const auth = logs.at(-1).status === 'passed' ? authenticationProbe(session, runDir, runDir) : { status: 'failed', output: 'snapshot did not complete' }; logs.push(auth);
   const observed = probeValue(auth.output);
-  const authenticationRequired = Array.isArray(observed?.frames) && [observed.top, ...observed.frames].some(value => { try { return new URL(value).hostname === 'accounts.google.com'; } catch { return false; } });
-  if (!authenticationRequired && (!observed || !stitchUrl(observed.top))) { logs.push({ command: ['validate-origin'], status: 'failed', output: 'Stitch page origin is missing or not official; no upload attempted' }); }
+  const needsAuthentication = authenticationRequired(observed);
+  if (!needsAuthentication && (!observed || !stitchUrl(observed.top))) { logs.push({ command: ['validate-origin'], status: 'failed', output: 'Stitch page origin is missing or not official; no upload attempted' }); }
   if (runCancellationRequested(runDir)) die('run was cancelled before Stitch upload');
-  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['click', plan.uploadTriggerRef], runDir));
-  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
+  if (!needsAuthentication && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['click', plan.uploadTriggerRef], runDir));
+  if (!needsAuthentication && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
   let uploadIntentId = null, uploadOutcome = null;
-  if (!authenticationRequired && logs.at(-1).status === 'passed') {
+  if (!needsAuthentication && logs.at(-1).status === 'passed') {
     if (runCancellationRequested(runDir)) die('run was cancelled before Stitch upload');
     uploadIntentId = crypto.randomUUID();
     try { recordExternalSubmissionIntent(runDir, { intentId: uploadIntentId, provider: 'stitch', operation: 'upload', projectId: plan.projectId || null, imageHash, promptHash }); } catch (error) { die(error.message); }
@@ -93,13 +94,13 @@ else {
     uploadOutcome = upload.status === 'passed' ? 'uploaded' : 'submission-uncertain';
     recordExternalSubmissionObservation(runDir, { intentId: uploadIntentId, status: uploadOutcome, at: new Date().toISOString() });
   }
-  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
-  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['fill', plan.promptRef, promptInfo.prompt], runDir));
-  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
-  if (authenticationRequired || logs.at(-1).status !== 'passed') {
-    const status = authenticationRequired ? 'authentication-required' : 'failed';
+  if (!needsAuthentication && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
+  if (!needsAuthentication && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['fill', plan.promptRef, promptInfo.prompt], runDir));
+  if (!needsAuthentication && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
+  if (needsAuthentication || logs.at(-1).status !== 'passed') {
+    const status = needsAuthentication ? 'authentication-required' : 'failed';
     const stage = uploadIntentId ? (uploadOutcome === 'uploaded' ? 'uploaded-unsubmitted' : 'upload-uncertain') : 'not-submitted';
-    const note = authenticationRequired ? 'Stitch redirected to Google sign-in. No file was uploaded and no generation was requested; sign in in the headed browser, then rerun with fresh element references.' : uploadIntentId ? 'An upload was attempted or completed, but no generation was submitted. Inspect and recover the durable upload before any retry; do not upload again.' : 'No upload or generation was attempted; retry after correcting the observed failure.';
+    const note = needsAuthentication ? 'Stitch redirected to Google sign-in. No file was uploaded and no generation was requested; sign in in the headed browser, then rerun with fresh element references.' : uploadIntentId ? 'An upload was attempted or completed, but no generation was submitted. Inspect and recover the durable upload before any retry; do not upload again.' : 'No upload or generation was attempted; retry after correcting the observed failure.';
     write(evidenceFile, { schemaVersion: '3.0', status, stage, ...(uploadIntentId ? { uploadIntentId } : {}), transport: 'stitch-ui-automation', session, imagePath: path.relative(runDir, image), imageHash, promptHash, logs, completedAt: new Date().toISOString(), note });
     console.log(JSON.stringify({ evidence: evidenceFile, status, session })); process.exit(2);
   }
@@ -123,8 +124,8 @@ else {
   write(jobFile, { schemaVersion: '3.0', status: 'submitted', transport: 'stitch-ui-automation', intentId, ...(promptInfo.adaptation ? { skillAdaptation: promptInfo.adaptation } : {}), projectId: plan.projectId || null, screenId: plan.resultScreenId || null, imageHash, promptHash, submittedAt, attempts: 0, note: 'Bind the resulting Screen ID, then use observe_stitch to poll readiness. No retry may submit a second generation.' });
 }
 observationLogs.push(call(session, runDir, ['snapshot'], runDir)); logs.push(observationLogs.at(-1));
+if (observationLogs.at(-1).status === 'passed') { observationLogs.push(verifyPageOrigin(session, runDir)); logs.push(observationLogs.at(-1)); }
 if (observationLogs.at(-1).status === 'passed') { observationLogs.push(call(session, runDir, ['screenshot'], runDir)); logs.push(observationLogs.at(-1)); }
-const authenticationRequired = false;
-const status = previous?.stage === 'submission-uncertain' ? 'submission-uncertain' : authenticationRequired ? 'authentication-required' : (observationLogs.length && observationLogs.every(item => item.status === 'passed') ? 'passed' : 'failed');
-const artifact = { schemaVersion: '3.0', status, stage: status === 'submission-uncertain' ? 'submission-uncertain' : status === 'passed' ? 'observed' : 'submitted', transport: 'stitch-ui-automation', session, ...(submissionIntentId ? { intentId: submissionIntentId } : {}), ...(promptInfo.adaptation ? { skillAdaptation: promptInfo.adaptation } : {}), imagePath: path.relative(runDir, image), imageHash, promptHash, logs, completedAt: new Date().toISOString(), note: status === 'passed' ? 'Submission observed. Element references must come from the immediately preceding Stitch UI snapshot; stale references fail closed.' : 'Submission is retained. Retry resumes snapshot collection and does not upload or submit again.' };
+const status = previous?.stage === 'submission-uncertain' ? 'submission-uncertain' : (observationLogs.length && observationLogs.every(item => item.status === 'passed') ? 'passed' : 'failed');
+const artifact = { schemaVersion: '3.0', status, stage: status === 'submission-uncertain' ? 'submission-uncertain' : status === 'passed' ? 'observed' : 'submitted', transport: 'stitch-ui-automation', session, ...(submissionIntentId ? { intentId: submissionIntentId } : {}), ...(promptInfo.adaptation ? { skillAdaptation: promptInfo.adaptation } : {}), imagePath: path.relative(runDir, image), imageHash, promptHash, logs, completedAt: new Date().toISOString(), note: status === 'passed' ? 'Stitch UI snapshot captured; remote job readiness requires a separately bound screen and observation.' : 'Submission is retained. Retry resumes snapshot collection and does not upload or submit again.' };
 write(evidenceFile, artifact); console.log(JSON.stringify({ evidence: evidenceFile, job: fs.existsSync(jobFile) ? jobFile : null, status, session, resumed: resumingSubmission })); if (status !== 'passed') process.exitCode = 2;
