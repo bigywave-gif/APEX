@@ -76,7 +76,8 @@ if (resumingSubmission) {
   logs.push({ command: ['resume-submission'], status: 'passed', output: 'previous submission is reused; no second upload or submit is sent' });
 }
 else {
-  logs.push(call(session, runDir, ['open', plan.url, '--headed'], runDir)); logs.push(call(session, runDir, ['snapshot'], runDir));
+  logs.push(call(session, runDir, ['open', plan.url, '--headed'], runDir));
+  if (logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['snapshot'], runDir));
   const auth = logs.at(-1).status === 'passed' ? authenticationProbe(session, runDir, runDir) : { status: 'failed', output: 'snapshot did not complete' }; logs.push(auth);
   const observed = probeValue(auth.output);
   const needsAuthentication = authenticationRequired(observed);
