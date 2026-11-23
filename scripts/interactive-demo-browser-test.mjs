@@ -57,6 +57,8 @@ let pid;
 try {
   run('apex-router.mjs', ['intake', project, runId, 'greenfield', 'standard', 'interactive', session, '确认调用 APEX']);
   const stateFile = path.join(runDir, 'state.json'), state = JSON.parse(fs.readFileSync(stateFile));
+  write('fixture-product-strategy.json', { functionalPlan: demoContract.journeys.filter(item => item.kind === 'task').map(item => ({ task: item.task })) });
+  state.artifacts.experienceStrategy = 'fixture-product-strategy.json';
   const selections = ['layout-a', 'chart-b', 'style-a', 'font-a', 'content-a'].map((id, index) => ({ id, kind: ['layout', 'component', 'style', 'font', 'content'][index], visualNodes: ['demo-root'], sourceType: 'native-web', sourceId: 'web', resourceId: id, version: 'current', materialization: 'native-web', parameters: index === 4 ? { origin: 'mock', fields: ['count'], implementation: 'local counter' } : {} }));
   const designText = '# Fixture design contract\n'; fs.writeFileSync(path.join(runDir, 'DESIGN.md'), designText);
   write('visual-execution-plan.json', { sourceSelections: selections, selectionAnalysis: { designContract: { path: 'DESIGN.md', sha256: `sha256:${crypto.createHash('sha256').update(designText).digest('hex')}` } } });

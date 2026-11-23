@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import { compileChatPreview } from './chat-demo.mjs';
 import { validateInteractionContract } from './interactive-demo.mjs';
+import { requiredFormalTasks } from './formal-interaction-evidence.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalApexRoot } from './apex-paths.mjs';
@@ -51,7 +52,9 @@ for (const [sourceSelectionId, binding] of bindings.entries()) {
   if (requiresDomMarker && !declaredInRenderedSource) die(`Demo source must render the selected source marker for ${sourceSelectionId}; sourceBindings alone are not runtime evidence`);
 }
 const strategyFile = state.artifacts?.experienceStrategy && path.join(runDir, state.artifacts.experienceStrategy);
-const tasks = strategyFile && fs.existsSync(strategyFile) ? (read(strategyFile).functionalPlan || []).map(item => item.task) : [];
+const strategy = strategyFile && fs.existsSync(strategyFile) ? read(strategyFile) : {};
+let tasks;
+try { tasks = [...requiredFormalTasks({}, strategy, { requireProductPlan: state.roleChain?.confirmationModel === 'two-confirmations' })]; } catch (error) { die(error.message); }
 try { validateInteractionContract(input.interactionContract, tasks); } catch (error) { die(error.message); }
 let existingPageSkeleton = null;
 if (state.track === 'existing') {

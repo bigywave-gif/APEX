@@ -1722,6 +1722,15 @@ function automaticWorkStep(state, runDir, action) {
     return step('compile-complete-visual-plan', '编译完整视觉方案及十节确认内容', ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json'], '基于已确认需求、冻结基线、DESIGN 规范和专业角色结论，以 plan_visual 生成视觉执行方案及完整十节展示内容；完成后重新读取 Router，并且只呈现“确认视觉方案”。不得以一句摘要、文件卡片或“继续”替代该确认。');
   }
   if (action === 'generate_visual') {
+    if (usesCombinedPlan(state)) {
+      try {
+        const strategyFile = artifactFile(runDir, state.artifacts?.experienceStrategy);
+        if (!strategyFile) throw new Error('产品方案文件缺失');
+        requiredFormalTasks({}, read(strategyFile), { requireProductPlan: true });
+      } catch (error) {
+        return step('restore-product-plan-before-demo', '恢复已确认产品方案证据', ['experience-strategy.json'], `产品任务清单不可用：${error.message}。先通过受控恢复核查并恢复原始方案；无法恢复时按实际情况重新形成并确认受影响方案。不要反复生成 Demo 或虚构任务。`);
+      }
+    }
     const manifest = artifactFile(runDir, state.artifacts?.demoSourceManifest) || path.join(runDir, 'demo-source-manifest.json');
     if (!fs.existsSync(manifest)) return step('compile-demo-source-manifest', '编译运行时 Demo 源清单', ['demo-source-input.json', 'demo-source-manifest.json'], '从已确认视觉方案、精确来源选择和 Existing 页面骨架自动构建可交互 UI 原型（前端 Demo）；默认声明 chatPreview.fragment，编写自包含 HTML/CSS/JavaScript 片段，由编译器生成同源 index.html；不兼容时说明具体回退原因。demo-source-input.json 必须包含 interactionContract：示例数据提示、功能任务、真实操作及前后状态断言、重置流程，格式见 core/runtime/interactive-demo-contract.md；以 generate_visual 调用 demo-source-compiler.mjs compile，再调用 visual-sandbox-writer.mjs materialize。清单缺失是自动链内部步骤，禁止作为用户阻断或确认。');
     if (!runFile('visualSandboxFiles')) return step('materialize-run-local-demo-code', '物化当前 Run 的运行时 Demo 源码', ['visual-sandbox/index.html', 'visual-sandbox-files.json'], '以当前 Demo 源清单调用 visual-sandbox-writer.mjs materialize；只能写入当前 Run 的 visual-sandbox，正式项目代码不得变更。');
