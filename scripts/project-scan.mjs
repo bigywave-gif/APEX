@@ -11,6 +11,20 @@ export function projectScanOptions(input = {}) {
   for (const [key, value] of Object.entries(defaults)) { const n = input[key] ?? value; if (!Number.isSafeInteger(n) || n < 1 || n > 1000000) throw new Error(`invalid project scan limit: ${key}`); result[key] = n; }
   return result;
 }
+export function expandedProjectScanOptions(coverage) {
+  if (!coverage || coverage.complete !== false) throw new Error('no truncated project scan to expand');
+  const options = projectScanOptions({ maxSourceFiles: coverage.sourceLimit, maxEntrypoints: coverage.entrypointLimit, maxRoutes: coverage.routeLimit });
+  let changed = false;
+  for (const [flag, key] of [['sourceTruncated', 'maxSourceFiles'], ['entrypointsTruncated', 'maxEntrypoints'], ['routesTruncated', 'maxRoutes']]) {
+    if (typeof coverage[flag] !== 'boolean') throw new Error(`invalid scan coverage: ${flag}`);
+    if (!coverage[flag]) continue;
+    if (options[key] >= 1000000) throw new Error(`project scan limit reached: ${key}; inventory remains incomplete`);
+    options[key] = Math.min(1000000, options[key] * 2);
+    changed = true;
+  }
+  if (!changed) throw new Error('incomplete project scan has no expandable limit');
+  return options;
+}
 export function scanProjectSources(root, input = {}) {
   const limits = projectScanOptions(input), files = [];
   function walk(current) {

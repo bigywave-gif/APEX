@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { scanProjectSources, projectScanOptions } from './project-scan.mjs';
+import { scanProjectSources, projectScanOptions, expandedProjectScanOptions } from './project-scan.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-scan-'));
 try {
@@ -16,11 +16,14 @@ try {
   assert.equal(partial.coverage.entrypointsTruncated, true);
   assert.equal(partial.coverage.routesTruncated, true);
   assert.equal(partial.coverage.complete, false);
+  assert.deepEqual(expandedProjectScanOptions(partial.coverage), { maxSourceFiles: 4, maxEntrypoints: 2, maxRoutes: 2 });
+  assert.throws(() => expandedProjectScanOptions({ ...partial.coverage, sourceLimit: 1000000 }), /limit reached/);
   const complete = scanProjectSources(root, { maxSourceFiles: 3, maxEntrypoints: 2, maxRoutes: 3 });
   assert.equal(complete.coverage.sourceCount, 3);
   assert.equal(complete.coverage.entrypointCount, 2);
   assert.equal(complete.coverage.routeCount, 3);
   assert.equal(complete.coverage.complete, true);
+  assert.throws(() => expandedProjectScanOptions(complete.coverage), /no truncated/);
   assert.throws(() => projectScanOptions({ maxSourceFiles: 0 }));
   assert.throws(() => projectScanOptions({ maxRoutes: 1000001 }));
   assert.throws(() => projectScanOptions({ unknown: 1 }));

@@ -2,7 +2,7 @@
 
 Existing 基线必须同时读取“目标范围完整代码”和“真实前端展示”。先使用 `project-intake.mjs scan` 发现技术栈、入口、路由候选与项目声明的验证脚本；再使用 `existing-code-reference.mjs capture` 对本次迭代目标页面的入口、路由及其传递项目依赖闭包（组件、样式、模板、配置和本地调用代码）建立完整的、按文件哈希冻结的 run 内副本，并生成真实页面骨架。随后通过已运行项目的真实 URL 使用 `browser-capture.mjs capture` 采集截图和 DOM 证据。最后 `baseline-collector.mjs` 才将真实页面、代码入口和接口样本写入可验证的 `existing-baseline.json`，并校验项目代码、页面骨架和展示证据。它不加载与本次范围无关的整站代码，也不伪造截图、接口或运行结果。
 
-扫描默认限制为 12000 个源文件、80 个入口和 160 个路由候选。`scanCoverage` 分别记录计数、限制及是否截断；源文件截断时，入口和路由计数仅为已扫描部分的下界。出现截断时宿主按 Router 指令在 Run 内生成扫描选项并以新授权扩大相应限制重扫，直至完整；每次使用新的选项文件，避免破坏已登记的输入哈希。各限制最高为 1000000，达到上限仍截断则保留未验证状态，不能通过 Gate 1。选项 JSON 只接受 `maxSourceFiles`、`maxEntrypoints`、`maxRoutes`，作为 scan 命令最后一个参数传入，不新增用户确认。历史清单未记录此字段时维持原协议，不能据此宣称历史扫描完整。
+扫描默认限制为 12000 个源文件、80 个入口和 160 个路由候选。`scanCoverage` 分别记录计数、限制及是否截断；源文件截断时，入口和路由计数仅为已扫描部分的下界。出现截断时宿主按 Router 指令以新授权调用 `project-intake.mjs expand <run-dir> <project-root>`，脚本将截断项限制加倍并重扫，直至完整。各限制最高为 1000000，达到上限仍截断则保留未验证状态，不能通过 Gate 1。选项 JSON 只接受 `maxSourceFiles`、`maxEntrypoints`、`maxRoutes`，作为 scan 命令最后一个参数传入，不新增用户确认。历史清单未记录此字段时维持原协议，不能据此宣称历史扫描完整。
 
 这两个脚本均只能使用 `collect_existing_baseline` 授权，经 Action Gateway 运行：
 

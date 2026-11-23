@@ -17,7 +17,7 @@ try {
     const project = path.join(base, item.name), run = 'adapter', session = 'adapter-session', runDir = path.join(project, '.apex/runs', run);
     fs.mkdirSync(path.dirname(path.join(project, item.source)), { recursive: true });
     fs.writeFileSync(path.join(project, item.source), 'export const fixture = true;\n');
-    if (item.name === 'vue') fs.writeFileSync(path.join(path.dirname(path.join(project, item.source)), 'extra.ts'), 'export const extra = true;\n');
+    if (item.name === 'vue') for (let i = 0; i < 4; i++) fs.writeFileSync(path.join(path.dirname(path.join(project, item.source)), `extra${i}.ts`), 'export const extra = true;\n');
     fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ dependencies: item.dependencies }));
     call('apex-router.mjs', ['intake', project, run, 'existing', 'standard', 'interactive', session, '确认调用 APEX']);
     const authorization = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
@@ -36,10 +36,14 @@ try {
       const status = call('apex-router.mjs', ['status', project, run, session]);
       assert.equal(status.executionDirective?.currentStep?.id, 'expand-project-inventory');
       assert.equal(status.userInteraction?.mode, 'no-user-input');
-      const expandedOptions = path.join(runDir, 'project-scan-options-expanded.json');
-      fs.writeFileSync(expandedOptions, JSON.stringify({ maxSourceFiles: 3 }));
-      const expandedAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
-      call('apex-action.mjs', ['run', project, run, session, expandedAuth.authorizationRef, 'collect_existing_baseline', 'project-intake.mjs', 'scan', runDir, project, expandedOptions]);
+      for (const expectedLimit of [2, 4, 8]) {
+        const expandedAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
+        call('apex-action.mjs', ['run', project, run, session, expandedAuth.authorizationRef, 'collect_existing_baseline', 'project-intake.mjs', 'expand', runDir, project]);
+        const coverage = JSON.parse(fs.readFileSync(path.join(runDir, 'project-inventory.json'))).scanCoverage;
+        assert.equal(coverage.sourceLimit, expectedLimit);
+        assert.equal(coverage.complete, expectedLimit === 8);
+        if (!coverage.complete) assert.equal(call('apex-router.mjs', ['status', project, run, session]).executionDirective?.currentStep?.id, 'expand-project-inventory');
+      }
       assert.equal(JSON.parse(fs.readFileSync(path.join(runDir, 'project-inventory.json'))).scanCoverage.complete, true);
       assert.notEqual(call('apex-router.mjs', ['status', project, run, session]).executionDirective?.currentStep?.id, 'expand-project-inventory');
     }

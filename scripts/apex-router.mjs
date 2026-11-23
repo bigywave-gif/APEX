@@ -1713,7 +1713,7 @@ function automaticWorkStep(state, runDir, action) {
   if (action === 'collect_existing_baseline') {
     if (!runFile('projectInventory')) return step('capture-project-inventory', '扫描正式项目入口、技术栈与脚本', ['project-inventory.json'], '通过 collect_existing_baseline 调用 project-intake.mjs scan；仅扫描正式项目，排除 .apex 与临时 Demo。');
     const inventory = read(artifactFile(runDir, state.artifacts.projectInventory));
-    if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) return step('expand-project-inventory', '扩大项目扫描范围', ['project-scan-options.json', 'project-inventory.json'], '扫描结果存在截断。在当前 Run 内创建新的扫描选项文件（不得覆盖已登记输入），提高发生截断的 maxSourceFiles、maxEntrypoints、maxRoutes（各不超过 1000000），以新的 collect_existing_baseline 授权调用 project-intake.mjs scan <run-dir> <project-root> <options>，直至完整；达到上限仍截断时保留未验证状态。不得增加用户确认。');
+    if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) return step('expand-project-inventory', '扩大项目扫描范围', ['project-inventory.json'], '扫描结果存在截断。以新的 collect_existing_baseline 授权调用 project-intake.mjs expand <run-dir> <project-root>；脚本按截断情况扩大限制并重扫，达到上限时记录失败回执且保持未验证。不得增加用户确认或重复执行未改变的失败输入。');
     const reference = existingCodeReferenceFreshness(runDir, state);
     if (!reference.ready) return step('freeze-code-reference', '从当前目标页生成或刷新 Existing 代码闭包与页面骨架', ['baseline-code-scope-input.json', 'code-reference.json', 'page-skeleton.json'], `内部根据当前需求、真实入口和路由生成范围输入，再调用 existing-code-reference.mjs capture。当前原因：${reference.reason}。不得使用模板 Replace 值，也不得复用已漂移的快照。`);
     const display = existingBrowserCaptureFreshness(runDir, state, reference);
