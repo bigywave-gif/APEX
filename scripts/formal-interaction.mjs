@@ -32,7 +32,8 @@ export async function runFormalJourney(page, input) {
       ensureOrigin();
       const after = await until(step.after);
       ensureOrigin();
-      steps.push({ action: step.action, selector: step.selector, before, after, passed: true });
+      const observation = { selector: step.before.selector, property: step.before.property, ...(step.before.property === 'attribute' ? { attribute: step.before.attribute } : {}) };
+      steps.push({ action: step.action, selector: step.selector, observation, before, after, passed: true });
     }
     await page.screenshot({ path: screenshotPath, fullPage: true }); html = await page.content();
   } catch (cause) { error = cause.message; }

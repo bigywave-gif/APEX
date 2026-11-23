@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 const hash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+export function hasFormalObservation(step) {
+  const observation = step?.observation;
+  return typeof observation?.selector === 'string' && Boolean(observation.selector.trim()) && ['text', 'value', 'visible', 'checked', 'attribute'].includes(observation.property) && (observation.property !== 'attribute' || (typeof observation.attribute === 'string' && Boolean(observation.attribute.trim())));
+}
 export function requiredFormalTasks(manifest, strategy = {}, { requireProductPlan = false } = {}) {
   if (requireProductPlan && (!Array.isArray(strategy?.functionalPlan) || !strategy.functionalPlan.length || strategy.functionalPlan.some(item => typeof item?.task !== 'string' || !item.task.trim()))) throw new Error('current product plan with valid functional tasks is required');
   const productTasks = new Set((strategy.functionalPlan || []).map(item => item.task).filter(Boolean));
@@ -25,7 +29,7 @@ export function validateFormalInteractionEvidence(runDir, state, interactions) {
     ids.add(interaction.id);
     const evidence = local(interaction.evidence), trace = JSON.parse(fs.readFileSync(evidence, 'utf8'));
     const matches = (capture.formalInteractions.journeys || []).filter(item => item.id === interaction.id && item.evidence === interaction.evidence && item.evidenceSha256 === hash(evidence));
-    if (matches.length !== 1 || trace.id !== interaction.id || trace.status !== 'passed' || !Array.isArray(trace.steps) || !trace.steps.length || trace.steps.some(step => step.passed !== true || step.before === step.after) || trace.task !== matches[0].task || !allowedTasks.has(trace.task)) throw new Error(`formal interaction is not an observed confirmed task: ${interaction.id}`);
+    if (matches.length !== 1 || trace.id !== interaction.id || trace.status !== 'passed' || !Array.isArray(trace.steps) || !trace.steps.length || trace.steps.some(step => step.passed !== true || step.before === step.after || !hasFormalObservation(step)) || trace.task !== matches[0].task || !allowedTasks.has(trace.task)) throw new Error(`formal interaction is not an observed confirmed task: ${interaction.id}`);
     for (const ref of [trace.screenshot, trace.dom]) if (!ref?.sha256 || hash(local(ref.path)) !== ref.sha256) throw new Error(`formal interaction screenshot or DOM changed: ${interaction.id}`);
     if (!(receipts || []).some(item => item.action === 'verify' && item.status === 'succeeded' && path.basename(item.script || '') === 'browser-capture.mjs' && item.outputFileHashes?.[captureRef] === hash(captureFile) && item.outputFileHashes?.[interaction.evidence] === hash(evidence))) throw new Error(`formal interaction lacks a successful capture receipt: ${interaction.id}`);
     covered.add(trace.task);

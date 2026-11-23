@@ -26,7 +26,7 @@ import { formalStitchProgress } from './formal-stitch-progress.mjs';
 import { formalDirectProgress } from './formal-direct-progress.mjs';
 import { implementationSealCurrent } from './implementation-seal.mjs';
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
-import { requiredFormalTasks } from './formal-interaction-evidence.mjs';
+import { hasFormalObservation, requiredFormalTasks } from './formal-interaction-evidence.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, commitRunState, externalSubmissionIntents, fenceRunCancellation, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 
@@ -1608,7 +1608,7 @@ function formalCaptureSourceReady(state, runDir) {
       const sandbox = read(artifactFile(runDir, state.artifacts?.visualSandboxFiles));
       const strategyFile = artifactFile(runDir, state.artifacts?.experienceStrategy);
       const tasks = requiredFormalTasks(sandbox, strategyFile ? read(strategyFile) : {}, { requireProductPlan: true });
-      if (!tasks.size || capture.formalInteractions?.status !== 'passed' || [...tasks].some(task => !(capture.formalInteractions.journeys || []).some(item => item.task === task && item.status === 'passed' && item.evidence))) return false;
+      if (!tasks.size || capture.formalInteractions?.status !== 'passed' || [...tasks].some(task => !(capture.formalInteractions.journeys || []).some(item => item.task === task && item.status === 'passed' && item.evidence && Array.isArray(item.steps) && item.steps.length && item.steps.every(hasFormalObservation)))) return false;
     }
     if (![...expected].every(id => capture.sourceSelectionIds?.includes(id)) || (capture.sourceSelectionIds || []).some(id => !expected.has(id))) return false;
     if (!(manifest.bindings || []).every(item => bindings.some(binding => binding.visualNode === item.visualNode && binding.selector === item.selector && binding.sourceMarker === item.sourceMarker))) return false;
