@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { validateApiSample } from './api-sample-schema.mjs';
+const schema = { type: 'object', required: ['age', 'name'], additionalProperties: false, properties: { age: { type: 'integer', minimum: 18 }, name: { type: 'string', minLength: 2, pattern: '^[a-z]+$' }, tags: { type: 'array', minItems: 1, items: { enum: ['a', 'b'] } } } };
+assert.deepEqual(validateApiSample({ age: 20, name: 'lee', tags: ['a'] }, schema), []);
+for (const value of [{ age: 17, name: 'lee' }, { age: 20.5, name: 'lee' }, { age: 20, name: 'L' }, { age: 20, name: 'lee', extra: true }, { age: 20, name: 'lee', tags: [] }, { age: 20, name: 'lee', tags: ['c'] }]) assert.ok(validateApiSample(value, schema).length);
+assert.match(validateApiSample({}, { type: 'object', properties: { optional: { type: 'array', items: { $ref: '#/$defs/item' } } } }).join(), /unsupported schema keyword \$ref/);
+assert.match(validateApiSample([], { type: 'array', items: { format: 'email' } }).join(), /unsupported schema keyword format/);
+assert.match(validateApiSample({}, { type: 'object', properties: { optional: { pattern: '[' } } }).join(), /invalid pattern/);
+assert.deepEqual(validateApiSample({ x: 1 }, { const: { x: 1 } }), []);
+console.log(JSON.stringify({ status: 'passed', scope: 'API sample validation and unsupported-keyword rejection' }));
