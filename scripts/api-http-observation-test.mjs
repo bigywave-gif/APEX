@@ -46,6 +46,11 @@ try {
   const crashed = spawnSync(process.execPath, ['--input-type=module', '-e', childCode, root], { encoding: 'utf8' }); assert.equal(crashed.status, 9);
   await assert.rejects(journal.execute('fixture_crashed_write_0005', { test: 'crash' }, async () => { throw new Error('must not dispatch'); }), /uncertain/);
   journal.close();
+  const journalFile = path.join(root, '.apex/api-mutation-journal.sqlite'), backup = journalFile + '.backup', markerFile = path.join(root, '.apex/api-mutation-established.json');
+  fs.renameSync(journalFile, backup); assert.throws(() => openApiMutationJournal(root), /journal is missing/);
+  fs.writeFileSync(journalFile, ''); assert.throws(() => openApiMutationJournal(root), /records are missing/); fs.unlinkSync(journalFile); fs.renameSync(backup, journalFile);
+  const marker = fs.readFileSync(markerFile); fs.unlinkSync(markerFile); assert.throws(() => openApiMutationJournal(root), /identity is missing or mismatched/); fs.writeFileSync(markerFile, marker);
+  const restored = openApiMutationJournal(root); assert.deepEqual(await observeHttpCases(origin, [write], { journal: restored, writeContext: { registration: 'fixture-registration', contract: 'fixture-contract' } }), firstWrite); assert.equal(writes, 3); restored.close();
   await assert.rejects(observeHttpCases(origin, [{ method: 'GET', path: '/redirect', route: '/redirect', request: {}, expectedStatus: 200 }]), /status 302/);
   await assert.rejects(observeHttpCases('http://example.org', [{ method: 'GET', path: '/', route: '/', request: {}, expectedStatus: 200 }]), /loopback/);
   await assert.rejects(observeHttpCases(origin, [{ method: 'GET', path: '/', route: '//example.org/', request: {}, expectedStatus: 200 }]), /invalid/);
