@@ -15,6 +15,7 @@ import { reserveProjectExternalIntent, releaseUnsubmittedProjectIntent, updatePr
 
 const STATE_FILE = 'state.json';
 const LEDGER_FILE = 'run-ledger.sqlite';
+const LEDGER_MARKER = 'ledger-established.json';
 // A freshly claimed job is normal execution, not corruption.  Only an
 // expired lease is eligible for automatic recovery.
 export const AGENT_JOB_LEASE_MS = 15 * 60 * 1000;
@@ -33,6 +34,7 @@ function atomicWrite(file, value) {
 
 function open(runDir) {
   fs.mkdirSync(runDir, { recursive: true });
+  if (!fs.existsSync(ledgerPath(runDir)) && ['ledger-integrity-incident.json', LEDGER_MARKER].some(name => fs.existsSync(path.join(runDir, name)))) throw new Error('run ledger is missing after it was established or a monitoring incident; restore and investigate the original ledger before recovery');
   const database = new DatabaseSync(ledgerPath(runDir));
   database.exec('PRAGMA busy_timeout = 5000;');
   // Reasserting journal_mode while another connection writes can fail even
@@ -199,6 +201,11 @@ function appendSnapshot(database, state, reason) {
   database.prepare('INSERT OR IGNORE INTO state_snapshots (revision, state_hash, reason, created_at, state_json) VALUES (?, ?, ?, ?, ?)')
     .run(Number(state.revision || 0), hash(serialized), reason, now(), serialized);
 }
+function ensureLedgerMarker(runDir) {
+  const marker = path.join(runDir, LEDGER_MARKER);
+  try { fs.writeFileSync(marker, '{"schemaVersion":"1.0","kind":"established-ledger"}\n', { flag: 'wx' }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+}
 
 export function initializeLedger(runDir, state, reason = 'run-initialized') {
   const database = open(runDir);
@@ -213,6 +220,7 @@ export function initializeLedger(runDir, state, reason = 'run-initialized') {
     try { database.exec('ROLLBACK'); } catch {}
     throw error;
   } finally { database.close(); }
+  ensureLedgerMarker(runDir);
 }
 
 export function commitRunState(runDir, state, { reason = 'state-transition', event = null, checkpoint = null, expectedStateHash = null } = {}) {
@@ -802,7 +810,7 @@ export function readRunState(runDir) {
   const file = statePath(runDir);
   const disk = fs.existsSync(file) ? parseState(file) : null;
   if (!fs.existsSync(ledgerPath(runDir))) {
-    if (fs.existsSync(path.join(runDir, 'ledger-integrity-incident.json'))) throw new Error('run ledger is missing after a monitoring incident; restore and investigate the original ledger before recovery');
+    if (['ledger-integrity-incident.json', LEDGER_MARKER].some(name => fs.existsSync(path.join(runDir, name)))) throw new Error('run ledger is missing after it was established or a monitoring incident; restore and investigate the original ledger before recovery');
     if (!disk) throw new Error(`run state does not exist: ${file}`);
     initializeLedger(runDir, disk, 'legacy-state-import');
     return disk;
@@ -824,6 +832,7 @@ export function readRunState(runDir) {
     try { database.exec('ROLLBACK'); } catch {}
     throw error;
   } finally { database.close(); }
+  if (snapshot) ensureLedgerMarker(runDir);
   if (recovered) return recovered;
   if (!snapshot) {
     if (!disk) throw new Error(`run ledger has no state and projection is missing: ${file}`);

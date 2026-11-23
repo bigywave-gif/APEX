@@ -355,7 +355,7 @@ function appendEvent(dir, event) {
   fs.appendFileSync(path.join(dir, 'events.ndjson'), `${JSON.stringify(entry)}\n`);
 }
 const cancellationReceiptName = 'cancellation-receipt.json';
-const cancellationRetainedEntries = new Set(['state.json', 'events.ndjson', 'run-ledger.sqlite', 'run-ledger.sqlite-wal', 'run-ledger.sqlite-shm', cancellationReceiptName]);
+const cancellationRetainedEntries = new Set(['state.json', 'events.ndjson', 'run-ledger.sqlite', 'run-ledger.sqlite-wal', 'run-ledger.sqlite-shm', 'ledger-established.json', 'ledger-integrity-incident.json', cancellationReceiptName]);
 function isCurrentRunChild(runDir, candidate) {
   const root = path.resolve(runDir);
   const resolved = path.resolve(candidate);

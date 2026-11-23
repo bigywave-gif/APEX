@@ -145,7 +145,7 @@ function runInputHashes() {
   // Ledger files are control-plane durability data, not business/action
   // inputs. Including WAL churn here makes an identical failed operation look
   // different merely because authorization or recovery appended an event.
-  const ignoredFiles = new Set(['events.ndjson', 'operations-index.json', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal']);
+  const ignoredFiles = new Set(['events.ndjson', 'operations-index.json', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal', 'ledger-established.json']);
   const hashes = {};
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {

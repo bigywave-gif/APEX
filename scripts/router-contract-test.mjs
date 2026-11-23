@@ -82,6 +82,7 @@ try {
   fs.writeFileSync(path.join(cancelRunDir, 'visual-sandbox-runtime.json'), `${JSON.stringify({ schemaVersion: '3.0', runId: 'run-cancel', runtimeRoot: 'visual-sandbox', url: `http://127.0.0.1:${cancelPort}/`, pid: child.pid, status: 'running' })}\n`);
   fs.writeFileSync(path.join(cancelRunDir, 'runtime-services.json'), `${JSON.stringify({ schemaVersion: '1.0', runId: 'run-cancel', services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json' }] })}\n`);
   expect(run(router, ['lease', root, 'run-cancel', 'session-cancel', '5']), 'cancellation must release a current run mutation lease');
+  fs.writeFileSync(path.join(cancelRunDir, 'ledger-integrity-incident.json'), JSON.stringify({ status: 'requires-ledger-investigation' }));
   reject(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '修改当前方案并重新分析']), 'cancel requires an unambiguous user instruction', 'revision language must never be misclassified as a destructive run cancellation');
   if (!fs.existsSync(path.join(cancelRunDir, 'visual-sandbox')) || !fs.existsSync(path.join(cancelRunDir, 'evidence', 'browser', 'screen.png'))) throw new Error('a rejected cancellation intent must not reclaim any current-run artifact');
   const cancelled = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行', 'user-terminated-current-run']), 'current-run cancellation must reclaim temporary artifacts');
@@ -95,8 +96,8 @@ try {
   const cancelReceipt = JSON.parse(fs.readFileSync(path.join(cancelRunDir, 'cancellation-receipt.json'), 'utf8'));
   if (cancelReceipt.agents?.fencedJobs?.length !== 2 || cancelReceipt.agents.externalInterruption !== 'not-confirmed') throw new Error('cancellation receipt must identify fenced Agent jobs without claiming host interruption');
   const cancelEntries = fs.readdirSync(cancelRunDir).sort();
-  const retainedNames = new Set(['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal', 'state.json']);
-  if (cancelEntries.some(name => !retainedNames.has(name)) || !['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'state.json'].every(name => cancelEntries.includes(name))) throw new Error(`cancellation must retain only the receipt, durable ledger (including possible WAL files), and state projection, received: ${cancelEntries.join(', ')}`);
+  const retainedNames = new Set(['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal', 'ledger-established.json', 'ledger-integrity-incident.json', 'state.json']);
+  if (cancelEntries.some(name => !retainedNames.has(name)) || !['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'ledger-established.json', 'state.json'].every(name => cancelEntries.includes(name))) throw new Error(`cancellation must retain the receipt, durable ledger, protection marker and state projection, received: ${cancelEntries.join(', ')}`);
   const jobsAfterCancel = agentRuntimeStatus(cancelRunDir).jobs;
   if (jobsAfterCancel.find(job => job.jobId === activeJob.jobId)?.status !== 'cancelled' || jobsAfterCancel.find(job => job.jobId === pendingJob.jobId)?.status !== 'cancelled') throw new Error('cancellation must fence running and queued jobs in the retained ledger');
   if (agentRuntimeStatus(cancelRunDir).tokenUsage.visual !== 7) throw new Error('cancellation must retain previously recorded token usage');
@@ -105,6 +106,8 @@ try {
   try { claimAgentJob(cancelRunDir, pendingJob.jobId); throw new Error('cancelled queued job was claimed'); } catch (error) { if (!String(error.message).includes('not queued')) throw error; }
   try { registerAgent(cancelRunDir, { agentId: 'running-agent', vocation: 'design', stage: 'visual' }); throw new Error('cancelled Agent was reactivated'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
   const cancelledState = JSON.parse(fs.readFileSync(path.join(cancelRunDir, 'state.json'), 'utf8'));
+  if (!fs.existsSync(path.join(cancelRunDir, 'ledger-established.json'))) throw new Error('cancellation must retain the established-ledger marker');
+  if (!fs.existsSync(path.join(cancelRunDir, 'ledger-integrity-incident.json'))) throw new Error('cancellation must retain ledger incident evidence');
   const staleState = { ...cancelledState, lifecycle: 'active', revision: cancelledState.revision + 1 };
   try { commitRunState(cancelRunDir, staleState); throw new Error('cancelled Run was reactivated by a late state commit'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
   try { initializeLedger(cancelRunDir, staleState, 'late-compatibility-import'); throw new Error('cancelled Run was reactivated by a late import'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
