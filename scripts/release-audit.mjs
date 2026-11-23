@@ -81,7 +81,7 @@ const guardedActionScripts = {
   'prepare_workspace': ['apex-workspace.mjs'],
   'compile_visual_bundle': ['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs', 'role-advisory.mjs', 'contract-recorder.mjs', 'confirmation-presentation.mjs', 'agent-runtime.mjs'],
   implement: ['asset-materializer.mjs', 'runtime-materializer.mjs'],
-  verify: ['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
+  verify: ['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'api-contract-capture.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
   'record_context': ['contract-recorder.mjs', 'context-compiler.mjs', 'evidence-provenance.mjs'],
   recover: ['apex-recover.mjs', 'run-migrate.mjs']
 };
@@ -92,7 +92,7 @@ for (const [action, scripts] of Object.entries(guardedActionScripts)) {
   });
   results.push(check(`router-guard:${action}`, missingGuards.length === 0, missingGuards.length ? `missing matching Router guard for ${action}: ${missingGuards.join(', ')}` : `${scripts.length} scripts guarded for ${action}`));
 }
-const guardedScriptPattern = /node scripts\/(?:runtime-visual-baseline|runtime-materializer|visual-reference-compiler|visual-source|stitch-sync|stitch-ui-importer|strict-replica|browser-capture|structure-contract|visual-parity|asset-resolver|asset-materializer|bundle-compiler|motion-contract|motion-capability|context-compiler|verification-orchestrator|project-intake|existing-code-reference|baseline-collector|verification-planner|contract-verifier|quality-evidence|implementation-audit|contract-recorder|apex-recover|apex-workspace|trajectory-evaluator|experience-evaluator|stability-evidence)\.mjs/;
+const guardedScriptPattern = /node scripts\/(?:runtime-visual-baseline|runtime-materializer|visual-reference-compiler|visual-source|stitch-sync|stitch-ui-importer|strict-replica|browser-capture|structure-contract|visual-parity|asset-resolver|asset-materializer|bundle-compiler|motion-contract|motion-capability|context-compiler|verification-orchestrator|project-intake|existing-code-reference|baseline-collector|verification-planner|contract-verifier|api-contract-capture|quality-evidence|implementation-audit|contract-recorder|apex-recover|apex-workspace|trajectory-evaluator|experience-evaluator|stability-evidence)\.mjs/;
 const documentationFiles = files(apexRoot, file => file.endsWith('.md'));
 const obsoleteDirectCommands = documentationFiles.filter(file => guardedScriptPattern.test(fs.readFileSync(file, 'utf8'))).map(file => path.relative(apexRoot, file));
 results.push(check('documentation-router-path', obsoleteDirectCommands.length === 0, obsoleteDirectCommands.length ? `direct guarded commands documented in: ${obsoleteDirectCommands.join(', ')}` : 'no direct guarded runtime commands documented'));
@@ -143,6 +143,7 @@ for (const [name, script] of [
   ['verification-policy', 'verification-policy-test.mjs'],
   ['api-sample-schema', 'api-sample-schema-test.mjs'],
   ['api-contract-evidence', 'api-contract-evidence-test.mjs'],
+  ['api-http-observation', 'api-http-observation-test.mjs'],
   ['quality-measurement', 'quality-measurement-test.mjs'],
   ['quality-workflow', 'quality-workflow-test.mjs'],
   ['industry-review-progress', 'industry-review-progress-test.mjs'],
