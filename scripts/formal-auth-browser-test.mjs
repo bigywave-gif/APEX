@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { apiObservationCurrent } from './api-http-observation.mjs';
 const apex = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-formal-auth-'));
 const runId = 'auth', session = 'auth-session', runDir = path.join(project, '.apex/runs', runId);
@@ -19,7 +20,7 @@ if(document.cookie.includes('session=ok')){login.hidden=true;ready.hidden=false}
 login.addEventListener('submit',async e=>{e.preventDefault();const r=await fetch('/login',{method:'POST',body:JSON.stringify({username:document.querySelector('#user').value,password:document.querySelector('#pass').value})});document.querySelector('#user').value='';document.querySelector('#pass').value='';if(r.ok){login.hidden=true;ready.hidden=false}});
 document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=String(Number(document.querySelector('#count').textContent)+1);
 </script></body></html>\`;
-const handler=(req,res)=>{if(req.url==='/count'){res.end(String(logins));return}if(req.url==='/redirect'){res.writeHead(302,{location:'http://127.0.0.1:'+other.address().port+'/'});res.end();return}if(req.url==='/login'){let b='';req.on('data',c=>b+=c);req.on('end',()=>{const d=JSON.parse(b);if(d.username===process.env.APEX_AUTH_FIXTURE_USER&&d.password===process.env.APEX_AUTH_FIXTURE_PASSWORD){logins++;res.writeHead(200,{'Set-Cookie':'session=ok; Path=/; SameSite=Lax'});res.end('ok')}else{res.writeHead(401);res.end('bad')}});return}res.writeHead(200,{'content-type':'text/html'});res.end(html)};const server=http.createServer(handler),other=http.createServer(handler);other.listen(0,'127.0.0.1',()=>server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port))));`;
+const handler=(req,res)=>{if(req.url==='/api/fixture'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return}if(req.url==='/count'){res.end(String(logins));return}if(req.url==='/redirect'){res.writeHead(302,{location:'http://127.0.0.1:'+other.address().port+'/'});res.end();return}if(req.url==='/login'){let b='';req.on('data',c=>b+=c);req.on('end',()=>{const d=JSON.parse(b);if(d.username===process.env.APEX_AUTH_FIXTURE_USER&&d.password===process.env.APEX_AUTH_FIXTURE_PASSWORD){logins++;res.writeHead(200,{'Set-Cookie':'session=ok; Path=/; SameSite=Lax'});res.end('ok')}else{res.writeHead(401);res.end('bad')}});return}res.writeHead(200,{'content-type':'text/html'});res.end(html)};const server=http.createServer(handler),other=http.createServer(handler);other.listen(0,'127.0.0.1',()=>server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port))));`;
 let server;
 try {
   const portFile = path.join(project, 'port'); server = spawn(process.execPath, ['-e', serverCode, portFile], { env, stdio: 'ignore' });
@@ -29,8 +30,8 @@ try {
   run('apex-router.mjs', ['intake', project, runId, 'greenfield', 'standard', 'interactive', session, '确认调用 APEX']);
   const stateFile = path.join(runDir, 'state.json'), state = JSON.parse(fs.readFileSync(stateFile));
   state.roleChain.confirmationModel = 'gate-summary-only';
-  state.gates.gate1 = { status: 'passed', evidence: ['fixture'] }; state.gates.gate2 = { status: 'passed', evidence: ['fixture'] }; state.locks.implementationAllowed = true; state.locks.implementationApproved = true; state.artifacts.pageDelta = 'page-delta.json'; state.phase = 'G-09 PROOF_IMPLEMENT';
-  fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{}'); fs.writeFileSync(stateFile, JSON.stringify(state));
+  state.gates.gate1 = { status: 'passed', evidence: ['fixture'] }; state.gates.gate2 = { status: 'passed', evidence: ['fixture'] }; state.locks.implementationAllowed = true; state.locks.implementationApproved = true; state.artifacts.pageDelta = 'page-delta.json'; state.artifacts.implementationRegistration = 'implementation-registration.json'; state.artifacts.apiContract = 'api-contract.json'; state.phase = 'G-09 PROOF_IMPLEMENT';
+  fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{}'); fs.writeFileSync(path.join(runDir, 'implementation-registration.json'), '{}'); fs.writeFileSync(path.join(runDir, 'api-contract.json'), JSON.stringify({endpoints:[{method:'GET',path:'/api/fixture',requestSchema:'request-schema.json',responseSchema:'response-schema.json'}]})); fs.writeFileSync(path.join(runDir, 'request-schema.json'), JSON.stringify({type:'object'})); fs.writeFileSync(path.join(runDir, 'response-schema.json'), JSON.stringify({type:'object',required:['ok'],properties:{ok:{const:true}}})); fs.writeFileSync(stateFile, JSON.stringify(state));
   const step = { action: 'click', selector: '#increment', before: { selector: '#count', property: 'text', equals: '0' }, after: { selector: '#count', property: 'text', equals: '1' } };
   const spec = { authentication: { usernameEnv: 'APEX_AUTH_FIXTURE_USER', passwordEnv: 'APEX_AUTH_FIXTURE_PASSWORD', usernameSelector: '#user', passwordSelector: '#pass', submitSelector: '#submit', successSelector: '#ready' }, screens: [{ id: 'desktop', route: '/', width: 1280, height: 800 }], formalJourneys: [{ id: 'add', task: '添加项目', route: '/', steps: [step] }] };
   const specFile = path.join(runDir, 'auth-spec.json'); fs.writeFileSync(specFile, JSON.stringify(spec));
@@ -38,6 +39,15 @@ try {
   run('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'verify', 'browser-capture.mjs', 'capture', runDir, url, specFile]);
   const capture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
   assert.equal(capture.status, 'passed'); assert.equal(capture.evidence[0].sessionClosed, true); assert.equal(capture.formalInteractions?.journeys?.[0]?.steps?.[0]?.after, '1');
+  const casesFile = path.join(runDir, 'api-cases.json'); fs.writeFileSync(casesFile, JSON.stringify({cases:[{method:'GET',path:'/api/fixture',route:'/api/fixture',request:{},expectedStatus:200}]}));
+  const apiAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
+  run('apex-action.mjs', ['run', project, runId, session, apiAuth.authorizationRef, 'verify', 'api-contract-capture.mjs', 'capture', runDir, casesFile]);
+  const observedState = JSON.parse(fs.readFileSync(stateFile));
+  assert.equal(apiObservationCurrent(runDir, observedState, project, 'evidence/api-observed-samples.json'), true, 'actual controlled capture must have valid receipts');
+  const contractAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
+  run('apex-action.mjs', ['run', project, runId, session, contractAuth.authorizationRef, 'verify', 'contract-verifier.mjs', 'verify', runDir, path.join(runDir, 'evidence/api-observed-samples.json')]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/contract-verification.json'))).status, 'passed');
+  fs.appendFileSync(casesFile, ' '); assert.equal(apiObservationCurrent(runDir, observedState, project, 'evidence/api-observed-samples.json'), false, 'changed cases must invalidate the observation'); fs.writeFileSync(casesFile, JSON.stringify({cases:[{method:'GET',path:'/api/fixture',route:'/api/fixture',request:{},expectedStatus:200}]}));
   assert.ok(Number(await (await fetch(new URL('/count', url), { headers: { connection: 'close' } })).text()) >= 2, 'screen and formal journey must authenticate independently');
   const visit = dir => { if (!fs.existsSync(dir)) return; for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) visit(file); else if (/\.(?:json|html|ndjson)$/.test(file)) { const content = fs.readFileSync(file, 'utf8'); assert.ok(!content.includes(user) && !content.includes(password) && !content.includes(env.APEX_AUTH_WRONG_PASSWORD), `fixture credential leaked into ${path.relative(runDir, file)}`); } } };
   visit(path.join(runDir, 'evidence')); visit(path.join(runDir, 'operations'));
@@ -61,5 +71,5 @@ try {
   assert.equal(redirectCapture.evidence[0].sessionClosed, true); assert.equal(redirectCapture.evidence[0].logs.authentication, 'authentication failed');
   assert.equal(Number(await (await fetch(new URL('/count', url), { headers: { connection: 'close' } })).text()), loginCount, 'cross-origin redirect must not submit credentials');
   visit(path.join(runDir, 'evidence')); visit(path.join(runDir, 'operations'));
-  console.log(JSON.stringify({ status: 'passed', checks: 11, scope: 'real-browser-isolated-local-auth-fixture' }));
+  console.log(JSON.stringify({ status: 'passed', checks: 15, scope: 'real-browser-router-api-capture-and-local-auth-fixture' }));
 } finally { if (server) server.kill('SIGTERM'); fs.rmSync(project, { recursive: true, force: true }); }
