@@ -252,11 +252,11 @@ export function commitRunState(runDir, state, { reason = 'state-transition', eve
   return { revision: Number(state.revision || 0), stateHash: fingerprint };
 }
 
-export function runCancellationRequested(runDir, { busyTimeoutMs = 5000 } = {}) {
+export function runCancellationRequested(runDir, { busyTimeoutMs = 5000, requireLedger = false } = {}) {
   const file = ledgerPath(runDir);
-  if (!fs.existsSync(file)) return false;
+  if (!fs.existsSync(file)) { if (requireLedger) throw new Error('run ledger is unavailable for cancellation monitoring'); return false; }
   const database = new DatabaseSync(file, { readOnly: true });
-  try { database.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.min(5000, Math.trunc(busyTimeoutMs) || 0))}`); const snapshot = latestSnapshot(database); return Boolean(snapshot && JSON.parse(snapshot.state_json).lifecycle === 'cancelled'); }
+  try { database.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.min(5000, Math.trunc(busyTimeoutMs) || 0))}`); const snapshot = latestSnapshot(database); if (!snapshot && requireLedger) throw new Error('run ledger has no cancellation state'); return Boolean(snapshot && JSON.parse(snapshot.state_json).lifecycle === 'cancelled'); }
   finally { database.close(); }
 }
 
