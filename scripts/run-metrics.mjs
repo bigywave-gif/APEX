@@ -22,7 +22,13 @@ export function readRunMetrics(runDirectory) {
       const diskHash = `sha256:${crypto.createHash('sha256').update(JSON.stringify(diskState)).digest('hex')}`;
       projection = diskHash === snapshot.state_hash ? 'consistent' : 'diverged';
     } catch {}
-    const start = db.prepare('SELECT created_at FROM state_snapshots ORDER BY id LIMIT 1').get()?.created_at || null;
+    const firstSnapshot = db.prepare('SELECT created_at, state_hash, state_json FROM state_snapshots ORDER BY id LIMIT 1').get();
+    const start = firstSnapshot?.created_at || null;
+    let ledgerOrigin = null;
+    try {
+      const initialHash = `sha256:${crypto.createHash('sha256').update(JSON.stringify(JSON.parse(firstSnapshot.state_json))).digest('hex')}`;
+      if (initialHash === firstSnapshot.state_hash && Number.isFinite(Date.parse(start))) ledgerOrigin = `sha256:${crypto.createHash('sha256').update(JSON.stringify([initialHash, start])).digest('hex')}`;
+    } catch {}
     const rows = db.prepare('SELECT stage, agent_id, input_tokens, output_tokens, total_tokens, metadata_json FROM token_usage').all();
     const jobRows = db.prepare('SELECT status, attempt FROM agent_jobs').all();
     const coverage = { providerReported: 0, estimated: 0, unknown: 0, unverified: 0 };
@@ -80,7 +86,7 @@ export function readRunMetrics(runDirectory) {
     const finished = state.gates?.gate3?.status === 'passed' ? state.gates.gate3.at : null;
     const elapsed = start && finished && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(finished)) && Date.parse(finished) >= Date.parse(start) && Date.parse(finished) <= Date.now() ? Date.parse(finished) - Date.parse(start) : null;
     return {
-      runId: state.runId, runIdentity: `sha256:${crypto.createHash('sha256').update(root).digest('hex')}`, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
+      runId: state.runId, runIdentity: `sha256:${crypto.createHash('sha256').update(root).digest('hex')}`, ledgerOrigin, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
       contractIntegrity, capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
       elapsedWallMs: elapsed, elapsedBasis: 'first-ledger-snapshot-to-passed-gate3-including-user-wait',
       operations: { receiptDirectory: operationsPresent ? 'present' : 'missing', recorded: operationsPresent ? receipts.length : null, failed: operationsPresent ? receipts.filter(x => x.status === 'failed').length : null, running: operationsPresent ? receipts.filter(x => x.status === 'running').length : null, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: operationsPresent ? receipts.length - durations.length : null, unreadable: operationsPresent ? unreadable.length : null, completeness: 'unverified' },
@@ -94,6 +100,8 @@ export function compareRuns(before, after) {
   const reasons = [];
   if (!before.runIdentity || !after.runIdentity) reasons.push('Run identity is missing');
   else if (before.runIdentity === after.runIdentity) reasons.push('before and after refer to the same Run');
+  if (!before.ledgerOrigin || !after.ledgerOrigin) reasons.push('initial ledger identity is missing or invalid');
+  else if (before.ledgerOrigin === after.ledgerOrigin && before.runIdentity !== after.runIdentity) reasons.push('Runs may be copies of the same ledger');
   if (before.gate3 !== 'passed' || after.gate3 !== 'passed') reasons.push('both runs need passed Gate 3');
   if (before.track !== after.track || before.scope !== after.scope) reasons.push('track or scope differs');
   if (!before.capabilities || !after.capabilities || JSON.stringify(before.capabilities) !== JSON.stringify(after.capabilities)) reasons.push('capability sets are missing or differ');
