@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { DatabaseSync } from 'node:sqlite';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Adapter coverage failed: ${message}`); process.exit(1); }
 function read(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -21,7 +21,25 @@ for (const project of projects) {
   const runDir = fs.realpathSync(project.runDir), projectRoot = fs.realpathSync(project.projectRoot), profile = profiles.get(project.adapterId);
   const statePath = path.join(runDir, 'state.json');
   if (!fs.existsSync(statePath) || !fs.realpathSync(statePath).startsWith(`${runDir}${path.sep}`)) die(`Run state must belong to the current Run: ${project.id}`);
-  const state = read(statePath);
+  const ledgerPath = path.join(runDir, 'run-ledger.sqlite');
+  if (!fs.existsSync(ledgerPath) || !fs.realpathSync(ledgerPath).startsWith(`${runDir}${path.sep}`)) die(`Run ledger is missing or outside the current Run: ${project.id}`);
+  let state;
+  try {
+    const db = new DatabaseSync(ledgerPath, { readOnly: true });
+    try {
+      db.exec('BEGIN');
+      const snapshot = db.prepare('SELECT state_json, state_hash FROM state_snapshots ORDER BY id DESC LIMIT 1').get();
+      if (!snapshot) throw new Error('durable state is missing');
+      state = JSON.parse(snapshot.state_json);
+      const stateHash = value => `sha256:${crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
+      if (stateHash(state) !== snapshot.state_hash || stateHash(read(statePath)) !== snapshot.state_hash) throw new Error('state projection differs from durable ledger');
+      for (const [name, reference] of Object.entries(project.artifacts)) {
+        const match = db.prepare("SELECT 1 FROM artifacts WHERE reference = ? AND sha256 = ? AND status = 'verified' LIMIT 1").get(reference, project.artifactHashes[name]);
+        if (!match) throw new Error(`artifact is not currently verified in the ledger: ${name}`);
+      }
+      db.exec('COMMIT');
+    } finally { db.close(); }
+  } catch (error) { die(`Run ledger verification failed for ${project.id}: ${error.message}`); }
   const expectedRun = path.join(projectRoot, '.apex', 'runs', String(state.runId || ''));
   if (!state.runId || !runDir.startsWith(`${projectRoot}${path.sep}`) || !fs.existsSync(expectedRun) || fs.realpathSync(expectedRun) !== runDir) die(`Run does not belong to its project: ${project.id}`);
   for (const [name, artifact] of Object.entries(project.artifacts)) {
@@ -30,6 +48,7 @@ for (const project of projects) {
   }
   const inventory = read(path.resolve(runDir, project.artifacts.projectInventory)), verification = read(path.resolve(runDir, project.artifacts.gate3)), provenance = read(path.resolve(runDir, project.artifacts.evidenceProvenance));
   if (path.basename(runDir) !== state.runId || inventory.projectRoot !== project.projectRoot || inventory.adapterRecommendation?.id !== project.adapterId) die(`project identity, run identity, or adapter identity does not bind to supplied evidence: ${project.id}`);
+  for (const [name, stateName] of Object.entries({ projectInventory: 'projectInventory', existingBaseline: 'existingBaseline', gate3: 'verificationBundle', evidenceProvenance: 'evidenceProvenance' })) if (state.artifacts?.[stateName] !== project.artifacts[name]) die(`project evidence is not the current Run artifact: ${project.id}/${name}`);
   if (state.gates?.gate3?.status !== 'passed' || (verification.verificationStatus ?? verification.gate3) !== 'passed' || provenance.status !== 'passed') die(`project Gate 3 or provenance is not truly passed: ${project.id}`);
   for (const check of profile.requiredChecks) if (!(project.checks || []).includes(check)) die(`adapter required check is absent: ${project.id}/${check}`);
 }

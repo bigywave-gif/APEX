@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { initializeLedger, commitRunState, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-adapter-status-'));
@@ -17,11 +18,13 @@ try {
     const runId = `run-${index}`, projectRoot = path.join(temporary, `project-${index}`), runDir = path.join(projectRoot, '.apex', 'runs', runId);
     fs.mkdirSync(runDir, { recursive: true });
     const artifacts = { projectInventory: 'inventory.json', existingBaseline: 'baseline.json', gate3: 'verification.json', evidenceProvenance: 'provenance.json' };
-    write(path.join(runDir, 'state.json'), { runId, gates: { gate3: { status: 'passed' } } });
+    const state = { runId, revision: 1, artifacts: { projectInventory: artifacts.projectInventory, existingBaseline: artifacts.existingBaseline, verificationBundle: artifacts.gate3, evidenceProvenance: artifacts.evidenceProvenance }, gates: { gate3: { status: 'passed' } } };
+    write(path.join(runDir, 'state.json'), state); initializeLedger(runDir, state, 'fixture');
     write(path.join(runDir, artifacts.projectInventory), { projectRoot, adapterRecommendation: { id: profile.id } });
     write(path.join(runDir, artifacts.existingBaseline), {});
     write(path.join(runDir, artifacts.gate3), index === 0 ? { gate3: 'passed' } : { gate3: 'pending', verificationStatus: 'passed' });
     write(path.join(runDir, artifacts.evidenceProvenance), { status: 'passed' });
+    for (const [name, reference] of Object.entries(artifacts)) recordArtifact(runDir, { artifactId: `fixture-${name}`, reference, sha256: hash(path.join(runDir, reference)) });
     return { id: runId, runDir, projectRoot, adapterId: profile.id, checks: profile.requiredChecks, artifacts, artifactHashes: Object.fromEntries(Object.entries(artifacts).map(([name, value]) => [name, hash(path.join(runDir, value))])) };
   });
   const input = path.join(temporary, 'evidence.json');
@@ -47,11 +50,20 @@ try {
   const linkedRun = verify(); assert.notEqual(linkedRun.status, 0); assert.match(linkedRun.stderr, /Run does not belong to its project/);
   fs.rmSync(originalRun); fs.renameSync(movedRun, originalRun);
   const first = projects[0], stateFile = path.join(first.runDir, 'state.json');
-  write(stateFile, { runId: first.id, gates: { gate3: { status: 'pending' } } });
+  const ledger = path.join(first.runDir, 'run-ledger.sqlite'), backupLedger = path.join(first.runDir, 'ledger-test-backup');
+  fs.renameSync(ledger, backupLedger); const missingLedger = verify(); assert.notEqual(missingLedger.status, 0); assert.match(missingLedger.stderr, /Run ledger is missing/); fs.renameSync(backupLedger, ledger);
+  archiveArtifacts(first.runDir, [first.artifacts.existingBaseline], 'fixture-stale');
+  const staleArtifact = verify(); assert.notEqual(staleArtifact.status, 0); assert.match(staleArtifact.stderr, /artifact is not currently verified/);
+  recordArtifact(first.runDir, { artifactId: 'fixture-restored-baseline', reference: first.artifacts.existingBaseline, sha256: first.artifactHashes.existingBaseline });
+  const originalState = JSON.parse(fs.readFileSync(stateFile)), modifiedState = { ...originalState, gates: { gate3: { status: 'pending' } } };
+  write(stateFile, modifiedState); const changedProjection = verify(); assert.notEqual(changedProjection.status, 0); assert.match(changedProjection.stderr, /state projection differs/);
+  write(stateFile, originalState); commitRunState(first.runDir, modifiedState, { reason: 'fixture-pending-gate' });
   assert.notEqual(verify().status, 0, 'a pending actual Gate 3 must never be accepted');
-  write(stateFile, { runId: first.id, gates: { gate3: { status: 'passed' } } });
+  commitRunState(first.runDir, originalState, { reason: 'fixture-passed-gate' });
   const bundle = path.join(first.runDir, first.artifacts.gate3);
   write(bundle, { gate3: 'passed', verificationStatus: 'failed' }); first.artifactHashes.gate3 = hash(bundle);
+  const unregistered = verify(); assert.notEqual(unregistered.status, 0); assert.match(unregistered.stderr, /artifact is not currently verified/);
+  archiveArtifacts(first.runDir, [first.artifacts.gate3], 'fixture-replacement'); recordArtifact(first.runDir, { artifactId: 'fixture-replacement-gate3', reference: first.artifacts.gate3, sha256: first.artifactHashes.gate3 });
   assert.notEqual(verify().status, 0, 'a failed current verification must not fall back to a passed legacy field');
   console.log(JSON.stringify({ status: 'passed', scope: 'distinct project identities, Run and artifact ownership, legacy and current bundle status, actual Gate 3 and failure precedence' }));
 } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
