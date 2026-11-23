@@ -18,6 +18,9 @@ function playwrightEnv(runDir) { const daemonDirectory = path.join(runDir, 'cach
 function call(session, cwd, args, runDir) { const cached = cachedCli(); const result = spawnSync(cached ? process.execPath : pwcli, cached ? [cached, '--session', session, ...args] : ['--session', session, ...args], { cwd, env: playwrightEnv(runDir), encoding: 'utf8', timeout: PLAYWRIGHT_TIMEOUT_MS }); return { command: args, runner: cached ? 'cached-playwright-cli' : 'bridge-playwright-cli', status: result.status === 0 ? 'passed' : 'failed', output: `${result.stdout || ''}${result.stderr || ''}`.slice(-4000) }; }
 function health(cwd, runDir) { const cached = cachedCli(); const result = spawnSync(cached ? process.execPath : pwcli, cached ? [cached, '--help'] : ['--help'], { cwd, env: playwrightEnv(runDir), encoding: 'utf8', timeout: Math.min(15000, PLAYWRIGHT_TIMEOUT_MS) }); return { command: ['health'], runner: cached ? 'cached-playwright-cli' : 'bridge-playwright-cli', status: result.status === 0 ? 'passed' : 'failed', output: `${result.stdout || ''}${result.stderr || ''}`.slice(-4000) }; }
 function authenticationProbe(session, cwd, runDir) { return call(session, cwd, ['run-code', 'async (page) => JSON.stringify({ top: page.url(), frames: page.frames().map(frame => frame.url()) })'], runDir); }
+function probeValue(output) { try { const match = output.match(/### Result\s*\n([\s\S]*?)\n### /); if (!match) return null; const value = JSON.parse(match[1]); return typeof value === 'string' ? JSON.parse(value) : value; } catch { return null; } }
+function stitchUrl(value) { try { const url = new URL(value); return url.origin === 'https://stitch.withgoogle.com' && !url.username && !url.password; } catch { return false; } }
+function verifyPageOrigin(session, runDir) { const probe = authenticationProbe(session, runDir, runDir); const value = probeValue(probe.output); return { command: ['validate-origin'], status: probe.status === 'passed' && stitchUrl(value?.top) ? 'passed' : 'failed', output: 'Stitch page origin checked before external action' }; }
 const [command, runArg, planArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'import' || !runArg || !planArg) die('usage: import <run-dir> <stitch-ui-import-plan.json>');
@@ -25,6 +28,7 @@ if (!fs.existsSync(pwcli) && !cachedCli()) die(`Playwright bridge is unavailable
 const runDir = path.resolve(runArg); const plan = read(path.resolve(planArg));
 try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
 for (const key of ['url', 'imagePath', 'prompt', 'uploadTriggerRef', 'promptRef', 'submitRef']) if (!plan[key]) die(`${key} is required`);
+if (!stitchUrl(plan.url)) die('Stitch UI URL must use the official https://stitch.withgoogle.com origin');
 const image = path.resolve(plan.imagePath); if (!fs.existsSync(image)) die(`image is missing: ${image}`);
 const session = plan.session || `apex-stitch-${crypto.createHash('sha1').update(`${runDir}:${plan.url}`).digest('hex').slice(0,12)}`;
 const imageHash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(image)).digest('hex')}`;
@@ -73,9 +77,12 @@ if (resumingSubmission) {
 else {
   logs.push(call(session, runDir, ['open', plan.url, '--headed'], runDir)); logs.push(call(session, runDir, ['snapshot'], runDir));
   const auth = logs.at(-1).status === 'passed' ? authenticationProbe(session, runDir, runDir) : { status: 'failed', output: 'snapshot did not complete' }; logs.push(auth);
-  const authenticationRequired = /accounts\.google\.com/.test(auth.output);
+  const observed = probeValue(auth.output);
+  const authenticationRequired = Array.isArray(observed?.frames) && [observed.top, ...observed.frames].some(value => { try { return new URL(value).hostname === 'accounts.google.com'; } catch { return false; } });
+  if (!authenticationRequired && (!observed || !stitchUrl(observed.top))) { logs.push({ command: ['validate-origin'], status: 'failed', output: 'Stitch page origin is missing or not official; no upload attempted' }); }
   if (runCancellationRequested(runDir)) die('run was cancelled before Stitch upload');
   if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['click', plan.uploadTriggerRef], runDir));
+  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
   let uploadIntentId = null, uploadOutcome = null;
   if (!authenticationRequired && logs.at(-1).status === 'passed') {
     if (runCancellationRequested(runDir)) die('run was cancelled before Stitch upload');
@@ -86,7 +93,9 @@ else {
     uploadOutcome = upload.status === 'passed' ? 'uploaded' : 'submission-uncertain';
     recordExternalSubmissionObservation(runDir, { intentId: uploadIntentId, status: uploadOutcome, at: new Date().toISOString() });
   }
+  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
   if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['fill', plan.promptRef, promptInfo.prompt], runDir));
+  if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
   if (authenticationRequired || logs.at(-1).status !== 'passed') {
     const status = authenticationRequired ? 'authentication-required' : 'failed';
     const stage = uploadIntentId ? (uploadOutcome === 'uploaded' ? 'uploaded-unsubmitted' : 'upload-uncertain') : 'not-submitted';

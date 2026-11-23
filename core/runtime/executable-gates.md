@@ -75,7 +75,9 @@ Codex 调用必须先经过 `apex-router.mjs`。Router 将审批写入项目 run
     verify -> browser-capture.mjs capture <run-dir> <base-url> <browser-spec.json>
     verify -> strict-replica.mjs runtime <run-dir> <capture-id> <frozen-stitch-screen-id>
 
-strict-replica 自动调用 structure-contract 与 visual-parity，生成合同、parity 输入和证据。Freeze 仅为暂存；Stitch 阶段的 strict-replica 通过后，先由用户确认 Stitch，再由 `sync_stitch` 执行 Seal。禁止手工拼装 candidateContract 或通过证据。
+strict-replica 自动调用 structure-contract 与 visual-parity，生成合同、parity 输入和证据。新 Run 的 Freeze 仅为暂存；Stitch 结果与已确认 Demo 一致时，验证通过后由 `sync_stitch` 执行机器 Seal，不增加独立确认。若结果引入确认范围外的设计变化，展示差异并由用户决定。旧 Run 保持其原确认模型。禁止手工拼装 candidateContract 或通过证据。
+
+浏览器导入只接受 `https://stitch.withgoogle.com` 官方来源，并在上传和填写提示词前后重新核查页面来源；登录或跳转状态无法确认时停止外部操作。外部请求状态不明时保留回执，不自动重复提交。
 
 ## Motion Gate
 

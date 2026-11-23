@@ -11,7 +11,7 @@ const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-stitch-submit-'));
 const runId = 'submit', session = 'submit-session', dir = path.join(project, '.apex/runs', runId);
 const cache = path.join(project, 'npm-cache'), log = path.join(project, 'calls.ndjson');
 const cli = path.join(cache, '_npx/test/node_modules/@playwright/cli/playwright-cli.js'); fs.mkdirSync(path.dirname(cli), { recursive: true });
-fs.writeFileSync(cli, `const fs=require('fs');const args=process.argv.slice(2);fs.appendFileSync(process.env.TEST_STITCH_CALLS,JSON.stringify(args)+'\\n');if(process.env.TEST_FAIL_HEALTH==='1'&&args.includes('--help'))process.exit(1);if(process.env.TEST_REQUIRE_AUTH==='1'&&args.includes('run-code')){console.log('https://accounts.google.com/signin');process.exit(0)}if(args.includes('click')&&args.includes('submit'))process.exit(1);console.log('fixture ok');`);
+fs.writeFileSync(cli, `const fs=require('fs');const args=process.argv.slice(2);fs.appendFileSync(process.env.TEST_STITCH_CALLS,JSON.stringify(args)+'\\n');if(process.env.TEST_FAIL_HEALTH==='1'&&args.includes('--help'))process.exit(1);if(args.includes('run-code')){const top=process.env.TEST_REQUIRE_AUTH==='1'?'https://accounts.google.com/signin':(process.env.TEST_STITCH_REDIRECT==='1'||(process.env.TEST_STITCH_REDIRECT_AFTER_TRIGGER==='1'&&fs.readFileSync(process.env.TEST_STITCH_CALLS,'utf8').split('\\n').filter(Boolean).map(JSON.parse).some(x=>x.includes('click')&&x.includes('upload'))))?'https://example.org/':'https://stitch.withgoogle.com/';console.log('### Result\\n'+JSON.stringify(JSON.stringify({top,frames:[]}))+'\\n### End');process.exit(0)}if(args.includes('click')&&args.includes('submit'))process.exit(1);console.log('fixture ok');`);
 const env = { ...process.env, npm_config_cache: cache, TEST_STITCH_CALLS: log };
 const invoke = (script, args) => spawnSync(process.execPath, [path.join(core, 'scripts', script), ...args], { encoding: 'utf8', env, timeout: 30000 });
 const ok = (result, label) => { assert.equal(result.status, 0, `${label}: ${result.stderr || result.stdout}`); return JSON.parse(result.stdout); };
@@ -32,7 +32,7 @@ try {
   const presentAuth = ok(invoke('apex-router.mjs', ['authorize', project, runId, session, 'present_runtime_demo']), 'authorize presentation');
   ok(invoke('apex-router.mjs', ['present-runtime-demo', project, runId, session, presentAuth.authorizationRef, 'fixture-demo']), 'present fixture');
   const presentedState = JSON.parse(fs.readFileSync(stateFile)); presentedState.deliveryRoute = 'stitch'; fs.writeFileSync(stateFile, JSON.stringify(presentedState));
-  const image = write('fixture.png', 'image fixture'), plan = write('stitch-input.json', { url: 'https://stitch.example/', imagePath: image, prompt: 'fixture', uploadTriggerRef: 'upload', promptRef: 'prompt', submitRef: 'submit', projectId: 'fixture' });
+  const image = write('fixture.png', 'image fixture'), plan = write('stitch-input.json', { url: 'https://stitch.withgoogle.com/', imagePath: image, prompt: 'fixture', uploadTriggerRef: 'upload', promptRef: 'prompt', submitRef: 'submit', projectId: 'fixture' });
   const action = () => { const auth = ok(invoke('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']), 'authorize'); return invoke('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'sync_stitch', 'stitch-ui-importer.mjs', 'import', dir, plan]); };
   const stitchSkillAction = args => { const auth = ok(invoke('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']), 'authorize Stitch skill'); return invoke('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'skills', dir, ...args]); };
   const skills = ok(stitchSkillAction(['list']), 'list optional Stitch skills'); assert.match(skills.boundary, /confirmed Demo/);
@@ -48,6 +48,12 @@ try {
   const authCalls = fs.readFileSync(log, 'utf8').trim().split('\n').slice(authLogStart).map(JSON.parse);
   assert.equal(authCalls.some(args => args.includes('upload') || args.includes('fill') || args.includes('click')), false, 'authentication redirect must prevent upload, fill, and submit');
   assert.equal(externalSubmissionIntents(dir).length, 0, 'health and authentication failure must not create a remote submission intent');
+  const initialPlan=fs.readFileSync(plan), unsafe=JSON.parse(initialPlan);unsafe.url='https://stitch.withgoogle.com.example.org/';fs.writeFileSync(plan,JSON.stringify(unsafe));
+  const beforeUnsafe=fs.readFileSync(log,'utf8');const unsafeResult=action();assert.notEqual(unsafeResult.status,0);assert.match(unsafeResult.stderr,/official https:\/\/stitch\.withgoogle\.com origin/);assert.equal(fs.readFileSync(log,'utf8'),beforeUnsafe);fs.writeFileSync(plan,initialPlan);
+  const redirectStart=fs.readFileSync(log,'utf8').trim().split('\n').length;env.TEST_STITCH_REDIRECT='1';const redirect=action();delete env.TEST_STITCH_REDIRECT;assert.notEqual(redirect.status,0);
+  const redirectCalls=fs.readFileSync(log,'utf8').trim().split('\n').slice(redirectStart).map(JSON.parse);assert.equal(redirectCalls.some(args=>args.includes('upload')||args.includes('fill')||args.includes('click')),false,'unexpected redirect must not receive a screenshot or prompt');assert.equal(externalSubmissionIntents(dir).length,0);
+  const lateRedirectStart=fs.readFileSync(log,'utf8').trim().split('\n').length;env.TEST_STITCH_REDIRECT_AFTER_TRIGGER='1';const lateRedirect=action();delete env.TEST_STITCH_REDIRECT_AFTER_TRIGGER;assert.notEqual(lateRedirect.status,0);
+  const lateCalls=fs.readFileSync(log,'utf8').trim().split('\n').slice(lateRedirectStart).map(JSON.parse);assert.ok(lateCalls.some(args=>args.includes('click')&&args.includes('upload')));assert.equal(lateCalls.some(args=>args[2]==='upload'||args.includes('fill')),false,'redirect after opening the file picker must block upload');assert.equal(externalSubmissionIntents(dir).length,0);
   const first = action(); assert.notEqual(first.status, 0);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'evidence/stitch-ui-import.json'))).stage, 'submission-uncertain');
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'stitch-job.json'))).status, 'submission-uncertain');
@@ -71,5 +77,5 @@ try {
   const receipt = JSON.parse(fs.readFileSync(path.join(dir, 'cancellation-receipt.json')));
   assert.equal(receipt.externalJobs.length, 1); assert.equal(receipt.externalJobs[0].intentId, pendingIntent[0].intentId); assert.equal(receipt.externalJobs[0].status, 'submission-uncertain');
   assert.equal(fs.existsSync(path.join(dir, 'stitch-job.json')), false); assert.equal(externalSubmissionIntents(dir).find(item => item.operation !== 'upload').intentId, pendingIntent[0].intentId);
-  console.log(JSON.stringify({ status: 'passed', checks: 24, scope: 'controlled-router-fake-browser-submit-timeout-and-cancellation' }));
+  console.log(JSON.stringify({ status: 'passed', scope: 'controlled-router-origin-guards-submit-timeout-and-cancellation' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

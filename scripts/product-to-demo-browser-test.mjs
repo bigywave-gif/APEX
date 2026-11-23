@@ -178,7 +178,7 @@ try {
   if(stitchTaste){const loaded=invoke('sync_stitch','stitch-sync.mjs',['skills',dir,'load',stitchTaste.name,stitchTaste.sha256]);assert.equal(loaded.skill.sha256,stitchTaste.sha256);assert.ok(loaded.skill.content.length);}
   assert.equal(crypto.createHash('sha256').update(fs.readFileSync(baselineFile)).digest('hex'),baselineBefore,'optional skill loading must preserve the confirmed Demo baseline');
   const wrongImage=put('unapproved-stitch.png','not an approved Demo screenshot');
-  const stitchInput=put('stitch-unapproved-input.json',{url:'https://stitch.example/',imagePath:wrongImage,prompt:'fixture',uploadTriggerRef:'upload',promptRef:'prompt',submitRef:'submit'});
+  const stitchInput=put('stitch-unapproved-input.json',{url:'https://stitch.withgoogle.com/',imagePath:wrongImage,prompt:'fixture',uploadTriggerRef:'upload',promptRef:'prompt',submitRef:'submit'});
   const stitchAuth=route(['authorize',project,id,session,'sync_stitch']);
   const deniedStitch=run(action,['run',project,id,session,stitchAuth.authorizationRef,'sync_stitch','stitch-ui-importer.mjs','import',dir,stitchInput]);
   assert.notEqual(deniedStitch.status,0);
@@ -187,9 +187,9 @@ try {
   const mockCache=path.join(project,'mock-cache'),mockLog=path.join(project,'mock-stitch-calls.jsonl');
   const mockCli=path.join(mockCache,'_npx/test/node_modules/@playwright/cli/playwright-cli.js');
   fs.mkdirSync(path.dirname(mockCli),{recursive:true});
-  fs.writeFileSync(mockCli,"const fs=require('fs');const args=process.argv.slice(2);fs.appendFileSync(process.env.APEX_TEST_STITCH_LOG,JSON.stringify(args)+'\\n');if(args.includes('click')&&args.includes('submit'))process.exit(1);console.log('fixture ok');");
+  fs.writeFileSync(mockCli,"const fs=require('fs');const args=process.argv.slice(2);fs.appendFileSync(process.env.APEX_TEST_STITCH_LOG,JSON.stringify(args)+'\\n');if(args.includes('run-code')){console.log('### Result\\n'+JSON.stringify(JSON.stringify({top:'https://stitch.withgoogle.com/',frames:[]}))+'\\n### End');process.exit(0)}if(args.includes('click')&&args.includes('submit'))process.exit(1);console.log('fixture ok');");
   const skillUse=stitchTaste?{name:stitchTaste.name,sha256:stitchTaste.sha256,appliedRules:['Preserve the approved task hierarchy'],excludedRules:[{rule:'Unapproved visual changes',reason:'The confirmed Demo is authoritative'}],rationale:'Translate the confirmed design without changing it'}:null;
-  const approvedInput=put('stitch-approved-input.json',{url:'https://stitch.example/',imagePath:path.join(dir,baseline.referenceImage.path),prompt:'fixture',...(skillUse?{skillUse}:{}),uploadTriggerRef:'upload',promptRef:'prompt',submitRef:'submit'});
+  const approvedInput=put('stitch-approved-input.json',{url:'https://stitch.withgoogle.com/',imagePath:path.join(dir,baseline.referenceImage.path),prompt:'fixture',...(skillUse?{skillUse}:{}),uploadTriggerRef:'upload',promptRef:'prompt',submitRef:'submit'});
   const approvedAuth=route(['authorize',project,id,session,'sync_stitch']);
   const approvedResult=spawnSync(process.execPath,[action,'run',project,id,session,approvedAuth.authorizationRef,'sync_stitch','stitch-ui-importer.mjs','import',dir,approvedInput],{encoding:'utf8',timeout:30000,env:{...process.env,npm_config_cache:mockCache,APEX_TEST_STITCH_LOG:mockLog}});
   assert.notEqual(approvedResult.status,0,'simulated uncertain submission must stop for recovery');
