@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { validateApiSample } from './api-sample-schema.mjs';
-import { validateApiCaseCoverage } from './api-case-coverage.mjs';
+import { validateApiCaseCoverage, apiEndpointSchemaReferences, apiResponseSchemaReference } from './api-case-coverage.mjs';
 import { apiInput, apiContractEvidenceCurrent } from './api-contract-evidence.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,17 +29,18 @@ const samples = read(path.resolve(runDir, samplesRef));
 if (!Array.isArray(samples)) die('samples.json must be an array');
 try { validateApiCaseCoverage(contract.endpoints, samples); } catch (error) { die(error.message); }
 let inputBindings;
-try { inputBindings = [...new Set([contractRef, samplesRef, ...contract.endpoints.flatMap(endpoint => [endpoint.requestSchema, endpoint.responseSchema])])].map(ref => apiInput(runDir, ref)); } catch (error) { die(error.message); }
+try { inputBindings = [...new Set([contractRef, samplesRef, ...contract.endpoints.flatMap(apiEndpointSchemaReferences)])].map(ref => apiInput(runDir, ref)); } catch (error) { die(error.message); }
 const evidence = [];
 for (const endpoint of contract.endpoints) {
   const matched = samples.filter(item => item.method === endpoint.method && item.path === endpoint.path);
-  const requestSchema = schemaAt(runDir, endpoint.requestSchema), responseSchema = schemaAt(runDir, endpoint.responseSchema);
+  const requestSchema = schemaAt(runDir, endpoint.requestSchema);
   for (const sample of matched) {
     const errors = [];
     if ('request' in sample) errors.push(...validateApiSample(sample.request, requestSchema, 'request'));
     else errors.push('request missing');
-    if ('response' in sample) errors.push(...validateApiSample(sample.response, responseSchema, 'response'));
-    else errors.push('response missing');
+    let responseRef; try { responseRef = apiResponseSchemaReference(endpoint, sample.responseStatus); } catch (error) { errors.push(error.message); }
+    if (!('response' in sample)) errors.push('response missing');
+    else if (responseRef) errors.push(...validateApiSample(sample.response, schemaAt(runDir, responseRef), 'response'));
     evidence.push({ id: endpoint.method + ' ' + endpoint.path + (sample.caseId ? ' [' + sample.caseId + ']' : ''), status: errors.length ? 'failed' : 'passed', errors });
   }
 }

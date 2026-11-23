@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { apiEndpointSchemaReferences } from './api-case-coverage.mjs';
 
 export function apiInput(runDir, reference) {
   if (typeof reference !== 'string' || !reference || path.isAbsolute(reference)) throw new Error('API evidence input must be Run-local');
@@ -15,7 +16,7 @@ export function apiContractEvidenceCurrent(runDir, state, evidence) {
     if (evidence.contractRef !== contractRef || !evidence.samplesRef || !evidence.inputBindings.some(item => item.reference === contractRef) || !evidence.inputBindings.some(item => item.reference === evidence.samplesRef)) return false;
     const contract = JSON.parse(fs.readFileSync(path.join(runDir, contractRef), 'utf8'));
     if (!Array.isArray(contract.endpoints) || !contract.endpoints.length) return false;
-    const references = new Set([contractRef, evidence.samplesRef, ...contract.endpoints.flatMap(endpoint => [endpoint.requestSchema, endpoint.responseSchema])]);
+    const references = new Set([contractRef, evidence.samplesRef, ...contract.endpoints.flatMap(apiEndpointSchemaReferences)]);
     if (evidence.inputBindings.length !== references.size) return false;
     return [...references].every(ref => { const binding = evidence.inputBindings.find(item => item.reference === ref); return binding && apiInput(runDir, ref).sha256 === binding.sha256; });
   } catch { return false; }

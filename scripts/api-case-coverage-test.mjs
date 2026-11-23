@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { validateApiCaseCoverage } from './api-case-coverage.mjs';
+import { validateApiCaseCoverage, apiEndpointSchemaReferences, apiResponseSchemaReference } from './api-case-coverage.mjs';
 const endpoint = { method: 'GET', path: '/items' }, one = { ...endpoint }, first = { ...endpoint, caseId: 'first' }, second = { ...endpoint, caseId: 'second' };
 assert.equal(validateApiCaseCoverage([endpoint], [one]).size, 1);
 assert.equal(validateApiCaseCoverage([endpoint], [first, second]).get(JSON.stringify(['GET', '/items'])).length, 2);
@@ -8,4 +8,11 @@ assert.throws(() => validateApiCaseCoverage([endpoint], [first, first]), /IDs mu
 assert.throws(() => validateApiCaseCoverage([endpoint, endpoint], [first]), /duplicate API contract endpoint/);
 assert.throws(() => validateApiCaseCoverage([endpoint], [{ method: 'GET', path: '/other' }]), /does not match/);
 assert.throws(() => validateApiCaseCoverage([endpoint, { method: 'POST', path: '/items' }], [first]), /has no case/);
+const statusContract = { requestSchema: 'request.json', responseSchema: 'default.json', responseSchemas: { '200': 'success.json', '404': 'missing.json' } };
+assert.deepEqual(apiEndpointSchemaReferences(statusContract), ['request.json', 'default.json', 'success.json', 'missing.json']);
+assert.equal(apiResponseSchemaReference(statusContract, 200), 'success.json'); assert.equal(apiResponseSchemaReference(statusContract, 404), 'missing.json');
+assert.throws(() => apiResponseSchemaReference(statusContract, 500), /no declared response schema/);
+assert.throws(() => apiResponseSchemaReference(statusContract), /no declared response schema/);
+assert.throws(() => apiEndpointSchemaReferences({ ...statusContract, responseSchemas: { default: 'invalid.json' } }), /explicit HTTP status/);
+assert.equal(apiResponseSchemaReference({ requestSchema: 'request.json', responseSchema: 'default.json' }), 'default.json');
 console.log(JSON.stringify({ status: 'passed', scope: 'multiple distinct API cases and endpoint coverage' }));

@@ -8,9 +8,9 @@ const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-api-outside-'));
 fs.writeFileSync(path.join(outside, 'schema.json'), '{}');
 try {
   const put = (ref, value) => fs.writeFileSync(path.join(root, ref), JSON.stringify(value));
-  const contract = { endpoints: [{ method: 'GET', path: '/fixture', requestSchema: 'request.json', responseSchema: 'response.json' }] };
-  put('contract.json', contract); put('request.json', { type: 'object' }); put('response.json', { type: 'object' }); put('samples.json', []);
-  const state = { artifacts: { apiContract: 'contract.json' } }, refs = ['contract.json', 'request.json', 'response.json', 'samples.json'];
+  const contract = { endpoints: [{ method: 'GET', path: '/fixture', requestSchema: 'request.json', responseSchema: 'response.json', responseSchemas: { '404': 'not-found.json' } }] };
+  put('contract.json', contract); put('request.json', { type: 'object' }); put('response.json', { type: 'object' }); put('not-found.json', { type: 'object' }); put('samples.json', []);
+  const state = { artifacts: { apiContract: 'contract.json' } }, refs = ['contract.json', 'request.json', 'response.json', 'not-found.json', 'samples.json'];
   const evidence = { scope: 'supplied-samples-only', contractRef: 'contract.json', samplesRef: 'samples.json', inputBindings: refs.map(ref => apiInput(root, ref)) };
   assert.equal(apiContractEvidenceCurrent(root, state, evidence), true);
   assert.match(apiContractEvidenceAssessment(root, state, evidence).reason, /do not establish actual API execution/);

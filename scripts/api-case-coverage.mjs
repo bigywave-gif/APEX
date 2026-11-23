@@ -23,3 +23,18 @@ export function validateApiCaseCoverage(endpoints, cases) {
   }
   return groups;
 }
+
+export function apiEndpointSchemaReferences(endpoint) {
+  if (!endpoint || typeof endpoint.requestSchema !== 'string' || !endpoint.requestSchema || typeof endpoint.responseSchema !== 'string' || !endpoint.responseSchema) throw new Error('API endpoint requires request and response schemas');
+  const mapping = endpoint.responseSchemas;
+  if (mapping === undefined) return [endpoint.requestSchema, endpoint.responseSchema];
+  if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping) || !Object.keys(mapping).length || Object.entries(mapping).some(([status, ref]) => !/^[1-5]\d\d$/.test(status) || typeof ref !== 'string' || !ref)) throw new Error('API responseSchemas must map explicit HTTP status codes to schema paths');
+  return [endpoint.requestSchema, endpoint.responseSchema, ...Object.values(mapping)];
+}
+export function apiResponseSchemaReference(endpoint, status) {
+  apiEndpointSchemaReferences(endpoint);
+  if (status !== undefined && (!Number.isInteger(status) || status < 100 || status > 599)) throw new Error('API response status is invalid');
+  if (endpoint.responseSchemas === undefined) return endpoint.responseSchema;
+  if (status === undefined || !Object.hasOwn(endpoint.responseSchemas, String(status))) throw new Error('API response status has no declared response schema');
+  return endpoint.responseSchemas[String(status)];
+}
