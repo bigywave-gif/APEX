@@ -21,7 +21,7 @@ function authenticationProbe(session, cwd, runDir) { return call(session, cwd, [
 function probeValue(output) { try { const match = output.match(/### Result\s*\n([\s\S]*?)\n### /); if (!match) return null; const value = JSON.parse(match[1]); return typeof value === 'string' ? JSON.parse(value) : value; } catch { return null; } }
 function stitchUrl(value) { try { const url = new URL(value); return url.origin === 'https://stitch.withgoogle.com' && !url.username && !url.password; } catch { return false; } }
 function authenticationRequired(value) { return Array.isArray(value?.frames) && [value.top, ...value.frames].some(item => { try { return new URL(item).hostname === 'accounts.google.com'; } catch { return false; } }); }
-function verifyPageOrigin(session, runDir) { const probe = authenticationProbe(session, runDir, runDir); const value = probeValue(probe.output); return { command: ['validate-origin'], status: probe.status === 'passed' && stitchUrl(value?.top) && !authenticationRequired(value) ? 'passed' : 'failed', output: 'Stitch page origin checked before external action' }; }
+function verifyPageOrigin(session, runDir) { const probe = authenticationProbe(session, runDir, runDir); const value = probeValue(probe.output); return { command: ['validate-origin'], status: probe.status === 'passed' && Array.isArray(value?.frames) && stitchUrl(value?.top) && !authenticationRequired(value) ? 'passed' : 'failed', output: 'Stitch page origin checked before external action' }; }
 const [command, runArg, planArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'import' || !runArg || !planArg) die('usage: import <run-dir> <stitch-ui-import-plan.json>');
@@ -80,7 +80,7 @@ else {
   const auth = logs.at(-1).status === 'passed' ? authenticationProbe(session, runDir, runDir) : { status: 'failed', output: 'snapshot did not complete' }; logs.push(auth);
   const observed = probeValue(auth.output);
   const needsAuthentication = authenticationRequired(observed);
-  if (!needsAuthentication && (!observed || !stitchUrl(observed.top))) { logs.push({ command: ['validate-origin'], status: 'failed', output: 'Stitch page origin is missing or not official; no upload attempted' }); }
+  if (!needsAuthentication && (!observed || !Array.isArray(observed.frames) || !stitchUrl(observed.top))) { logs.push({ command: ['validate-origin'], status: 'failed', output: 'Stitch page origin is missing or not official; no upload attempted' }); }
   if (runCancellationRequested(runDir)) die('run was cancelled before Stitch upload');
   if (!needsAuthentication && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['click', plan.uploadTriggerRef], runDir));
   if (!needsAuthentication && logs.at(-1).status === 'passed') logs.push(verifyPageOrigin(session, runDir));
