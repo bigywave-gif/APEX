@@ -35,7 +35,7 @@ export async function observeHttpCases(origin, cases, { journal = null, writeCon
       if (JSON.stringify(item).includes(bearer)) throw new Error('API case must not contain authentication secret');
     }
     if (item.method !== 'GET') {
-      if (!journal || !writeContext || bearer || typeof item.executionId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(item.executionId)) throw new Error('write observation requires a journal and stable executionId; authenticated writes are not yet supported');
+      if (!journal || !writeContext || typeof item.executionId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(item.executionId)) throw new Error('write observation requires a journal and stable executionId');
       if (writeIds.has(item.executionId)) throw new Error('write executionId must be unique within the capture');
       writeIds.add(item.executionId);
     }
@@ -63,7 +63,7 @@ export async function observeHttpCases(origin, cases, { journal = null, writeCon
     if (containsSecret(responseBody)) throw new Error('API response contains the authentication secret');
     return { method: item.method, path: item.path, request: item.request, response: responseBody };
     };
-    const sample = item.method === 'GET' ? await dispatch() : await journal.execute(item.executionId, { origin, writeContext, method: item.method, path: item.path, route: item.route, request: item.request, expectedStatus: item.expectedStatus }, dispatch);
+    const sample = item.method === 'GET' ? await dispatch() : await journal.execute(item.executionId, { origin, writeContext, credential: bearer ? journal.credentialFingerprint(bearer) : null, method: item.method, path: item.path, route: item.route, request: item.request, expectedStatus: item.expectedStatus }, dispatch);
     samples.push(sample);
   }
   return samples;
