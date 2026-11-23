@@ -42,6 +42,8 @@ try {
   assert.equal(uploadEvidence.stage, fillFailure ? 'uploaded-unsubmitted' : 'upload-uncertain');
   assert.equal(uploadEvidence.uploadIntentId, uploads[0].intentId);
   assert.match(uploadEvidence.note, /do not upload again/);
+  const afterFailure = ok(invoke('apex-router.mjs', ['status', project, runId, session]), 'inspect upload failure');
+  assert.equal(afterFailure.executionDirective?.currentStep?.id, 'inspect-pending-stitch-upload');
   const beforeRetry = fs.readFileSync(log, 'utf8');
   assert.equal(beforeRetry.split('\n').filter(Boolean).map(JSON.parse).some(args => args.includes('submit')), false);
   const changedPlan = JSON.parse(fs.readFileSync(plan)); changedPlan.prompt = 'changed fixture'; fs.writeFileSync(plan, JSON.stringify(changedPlan));
@@ -54,5 +56,5 @@ try {
     const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { encoding: 'utf8', env: { ...process.env, TEST_STITCH_UPLOAD_SCENARIO: 'fill-failure' }, timeout: 120000 });
     assert.equal(child.status, 0, child.stderr || child.stdout);
   }
-  console.log(JSON.stringify({ status: 'passed', checks: fillFailure ? 12 : 13, scope: fillFailure ? 'fake-browser-upload-success-then-fill-failure' : 'fake-browser-upload-failure-and-fill-failure' }));
+  console.log(JSON.stringify({ status: 'passed', checks: fillFailure ? 13 : 14, scope: fillFailure ? 'fake-browser-upload-success-then-fill-failure' : 'fake-browser-upload-failure-and-fill-failure' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }
