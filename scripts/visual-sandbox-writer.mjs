@@ -4,6 +4,7 @@ import { canonicalApexRoot } from './apex-paths.mjs';
 import crypto from 'node:crypto';
 import { readChatPreview } from './chat-demo.mjs';
 import { validateInteractionContract } from './interactive-demo.mjs';
+import { assertDemoDesignHandoff } from './demo-design-handoff.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,7 @@ const input = read(inputFile);
 if (input.schemaVersion !== '3.0' || !Array.isArray(input.files) || !input.files.length || !input.entrypoint) die('Demo source manifest requires schemaVersion 3.0, entrypoint, and files');
 const stateFile = path.join(requestedRunDir, 'state.json');
 const state = read(stateFile);
+try { assertDemoDesignHandoff(runDir, state, input.designHandoff); } catch (error) { die(error.message); }
 let existingPageSkeleton = null;
 if (state.track === 'existing') {
   const planFile = state.artifacts?.visualExecutionPlan && inside(requestedRunDir, state.artifacts.visualExecutionPlan);
@@ -89,7 +91,7 @@ for (const item of input.files) {
 }
 const entrypoint = inside(sandboxRoot, input.entrypoint);
 if (!entrypoint || !seen.has(entrypoint)) die('Demo entrypoint must reference one of the materialized sandbox files');
-const manifest = { schemaVersion: '3.0', kind: 'project-local-runtime-demo-source', projectRoot, runId: process.env.APEX_ROUTER_RUN_ID, runtimeRoot: 'visual-sandbox', entrypoint: path.relative(runDir, entrypoint), files: outputs, interactionContract: input.interactionContract, ...(input.chatPreview ? { chatPreview: input.chatPreview } : {}), sourceManifest: path.relative(runDir, inputFile), existingPageSkeleton, status: 'materialized' };
+const manifest = { schemaVersion: '3.0', kind: 'project-local-runtime-demo-source', projectRoot, runId: process.env.APEX_ROUTER_RUN_ID, runtimeRoot: 'visual-sandbox', entrypoint: path.relative(runDir, entrypoint), files: outputs, interactionContract: input.interactionContract, ...(input.designHandoff ? { designHandoff: input.designHandoff } : {}), ...(input.chatPreview ? { chatPreview: input.chatPreview } : {}), sourceManifest: path.relative(runDir, inputFile), existingPageSkeleton, status: 'materialized' };
 try { readChatPreview(runDir, manifest); } catch (error) { die(error.message); }
 const output = path.join(runDir, 'visual-sandbox-files.json'); write(output, manifest);
 state.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);

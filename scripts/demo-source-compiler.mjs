@@ -7,6 +7,7 @@ import { requiredFormalTasks } from './formal-interaction-evidence.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalApexRoot } from './apex-paths.mjs';
+import { demoDesignHandoff } from './demo-design-handoff.mjs';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,7 +79,8 @@ if (state.track === 'existing') {
   };
   if (input.existingPageSkeleton && JSON.stringify(input.existingPageSkeleton) !== JSON.stringify(existingPageSkeleton)) die('Demo source input may not override the Existing visual-plan page-skeleton mapping');
 }
-const manifest = { schemaVersion: '3.0', entrypoint: input.entrypoint, files: input.files, interactionContract: input.interactionContract, sourceBindings: input.sourceBindings, ...(input.chatPreview ? { chatPreview: input.chatPreview } : {}), ...(existingPageSkeleton ? { existingPageSkeleton } : {}) };
+let designHandoff; try { designHandoff = demoDesignHandoff(runDir, state); } catch (error) { die(error.message); }
+const manifest = { schemaVersion: '3.0', ...(designHandoff ? { designHandoff } : {}), entrypoint: input.entrypoint, files: input.files, interactionContract: input.interactionContract, sourceBindings: input.sourceBindings, ...(input.chatPreview ? { chatPreview: input.chatPreview } : {}), ...(existingPageSkeleton ? { existingPageSkeleton } : {}) };
 const output = path.join(runDir, 'demo-source-manifest.json'); write(output, manifest);
 state.artifacts.demoSourceManifest = 'demo-source-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
 console.log(JSON.stringify({ demoSourceManifest: output, sourceBindingCount: bindings.size }));

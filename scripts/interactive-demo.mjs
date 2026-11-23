@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { assertDemoDesignHandoff } from './demo-design-handoff.mjs';
 
 export const demoHash = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 const objectHash = value => demoHash(JSON.stringify(value));
@@ -74,6 +75,9 @@ function localFile(runDir, relative) {
 export function interactionSource(runDir) {
   const manifestFile = path.join(runDir, 'visual-sandbox-files.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  const stateFile = path.join(runDir, 'state.json');
+  const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : {};
+  assertDemoDesignHandoff(runDir, state, manifest.designHandoff);
   const contract = validateInteractionContract(manifest.interactionContract);
   assert(Array.isArray(manifest.files) && manifest.files.length > 0, 'materialized source files are required');
   for (const item of manifest.files) {

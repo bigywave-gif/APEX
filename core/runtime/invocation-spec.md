@@ -121,7 +121,7 @@ Gate 3 前用 `verification-planner.mjs generate <run-dir>` 将 Project Inventor
 
 登记回执绑定项目、Run、会话、授权、租约、实施映射、page delta 与正式文件哈希。已登记文件变化会停止验证并要求重新登记；实质变化使旧浏览器捕获和下游验证结论失效，重采真实证据，但不撤销未变化的用户 Demo 确认。登记回执持久化后若状态提交中断，可用相同有效授权恢复同一回执；不匹配的内容必须使用新授权。
 
-两次确认模型中新编译的视觉方案须在 `selectionAnalysis.skillRuleDecisions` 中逐条关联设计师实际采用的 taste-skill 和按需技能规则，字段为 `skill`、`rule`、`decision`、`rationale`、`sourceSelectionIds`。规则必须来自当前设计师回执，来源 ID 必须属于当前方案；这些映射随视觉来源交接。机器只检查关联完整性，规则适用性和视觉品质仍由设计师与用户判断。已确认的历史方案不因缺少该新增字段而自动失效。
+两次确认模型中新编译的视觉方案须在 `selectionAnalysis.skillRuleDecisions` 中逐条关联设计师实际采用的 taste-skill 和按需技能规则，字段为 `skill`、`rule`、`decision`、`rationale`、`sourceSelectionIds`。规则必须来自当前设计师回执，来源 ID 必须属于当前方案；这些映射及已确认视觉方案哈希由 Demo 来源编译器写入 Demo 清单，并在物化和浏览器证据读取时复核；同时随视觉来源交接。机器只检查关联完整性，规则适用性和视觉品质仍由设计师与用户判断。已确认的历史方案不因缺少该新增字段而自动失效。
 
 ## 响应式布局规范
 

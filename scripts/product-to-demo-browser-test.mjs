@@ -108,6 +108,7 @@ try {
  const demoInput=put('demo-source-input.json',sourceInput);
  invoke('generate_visual','demo-source-compiler.mjs',['compile',dir,demoInput]);
  invoke('generate_visual','visual-sandbox-writer.mjs',['materialize',dir,path.join(dir,'demo-source-manifest.json')]);
+ assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'visual-sandbox-files.json'))).designHandoff.skillRuleDecisions, plan.selectionAnalysis.skillRuleDecisions, 'Demo must retain confirmed designer Skill decisions');
  invoke('generate_visual','visual-sandbox-runtime.mjs',['start',dir]);
  const runtime=JSON.parse(fs.readFileSync(path.join(dir,'visual-sandbox-runtime.json')));runtimePid=runtime.pid;
  const browserSpec=put('browser-spec.json',{requiredSourceSelectionIds:selections.map(x=>x.id),screens:[{id:'desktop',route:'/',width:1440,height:900},{id:'mobile',route:'/?view=reports',width:390,height:844}]});
