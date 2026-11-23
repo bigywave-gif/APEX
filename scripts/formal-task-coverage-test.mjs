@@ -30,7 +30,8 @@ try {
   fs.mkdirSync(path.join(dir, 'evidence')); fs.mkdirSync(path.join(dir, 'operations'));
   const write = (name, value) => fs.writeFileSync(path.join(dir, name), typeof value === 'string' ? value : JSON.stringify(value));
   const digest = name => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, name))).digest('hex')}`;
-  write('manifest.json', { interactionContract: { journeys: [{ task: '添加项目' }] } });
+  const demoJourney = { id: 'add', kind: 'task', task: '添加项目', route: '/' };
+  write('manifest.json', { interactionContract: { journeys: [demoJourney] } });
   write('plan.json', { functionalPlan: [{ task: '添加项目' }] });
   write('screen.png', 'screen'); write('dom.html', '<main/>');
   const trace = { ...observed, screenshot: { path: 'screen.png', sha256: digest('screen.png') }, dom: { path: 'dom.html', sha256: digest('dom.html') } };
@@ -51,6 +52,11 @@ try {
   assert.throws(() => formalReviewBindings(dir, state), /outside the run/);
   state.artifacts.runtimeStateMatrix = 'matrix.json';
   capture(); assert.equal(validateFormalInteractionEvidence(dir, state, interactions).status, 'passed');
+  write('manifest.json', { interactionContract: { journeys: [demoJourney, { ...demoJourney, id: 'add-alternate' }] } });
+  assert.throws(() => validateFormalInteractionEvidence(dir, state, interactions), /misses confirmed journeys: add-alternate/);
+  write('manifest.json', { interactionContract: { journeys: [{ ...demoJourney, route: '/other' }] } });
+  assert.throws(() => validateFormalInteractionEvidence(dir, state, interactions), /does not match a confirmed Demo journey/);
+  write('manifest.json', { interactionContract: { journeys: [demoJourney] } });
   const review = [{ task: '添加项目', interactionId: 'add', evidence: 'trace.json', expectedOutcome: '项目数量增加', observedOutcome: '数量从 0 变为 1', rationale: '操作对应添加项目，结果与预期一致', verdict: 'passed' }];
   assert.equal(validateProductTaskReview(dir, state, review).status, 'passed');
   assert.throws(() => validateProductTaskReview(dir, state, []), /cover every confirmed task/);

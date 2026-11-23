@@ -48,6 +48,14 @@ export function validateFormalInteractionEvidence(runDir, state, interactions) {
   const strategy = state.artifacts.experienceStrategy ? JSON.parse(fs.readFileSync(local(state.artifacts.experienceStrategy), 'utf8')) : {};
   const tasks = requiredFormalTasks(manifest, strategy, { requireProductPlan: state.roleChain?.confirmationModel === 'two-confirmations' });
   const allowedTasks = new Set((manifest.interactionContract?.journeys || []).map(item => item.task));
+  const expectedJourneys = state.roleChain?.confirmationModel === 'two-confirmations'
+    ? (manifest.interactionContract?.journeys || []).filter(item => item.kind !== 'reset' || (strategy.functionalPlan || []).some(task => task.task === item.task))
+    : [];
+  const expectedById = new Map();
+  for (const journey of expectedJourneys) {
+    if (!journey.id || !journey.task || typeof journey.route !== 'string' || expectedById.has(journey.id)) throw new Error('confirmed Demo journey identity or route is invalid');
+    expectedById.set(journey.id, journey);
+  }
   if (!tasks.size) throw new Error('confirmed Demo has no interaction tasks');
   const captureRef = 'evidence/runtime-browser-capture.json', captureFile = local(captureRef), capture = JSON.parse(fs.readFileSync(captureFile, 'utf8'));
   if (capture.status !== 'passed' || capture.formalInteractions?.status !== 'passed') throw new Error('formal browser interaction capture is missing or failed');
@@ -59,6 +67,8 @@ export function validateFormalInteractionEvidence(runDir, state, interactions) {
     if (!interaction.id || ids.has(interaction.id) || interaction.result !== 'passed') throw new Error('formal interaction IDs must be unique and passed');
     ids.add(interaction.id);
     const evidence = local(interaction.evidence), trace = JSON.parse(fs.readFileSync(evidence, 'utf8'));
+    const expected = expectedById.get(interaction.id);
+    if (expectedById.size && (!expected || trace.task !== expected.task || trace.route !== expected.route)) throw new Error(`formal interaction does not match a confirmed Demo journey: ${interaction.id}`);
     const matches = (capture.formalInteractions.journeys || []).filter(item => item.id === interaction.id && item.evidence === interaction.evidence && item.evidenceSha256 === hash(evidence));
     if (matches.length !== 1 || trace.id !== interaction.id || trace.status !== 'passed' || !Array.isArray(trace.steps) || !trace.steps.length || trace.steps.some(step => step.passed !== true || step.before === step.after || !hasFormalObservation(step)) || trace.task !== matches[0].task || !allowedTasks.has(trace.task)) throw new Error(`formal interaction is not an observed confirmed task: ${interaction.id}`);
     for (const ref of [trace.screenshot, trace.dom]) if (!ref?.sha256 || hash(local(ref.path)) !== ref.sha256) throw new Error(`formal interaction screenshot or DOM changed: ${interaction.id}`);
@@ -67,5 +77,7 @@ export function validateFormalInteractionEvidence(runDir, state, interactions) {
   }
   const missing = [...tasks].filter(task => !covered.has(task));
   if (missing.length) throw new Error(`formal interaction evidence misses confirmed tasks: ${missing.join(', ')}`);
+  const missingJourneys = [...expectedById.keys()].filter(id => !ids.has(id));
+  if (missingJourneys.length) throw new Error(`formal interaction evidence misses confirmed journeys: ${missingJourneys.join(', ')}`);
   return { status: 'passed', tasks: [...covered] };
 }
