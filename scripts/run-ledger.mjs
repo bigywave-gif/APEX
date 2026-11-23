@@ -802,6 +802,7 @@ export function readRunState(runDir) {
   const file = statePath(runDir);
   const disk = fs.existsSync(file) ? parseState(file) : null;
   if (!fs.existsSync(ledgerPath(runDir))) {
+    if (fs.existsSync(path.join(runDir, 'ledger-integrity-incident.json'))) throw new Error('run ledger is missing after a monitoring incident; restore and investigate the original ledger before recovery');
     if (!disk) throw new Error(`run state does not exist: ${file}`);
     initializeLedger(runDir, disk, 'legacy-state-import');
     return disk;

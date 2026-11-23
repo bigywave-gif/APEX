@@ -240,6 +240,23 @@ const execution = await runControlledSubprocess(process.execPath, [target, ...sc
   env: { ...process.env, APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: authorizationRef, APEX_ROUTER_ACTION: action, APEX_ROUTER_OPERATION_RECEIPT: path.relative(runDirectory, receiptFile) }
 });
 const finishedAt = new Date().toISOString();
+if (execution.error?.code === 'APEX_MONITOR_UNAVAILABLE') {
+  // Do not call readRunState here: its legacy migration can create a new
+  // ledger from the projection when the original ledger is unavailable.
+  // The local receipt remains recoverable, but neither cancellation nor any
+  // external side effect can be inferred from the missing ledger.
+  const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, outputFileHashes: {}, outputFileFingerprints: {}, status: 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut: false, exitCode: 1, stdout: execution.stdout || '', stderr: `APEX_MONITOR_UNAVAILABLE: ${execution.error.message}\nRun ledger integrity and external side effects remain unverified; inspect the original ledger before retrying.\n`, ledgerIntegrity: 'unverified', externalSideEffects: 'unverified' };
+  const temporary = `${receiptFile}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`);
+  fs.renameSync(temporary, receiptFile);
+  const incidentFile = path.join(runDirectory, 'ledger-integrity-incident.json');
+  const incidentTemp = `${incidentFile}.${process.pid}.tmp`;
+  fs.writeFileSync(incidentTemp, `${JSON.stringify({ schemaVersion: '1.0', kind: 'cancellation-monitor-unavailable', status: 'requires-ledger-investigation', authorizationRef, stateHash, observedAt: finishedAt, externalSideEffects: 'unverified' }, null, 2)}\n`);
+  fs.renameSync(incidentTemp, incidentFile);
+  try { updateOperationIndex(receiptFile, receipt); } catch (error) { process.stderr.write(`operation index unavailable: ${error.message}\n`); }
+  process.stdout.write(receipt.stdout); process.stderr.write(receipt.stderr);
+  process.exit(1);
+}
 if (recordLateCancelledOperation(runDirectory, { authorizationRef, action, script, startedAt, finishedAt, exitCode: execution.status, signal: execution.signal, interruptionRequested: execution.cancelled, timedOut: execution.error?.code === 'ETIMEDOUT' })) {
   fail('the operation finished after cancellation; its result is not accepted and external side effects require verification');
 }
