@@ -63,16 +63,24 @@ export function readRunMetrics(runDirectory) {
       } catch { unreadable.push(name); }
     }
     const durations = receipts.map(receipt => receipt.durationMs).filter(value => Number.isFinite(value) && value >= 0);
-    let contract = null;
+    let contract = null, contractIntegrity = 'missing';
     if (state.artifacts?.deliveryContract) {
-      const file = path.resolve(root, state.artifacts.deliveryContract);
-      if (file.startsWith(`${root}${path.sep}`) && fs.existsSync(file) && fs.realpathSync(file).startsWith(`${root}${path.sep}`)) contract = JSON.parse(fs.readFileSync(file, 'utf8'));
+      try {
+        const reference = state.artifacts.deliveryContract, file = path.resolve(root, reference);
+        if (!file.startsWith(`${root}${path.sep}`) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`)) throw new Error('contract outside run');
+        const bytes = fs.readFileSync(file);
+        const sha256 = `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+        const artifact = db.prepare("SELECT sha256 FROM artifacts WHERE reference = ? AND status = 'verified' ORDER BY rowid DESC LIMIT 1").get(reference);
+        if (!artifact) contractIntegrity = 'unregistered';
+        else if (artifact.sha256 !== sha256) contractIntegrity = 'stale';
+        else { contract = JSON.parse(bytes.toString('utf8')); contractIntegrity = 'verified'; }
+      } catch { contractIntegrity = 'unreadable'; }
     }
     const finished = state.gates?.gate3?.status === 'passed' ? state.gates.gate3.at : null;
     const elapsed = start && finished && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(finished)) && Date.parse(finished) >= Date.parse(start) ? Date.parse(finished) - Date.parse(start) : null;
     return {
       runId: state.runId, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
-      capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
+      contractIntegrity, capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
       elapsedWallMs: elapsed, elapsedBasis: 'first-ledger-snapshot-to-passed-gate3-including-user-wait',
       operations: { recorded: receipts.length, failed: receipts.filter(x => x.status === 'failed').length, running: receipts.filter(x => x.status === 'running').length, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: receipts.length - durations.length, unreadable: unreadable.length },
       manualInterventions: null, // No complete host/user-intervention counter is available.
@@ -86,6 +94,7 @@ export function compareRuns(before, after) {
   if (before.gate3 !== 'passed' || after.gate3 !== 'passed') reasons.push('both runs need passed Gate 3');
   if (before.track !== after.track || before.scope !== after.scope) reasons.push('track or scope differs');
   if (!before.capabilities || !after.capabilities || JSON.stringify(before.capabilities) !== JSON.stringify(after.capabilities)) reasons.push('capability sets are missing or differ');
+  if (before.contractIntegrity !== 'verified' || after.contractIntegrity !== 'verified') reasons.push('delivery contract is missing, unregistered, stale or unreadable');
   if (before.operations.unreadable || after.operations.unreadable) reasons.push('operation receipts are unreadable');
   if (before.stateProjection !== 'consistent' || after.stateProjection !== 'consistent') reasons.push('state projection is missing, unreadable or diverged from the durable ledger');
   const eligible = reasons.length === 0;

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { initializeLedger, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recordTokenUsage, recordObservedTokenUsage } from './run-ledger.mjs';
+import crypto from 'node:crypto';
+import { initializeLedger, recordArtifact, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recordTokenUsage, recordObservedTokenUsage } from './run-ledger.mjs';
 import { readRunMetrics, compareRuns } from './run-metrics.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-run-metrics-'));
 try {
@@ -10,6 +11,7 @@ try {
     const dir = path.join(root, name); fs.mkdirSync(dir);
     const state = { runId: name, revision: 0, track: 'greenfield', scope: 'standard', lifecycle: 'active', artifacts: { deliveryContract: 'delivery.json' }, gates: { gate3: { status: gate, at: '2099-01-01T00:00:00.000Z' } } };
     fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(state)); fs.writeFileSync(path.join(dir, 'delivery.json'), JSON.stringify({ capabilities: ['frontend'] })); initializeLedger(dir, state, 'fixture');
+    recordArtifact(dir, { artifactId: 'delivery', reference: 'delivery.json', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, 'delivery.json'))).digest('hex')}` });
     registerAgent(dir, { agentId: 'designer', vocation: 'design', stage: 'visual' });
     const job = enqueueAgentJob(dir, { agentId: 'designer', stage: 'visual', inputHash: 'fixture' });
     const first = claimAgentJob(dir, job.jobId); settleAgentJob(dir, job.jobId, { status: 'failed', leaseToken: first.leaseToken, retryDelayMs: 0, usage: { inputTokens, outputTokens: 3, usageSource: 'provider-reported' } });
@@ -40,6 +42,12 @@ try {
   assert.equal(hostComparison.changes.recordedIndependentHostTokens, -5);
   assert.equal(compareRuns(before, { ...after, gate3: 'pending' }).status, 'not-comparable');
   assert.equal(compareRuns(before, { ...after, capabilities: ['backend'] }).changes, null);
+  const deliveryFile = path.join(afterDir, 'delivery.json'), deliveryBytes = fs.readFileSync(deliveryFile);
+  fs.writeFileSync(deliveryFile, JSON.stringify({ capabilities: ['frontend'], modified: true }));
+  const staleContract = readRunMetrics(afterDir);
+  assert.equal(staleContract.contractIntegrity, 'stale'); assert.equal(staleContract.capabilities, null);
+  assert.equal(compareRuns(before, staleContract).status, 'not-comparable');
+  fs.writeFileSync(deliveryFile, deliveryBytes);
   assert.equal(after.stateSource, 'ledger-snapshot'); assert.equal(after.stateProjection, 'consistent');
   const stateFile = path.join(afterDir, 'state.json'), stateBytes = fs.readFileSync(stateFile);
   const staleState = JSON.parse(stateBytes); staleState.gates.gate3.status = 'pending';
@@ -53,6 +61,9 @@ try {
   const unknownDir = path.join(root, 'unknown'); fs.mkdirSync(unknownDir);
   const unknownState = { runId: 'unknown', revision: 0, track: 'greenfield', scope: 'standard', lifecycle: 'active', artifacts: { deliveryContract: 'delivery.json' }, gates: { gate3: { status: 'passed', at: '2099-01-01T00:00:00.000Z' } } };
   fs.writeFileSync(path.join(unknownDir, 'state.json'), JSON.stringify(unknownState)); fs.writeFileSync(path.join(unknownDir, 'delivery.json'), JSON.stringify({ capabilities: ['frontend'] })); initializeLedger(unknownDir, unknownState, 'fixture');
+  assert.equal(readRunMetrics(unknownDir).contractIntegrity, 'unregistered');
+  assert.equal(compareRuns(before, readRunMetrics(unknownDir)).status, 'not-comparable');
+  recordArtifact(unknownDir, { artifactId: 'delivery', reference: 'delivery.json', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(unknownDir, 'delivery.json'))).digest('hex')}` });
   assert.equal(readRunMetrics(unknownDir).tokens.recordedTotal, null);
   recordTokenUsage(unknownDir, { stage: 'visual', inputTokens: 0, metadata: { usageSource: 'unknown' } });
   const unknown = readRunMetrics(unknownDir);
@@ -73,5 +84,5 @@ try {
   assert.equal(compareRuns(before, damaged).status, 'not-comparable');
   fs.rmSync(path.join(afterDir, 'operations/a.json'));
   assert.equal(readRunMetrics(afterDir).operations.totalDurationMs, null);
-  console.log(JSON.stringify({ status: 'passed', checks: 42, scope: 'read-only-run-metrics-fixtures' }));
+  console.log(JSON.stringify({ status: 'passed', checks: 47, scope: 'read-only-run-metrics-fixtures' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
