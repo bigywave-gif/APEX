@@ -71,13 +71,13 @@ try {
   action('visual-sandbox-writer.mjs', 'materialize', runDir, path.join(runDir, 'demo-source-manifest.json'));
   action('visual-sandbox-runtime.mjs', 'start', runDir);
   const runtime = JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-runtime.json'))); pid = runtime.pid;
-  const spec = write('runtime-browser-spec.json', { requiredSourceSelectionIds: selections.map(item => item.id), formalJourneys: process.env.APEX_TEST_DIRECT === '1' ? demoContract.journeys.filter(item => item.kind !== 'reset') : demoContract.journeys, screens: [{ id: 'desktop', route: '/', width: 1440, height: 900 }, { id: 'mobile', route: process.env.APEX_TEST_SAME_ROUTE === '1' ? '/' : '/?view=reports', width: 390, height: 844 }] });
+  const spec = write('runtime-browser-spec.json', { requiredSourceSelectionIds: selections.map(item => item.id), formalJourneys: process.env.APEX_TEST_DIRECT === '1' ? demoContract.journeys.filter(item => item.kind !== 'reset') : demoContract.journeys, screens: [{ id: 'desktop', route: '/', width: 1440, height: 900 }, { id: 'mobile', route: '/', width: 390, height: 844 }] });
   action('browser-capture.mjs', 'capture', runDir, runtime.url, spec);
   const capture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
   verifyDemoInteractions(runDir, capture, runtime.url);
   const captureStatus = run('apex-router.mjs', ['status', project, runId, session]);
   if (captureStatus.executionDirective?.currentStep?.id === 'capture-runtime-browser-evidence') throw new Error('successful same-origin multi-route capture must advance instead of repeating browser capture');
-  for (const [id, size] of [['desktop', '1440x900'], ['mobile', '390x844']]) { const screen = capture.evidence.find(item => item.id === id); if (screen?.viewport !== size || screen.logs?.viewport !== 'matched' || screen.url !== new URL(id === 'mobile' && process.env.APEX_TEST_SAME_ROUTE !== '1' ? '/?view=reports' : '/', runtime.url).href) throw new Error(`browser capture must record the observed URL and viewport for ${id}`); }
+  for (const [id, size] of [['desktop', '1440x900'], ['mobile', '390x844']]) { const screen = capture.evidence.find(item => item.id === id); if (screen?.viewport !== size || screen.logs?.viewport !== 'matched' || screen.url !== new URL('/', runtime.url).href || screen.controlInventory?.viewport !== size || screen.controlInventory?.url !== screen.url) throw new Error(`browser capture must bind the observed URL, viewport and control inventory for ${id}`); }
   action('runtime-visual-baseline.mjs', 'compile', runDir, project, write('runtime-visual-baseline-input.json', { schemaVersion: '3.0', runtimeRoot: 'visual-sandbox', referenceScreenId: 'desktop', patterns: [] }));
   const baseline = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-visual-baseline.json')));
   const baselineValidation = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'validate', 'runtime-visual-baseline.schema.json', path.join(runDir, 'runtime-visual-baseline.json')], { encoding: 'utf8' });
@@ -85,7 +85,7 @@ try {
   if (baseline.screenCaptures?.length !== 2 || !['desktop', 'mobile'].every(id => baseline.screenCaptures.some(item => item.id === id && item.screenshot.sha256 && item.dom.sha256)) || baseline.journeyCaptures?.length !== demoContract.journeys.length || !demoContract.journeys.every(journey => baseline.journeyCaptures.some(item => item.id === journey.id && item.task === journey.task && /^\d+x\d+$/.test(item.viewport) && item.finalUrl.startsWith(runtime.url) && item.screenshot.sha256 && item.dom.sha256))) throw new Error('real browser baseline must bind both viewports and every executed user journey to its screenshot and DOM');
   const demo = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-demo.json')));
   if (demo.kind !== 'interactive-ui-prototype' || demo.journeyCount !== demoContract.journeys.length || demo.presentation.screenshotOnlyAllowed !== false || demo.presentation.preferred !== 'chat-inline' || !demo.presentation.contentReference?.includes('preview.html')) throw new Error('compiled Demo did not retain the interaction contract');
-  if (demo.controlCoverage?.scope !== 'observed-journey-states-only' || demo.controlCoverage.truncated || demo.controlCoverage.untestedControls.length || !['route:%2F|id:settings-tab', 'route:%2F|id:projects-tab', 'route:%2F|id:project-name', 'route:%2F|id:notifications'].every(key => demo.controlCoverage.observedControls.some(item => item.key === key))) throw new Error('complete Demo journeys must exercise all observed sample controls');
+  if (demo.controlCoverage?.scope !== 'observed-screens-and-journeys' || demo.controlCoverage.truncated || demo.controlCoverage.untestedControls.length || !['route:%2F|id:settings-tab', 'route:%2F|id:projects-tab', 'route:%2F|id:project-name', 'route:%2F|id:notifications'].every(key => demo.controlCoverage.observedControls.some(item => item.key === key))) throw new Error('complete Demo journeys must exercise all observed sample controls');
   // Prove that dispatching a real click without the expected UI change fails.
   const cli = fs.readdirSync(npmCacheRoot).map(name => path.join(npmCacheRoot, name, 'node_modules/@playwright/cli/playwright-cli.js')).find(file => fs.existsSync(file));
   if (!cli) throw new Error('browser acceptance needs the installed Playwright CLI');
@@ -136,6 +136,10 @@ try {
     const routeMatch = routeResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
     let routeTrace = routeMatch && JSON.parse(routeMatch[1]); if (typeof routeTrace === 'string') routeTrace = JSON.parse(routeTrace);
     if (routeResult.status !== 0 || routeTrace?.status !== 'passed' || !routeTrace.observedControls.some(item => item.key === 'route:%2F%3Fvariant%3Dother|id:increment') || routeTrace.observedControls.some(item => item.key === 'route:%2F|id:increment')) throw new Error('control inventory must distinguish identical IDs on different routes');
+    const limitedResult = cliCall(['run-code', journeyCode({ journey: demoContract.journeys[0], url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/sample-limited-inventory.png'), controlInventoryLimit: 1 })]);
+    const limitedMatch = limitedResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
+    let limited = limitedMatch && JSON.parse(limitedMatch[1]); if (typeof limited === 'string') limited = JSON.parse(limited);
+    if (limitedResult.status !== 0 || limited?.status !== 'passed' || limited.controlInventoryTruncated !== true || limited.observedControls.length !== 1) throw new Error('an undersized control inventory must report truncation');
   } finally { cliCall(['close']); }
   // Formal verification can replace its capture file without invalidating Demo evidence.
   const frozen = JSON.parse(fs.readFileSync(path.join(runDir, demo.interactionEvidence.path)));

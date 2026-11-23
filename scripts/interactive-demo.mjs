@@ -8,8 +8,8 @@ const objectHash = value => demoHash(JSON.stringify(value));
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const assert = (value, message) => { if (!value) throw new Error(`Interactive Demo: ${message}`); };
 
-export function observedControlCoverageStatus(coverage) {
-  if (coverage?.scope !== 'observed-journey-states-only' || !Array.isArray(coverage.untestedControls) || typeof coverage.truncated !== 'boolean') return { ready: false, reason: 'browser control inventory is missing', controls: [] };
+export function observedControlCoverageStatus(coverage, { requireScreens = false } = {}) {
+  if (!['observed-journey-states-only', 'observed-screens-and-journeys'].includes(coverage?.scope) || (requireScreens && coverage.scope !== 'observed-screens-and-journeys') || !Array.isArray(coverage.untestedControls) || typeof coverage.truncated !== 'boolean') return { ready: false, reason: 'browser control inventory is missing', controls: [] };
   if (coverage.truncated) return { ready: false, reason: 'browser control inventory was truncated', controls: [] };
   const exemptions = coverage.sharedControlReviews || [];
   if (!Array.isArray(exemptions)) return { ready: false, reason: 'shared control review is invalid', controls: [] };
@@ -112,7 +112,10 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     for (const control of journey.observedControls) { assert(nonempty(control?.key), 'invalid observed control identity'); observed.set(control.key, control); }
     for (const key of journey.exercisedControls) { assert(nonempty(key), 'invalid exercised control identity'); exercised.add(key); }
   }
-  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), sharedControlReviews: source.contract.sharedControlReviews || [], truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
+  const screens = Array.isArray(capture.evidence) ? capture.evidence : [];
+  const screenInventoryAvailable = screens.length > 0 && screens.every(screen => screen.controlInventory?.version === '1.1' && screen.controlInventory.status === 'captured' && Array.isArray(screen.controlInventory.observedControls) && typeof screen.controlInventory.truncated === 'boolean' && screen.controlInventory.url === screen.url && screen.controlInventory.viewport === screen.viewport);
+  if (inventoryAvailable && screenInventoryAvailable) for (const screen of screens) for (const control of screen.controlInventory.observedControls) { assert(nonempty(control?.key), 'invalid screen control identity'); observed.set(control.key, control); }
+  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: screenInventoryAvailable ? 'observed-screens-and-journeys' : 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), sharedControlReviews: source.contract.sharedControlReviews || [], truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated) || (screenInventoryAvailable && screens.some(screen => screen.controlInventory.truncated)), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
 }
 
 // This function is serialized into Playwright CLI run-code. It has no closure
@@ -121,6 +124,8 @@ export async function runDemoJourney(page, input) {
   const { journey, url, notice, screenshotPath } = input;
   const blockedRequests = [], steps = [], controls = new Map(), exercisedControls = new Set();
   let controlInventoryTruncated = false;
+  const controlInventoryLimit = input.controlInventoryLimit ?? 500;
+  if (!Number.isInteger(controlInventoryLimit) || controlInventoryLimit < 1 || controlInventoryLimit > 5000) throw new Error('control inventory limit must be an integer between 1 and 5000');
   const controlSelector = 'button, a[href], input:not([type="hidden"]), select, textarea, summary, [contenteditable="true"], [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="radio"], [role="combobox"], [role="slider"], [role="spinbutton"], [role="textbox"], [role="option"]';
   const describeControls = elements => {
     const found = new Map();
@@ -142,9 +147,13 @@ export async function runDemoJourney(page, input) {
   };
   const collectControls = async () => {
     const items = await page.locator(controlSelector).evaluateAll(describeControls);
-    if (items.length > 500) controlInventoryTruncated = true;
-    for (const item of items.slice(0, 500)) { if (controls.size >= 500 && !controls.has(item.key)) { controlInventoryTruncated = true; continue; } controls.set(item.key, item); }
+    if (items.length > controlInventoryLimit) controlInventoryTruncated = true;
+    for (const item of items.slice(0, controlInventoryLimit)) { if (controls.size >= controlInventoryLimit && !controls.has(item.key)) { controlInventoryTruncated = true; continue; } controls.set(item.key, item); }
   };
+  if (input.inventoryOnly) {
+    try { await collectControls(); const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })); return { version: '1.1', status: 'captured', url: page.url(), viewport: `${viewport.width}x${viewport.height}`, observedControls: [...controls.values()], limit: controlInventoryLimit, truncated: controlInventoryTruncated }; }
+    catch (cause) { return { version: '1.1', status: 'failed', error: cause.message }; }
+  }
   const origin = new URL(url).origin;
   const guard = async route => {
     const target = new URL(route.request().url());

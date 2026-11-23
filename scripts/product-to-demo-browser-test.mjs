@@ -108,19 +108,22 @@ try {
  invoke('generate_visual','visual-sandbox-writer.mjs',['materialize',dir,path.join(dir,'demo-source-manifest.json')]);
  invoke('generate_visual','visual-sandbox-runtime.mjs',['start',dir]);
  const runtime=JSON.parse(fs.readFileSync(path.join(dir,'visual-sandbox-runtime.json')));runtimePid=runtime.pid;
- const browserSpec=put('browser-spec.json',{requiredSourceSelectionIds:selections.map(x=>x.id),screens:[{id:'desktop',route:'/',width:1440,height:900},{id:'mobile',route:'/',width:390,height:844}]});
+ const browserSpec=put('browser-spec.json',{requiredSourceSelectionIds:selections.map(x=>x.id),screens:[{id:'desktop',route:'/',width:1440,height:900},{id:'mobile',route:'/?view=reports',width:390,height:844}]});
  invoke('generate_visual','browser-capture.mjs',['capture',dir,runtime.url,browserSpec]);
  const capture=JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json')));
  verifyDemoInteractions(dir,capture,runtime.url);
  const gapStatus=route(['status',project,id,session]);
  assert.equal(gapStatus.executionDirective.currentStep.id,'repair-demo-control-coverage');
  assert.match(gapStatus.executionDirective.currentStep.details,/project-name/);
+ assert.match(gapStatus.executionDirective.currentStep.details,/%3Fview%3Dreports/);
  assert.ok(!gapStatus.allowedActions.includes('register_runtime_demo'));
- const correctedInput=put('demo-source-corrected.json',{...sourceInput,interactionContract:demoContract});
+ const sharedControlReviews=['reset','projects-tab','settings-tab','project-name','increment'].map(id=>({key:`route:%2F%3Fview%3Dreports|id:${id}`,equivalentTo:`route:%2F|id:${id}`,rationale:'同一示例片段不读取查询参数且复用相同事件处理器'}));
+ const correctedInput=put('demo-source-corrected.json',{...sourceInput,interactionContract:{...demoContract,sharedControlReviews}});
  invoke('generate_visual','demo-source-compiler.mjs',['compile',dir,correctedInput]);
  invoke('generate_visual','visual-sandbox-writer.mjs',['materialize',dir,path.join(dir,'demo-source-manifest.json')]);
  invoke('generate_visual','browser-capture.mjs',['capture',dir,runtime.url,browserSpec]);
- assert.equal(verifyDemoInteractions(dir,JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json'))),runtime.url).controlCoverage.untestedControls.length,0);
+ const correctedCoverage=verifyDemoInteractions(dir,JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json'))),runtime.url).controlCoverage;
+ assert.equal(correctedCoverage.untestedControls.length,sharedControlReviews.length);
  const baselineInput=put('runtime-visual-baseline-input.json',{schemaVersion:'3.0',runtimeRoot:'visual-sandbox',referenceScreenId:'desktop',patterns:[]});
  invoke('generate_visual','runtime-visual-baseline.mjs',['compile',dir,project,baselineInput]);
  const baseline=JSON.parse(fs.readFileSync(path.join(dir,'runtime-visual-baseline.json')));
@@ -226,7 +229,7 @@ try {
  const beforeDraft=route(['status',project,id,session]);
  assert.equal(beforeDraft.executionDirective.currentStep.id,'compile-visual-bundle-and-implementation-map');
  const component={visualNode:'main',stitchNode:'main',screenId:'desktop',runtimeTarget:['index.html'],designTokens:['base'],data:[],apiContracts:[],events:['add'],permissions:[],responsive:{contractId:responsive.contractId},testSelectors:['[data-testid=increment]'],acceptance:['The approved task interaction works.']};
- const spec={schemaVersion:'3.0',layout:{grid:'single'},components:[component],content:{hierarchy:['task']},data:{},icons:[],tables:[],charts:[],diagrams:[],motion:[],interaction:[],responsive,acceptance:['The approved Demo is reproduced.']};
+ const spec={schemaVersion:'3.0',layout:{grid:'single'},components:[component,{...component,screenId:'mobile'}],content:{hierarchy:['task']},data:{},icons:[],tables:[],charts:[],diagrams:[],motion:[],interaction:[],responsive,acceptance:['The approved Demo is reproduced.']};
  invoke('compile_visual_bundle','bundle-compiler.mjs',['compile',dir,put('visual-spec-input.json',spec)]);
 
  const oldJobId=Object.values(oldSelection.agentJobs)[0];
@@ -320,7 +323,7 @@ try {
  const serverCode=`const http=require('node:http'),fs=require('node:fs'),path=require('node:path');const root=process.argv[1];http.createServer((req,res)=>{res.setHeader('content-type','text/html; charset=utf-8');res.end(fs.readFileSync(path.join(root,'index.html')))}).listen(0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port+'/')});`;
  formalServer=spawn(process.execPath,['-e',serverCode,project],{stdio:['ignore','pipe','pipe']});
  const formalUrl=await new Promise((resolve,reject)=>{let text='';formalServer.stdout.on('data',chunk=>{text+=chunk;if(text.includes('\n'))resolve(text.trim())});formalServer.on('error',reject);formalServer.on('exit',code=>reject(new Error('formal server exited: '+code)));});
- const formalSpec=put('formal-browser-spec.json',{requiredSourceSelectionIds:selections.map(item=>item.id),formalJourneys:demoContract.journeys.filter(item=>item.kind!=='reset'),screens:[{id:'desktop',route:'/',width:1440,height:900},{id:'mobile',route:'/',width:390,height:844}]});
+ const formalSpec=put('formal-browser-spec.json',{requiredSourceSelectionIds:selections.map(item=>item.id),formalJourneys:demoContract.journeys.filter(item=>item.kind!=='reset'),screens:[{id:'desktop',route:'/',width:1440,height:900},{id:'mobile',route:'/?view=reports',width:390,height:844}]});
  invoke('verify','browser-capture.mjs',['capture',dir,formalUrl,formalSpec]);
  const formalCapture=JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json')));
  assert.equal(formalCapture.status,'passed'); assert.equal(formalCapture.formalInteractions.status,'passed');
@@ -339,7 +342,7 @@ try {
  invoke('verify','browser-capture.mjs',['capture',dir,formalUrl,formalSpec]);
  assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json'))).status,'passed');
  const ranges=responsive.viewports.flatMap(viewport=>[viewport.minWidth,Math.floor((viewport.minWidth+viewport.maxWidth)/2),viewport.maxWidth].map(width=>({id:`${viewport.class}-${width}`,route:'/',width,height:900})));
- const rangeSpec=put('formal-range-spec.json',{requiredSourceSelectionIds:selections.map(item=>item.id),formalJourneys:demoContract.journeys.filter(item=>item.kind!=='reset'),screens:[{id:'desktop',route:'/',width:1440,height:900},{id:'mobile',route:'/',width:390,height:844},...ranges]});
+ const rangeSpec=put('formal-range-spec.json',{requiredSourceSelectionIds:selections.map(item=>item.id),formalJourneys:demoContract.journeys.filter(item=>item.kind!=='reset'),screens:[{id:'desktop',route:'/',width:1440,height:900},{id:'mobile',route:'/?view=reports',width:390,height:844},...ranges]});
  invoke('verify','browser-capture.mjs',['capture',dir,formalUrl,rangeSpec]);
  const rangeCapture=JSON.parse(fs.readFileSync(path.join(dir,'evidence/runtime-browser-capture.json')));
  assert.equal(rangeCapture.status,'passed');

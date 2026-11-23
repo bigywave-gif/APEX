@@ -35,6 +35,13 @@ try {
   assert.deepEqual(observedControlCoverageStatus(coverage).controls, ['id:settings']); checks++;
   assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }).ready, true); checks++;
   assert.equal(observedControlCoverageStatus(verified.controlCoverage).ready, false); checks++;
+  assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }, { requireScreens: true }).ready, false); checks++;
+  const screenCapture = structuredClone(inventoried);
+  screenCapture.evidence = [{ url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', controlInventory: { version: '1.1', status: 'captured', url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', observedControls: [{ key: 'route:%2Fsettings|id:save', tag: 'button' }], truncated: false } }];
+  const screenCoverage = verifyDemoInteractions(runDir, screenCapture, url).controlCoverage;
+  assert.equal(screenCoverage.scope, 'observed-screens-and-journeys'); checks++;
+  assert.ok(screenCoverage.untestedControls.some(item => item.key === 'route:%2Fsettings|id:save')); checks++;
+  assert.equal(observedControlCoverageStatus(screenCoverage, { requireScreens: true }).ready, false); checks++;
   const oldInventory = structuredClone(inventoried); delete oldInventory.interactiveDemo.journeys[0].controlInventoryVersion;
   assert.equal(verifyDemoInteractions(runDir, oldInventory, url).controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
   const shared = { scope: 'observed-journey-states-only', truncated: false, observedControls: [{ key: 'route:/|id:home', tag: 'button', role: null, type: 'button' }, { key: 'route:/settings|id:home', tag: 'button', role: null, type: 'button' }], exercisedControls: ['route:/|id:home'], untestedControls: [{ key: 'route:/settings|id:home' }], sharedControlReviews: [{ key: 'route:/settings|id:home', equivalentTo: 'route:/|id:home', rationale: '同一导航组件在两个路由保持相同行为' }] };
