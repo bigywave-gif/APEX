@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 const hash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 export function requiredFormalTasks(manifest, strategy = {}) {
   const productTasks = new Set((strategy.functionalPlan || []).map(item => item.task).filter(Boolean));
-  return new Set((manifest.interactionContract?.journeys || []).filter(item => item.kind !== 'reset' || productTasks.has(item.task)).map(item => item.task).filter(Boolean));
+  return new Set([...productTasks, ...(manifest.interactionContract?.journeys || []).filter(item => item.kind !== 'reset' || productTasks.has(item.task)).map(item => item.task).filter(Boolean)]);
 }
 export function validateFormalInteractionEvidence(runDir, state, interactions) {
   const root = fs.realpathSync(runDir), local = reference => { const file = path.resolve(runDir, reference || ''); if (!fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`)) throw new Error(`formal interaction evidence is missing or outside the run: ${reference || ''}`); return file; };

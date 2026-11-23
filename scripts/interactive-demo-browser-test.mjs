@@ -158,6 +158,9 @@ try {
     const actualFormalCapture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
     const formalInteractions = actualFormalCapture.formalInteractions.journeys.map(item => ({ id: item.id, result: 'passed', evidence: item.evidence }));
     validateFormalInteractionEvidence(runDir, JSON.parse(fs.readFileSync(stateFile)), formalInteractions);
+    write('missing-product-task.json', { functionalPlan: [{ task: '未实现的产品任务' }] });
+    const missingProductState = JSON.parse(fs.readFileSync(stateFile)); missingProductState.artifacts.experienceStrategy = 'missing-product-task.json';
+    try { validateFormalInteractionEvidence(runDir, missingProductState, formalInteractions); throw new Error('missing product task must fail'); } catch (error) { if (!error.message.includes('formal interaction evidence misses confirmed tasks: 未实现的产品任务')) throw error; }
     try { validateFormalInteractionEvidence(runDir, JSON.parse(fs.readFileSync(stateFile)), []); throw new Error('missing confirmed task must fail'); } catch (error) { if (error.message === 'missing confirmed task must fail') throw error; }
 
     const traceFile = path.join(runDir, formalInteractions[0].evidence), traceBytes = fs.readFileSync(traceFile);

@@ -5,6 +5,7 @@ const manifest = { interactionContract: { journeys: [{ kind: 'task', task: '添�
 assert.deepEqual([...requiredFormalTasks(manifest, { functionalPlan: [{ task: '添加项目' }] })], ['添加项目']);
 assert.deepEqual([...requiredFormalTasks(manifest, { functionalPlan: [{ task: '添加项目' }, { task: '重置演示' }] })], ['添加项目', '重置演示']);
 assert.deepEqual([...requiredFormalTasks(manifest)], ['添加项目']);
+assert.deepEqual([...requiredFormalTasks(manifest, { functionalPlan: [{ task: '添加项目' }, { task: '删除项目' }] })], ['添加项目', '删除项目']);
 let touched = false;
 const redirectedPage = { goto: async () => {}, url: () => 'https://outside.invalid/', locator: () => { touched = true; throw new Error('external page must not be touched'); } };
 const result = await runFormalJourney(redirectedPage, { url: 'https://app.invalid/', screenshotPath: '/unused', journey: { id: 'redirect', task: '操作', route: '/', steps: [{ action: 'click', selector: '#submit' }] } });
@@ -18,4 +19,4 @@ assert.deepEqual(await runFormalAuthentication(hiddenSuccessPage, { authenticati
 let leaked = false;
 await assert.rejects(runFormalAuthentication({ url: () => 'https://outside.invalid/', locator: () => { leaked = true; } }, { authentication: auth, credentials: { username: 'fixture-user', password: 'fixture-password' }, url: 'https://app.invalid/' }), /outside the application origin/);
 assert.equal(leaked, false);
-console.log(JSON.stringify({ status: 'passed', checks: 11 }));
+console.log(JSON.stringify({ status: 'passed', checks: 12 }));
