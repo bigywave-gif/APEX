@@ -76,19 +76,22 @@ else {
   const authenticationRequired = /accounts\.google\.com/.test(auth.output);
   if (runCancellationRequested(runDir)) die('run was cancelled before Stitch upload');
   if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['click', plan.uploadTriggerRef], runDir));
-  let uploadIntentId = null;
+  let uploadIntentId = null, uploadOutcome = null;
   if (!authenticationRequired && logs.at(-1).status === 'passed') {
     if (runCancellationRequested(runDir)) die('run was cancelled before Stitch upload');
     uploadIntentId = crypto.randomUUID();
     try { recordExternalSubmissionIntent(runDir, { intentId: uploadIntentId, provider: 'stitch', operation: 'upload', projectId: plan.projectId || null, imageHash, promptHash }); } catch (error) { die(error.message); }
     if (runCancellationRequested(runDir)) { recordExternalSubmissionObservation(runDir, { intentId: uploadIntentId, status: 'not-submitted', at: new Date().toISOString() }); die('run was cancelled before Stitch upload'); }
     const upload = call(session, runDir, ['upload', image], runDir); logs.push(upload);
-    recordExternalSubmissionObservation(runDir, { intentId: uploadIntentId, status: upload.status === 'passed' ? 'uploaded' : 'submission-uncertain', at: new Date().toISOString() });
+    uploadOutcome = upload.status === 'passed' ? 'uploaded' : 'submission-uncertain';
+    recordExternalSubmissionObservation(runDir, { intentId: uploadIntentId, status: uploadOutcome, at: new Date().toISOString() });
   }
   if (!authenticationRequired && logs.at(-1).status === 'passed') logs.push(call(session, runDir, ['fill', plan.promptRef, promptInfo.prompt], runDir));
   if (authenticationRequired || logs.at(-1).status !== 'passed') {
     const status = authenticationRequired ? 'authentication-required' : 'failed';
-    write(evidenceFile, { schemaVersion: '3.0', status, stage: 'not-submitted', transport: 'stitch-ui-automation', session, imagePath: path.relative(runDir, image), imageHash, promptHash, logs, completedAt: new Date().toISOString(), note: authenticationRequired ? 'Stitch redirected to Google sign-in. No file was uploaded and no generation was requested; sign in in the headed browser, then rerun with fresh element references.' : 'No submission was confirmed; retry is safe.' });
+    const stage = uploadIntentId ? (uploadOutcome === 'uploaded' ? 'uploaded-unsubmitted' : 'upload-uncertain') : 'not-submitted';
+    const note = authenticationRequired ? 'Stitch redirected to Google sign-in. No file was uploaded and no generation was requested; sign in in the headed browser, then rerun with fresh element references.' : uploadIntentId ? 'An upload was attempted or completed, but no generation was submitted. Inspect and recover the durable upload before any retry; do not upload again.' : 'No upload or generation was attempted; retry after correcting the observed failure.';
+    write(evidenceFile, { schemaVersion: '3.0', status, stage, ...(uploadIntentId ? { uploadIntentId } : {}), transport: 'stitch-ui-automation', session, imagePath: path.relative(runDir, image), imageHash, promptHash, logs, completedAt: new Date().toISOString(), note });
     console.log(JSON.stringify({ evidence: evidenceFile, status, session })); process.exit(2);
   }
   // Persist before the external side effect: a timeout or crash after click

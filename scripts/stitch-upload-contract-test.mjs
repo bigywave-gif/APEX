@@ -10,8 +10,9 @@ const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-stitch-submit-'));
 const runId = 'submit', session = 'submit-session', dir = path.join(project, '.apex/runs', runId);
 const cache = path.join(project, 'npm-cache'), log = path.join(project, 'calls.ndjson');
+const fillFailure = process.env.TEST_STITCH_UPLOAD_SCENARIO === 'fill-failure';
 const cli = path.join(cache, '_npx/test/node_modules/@playwright/cli/playwright-cli.js'); fs.mkdirSync(path.dirname(cli), { recursive: true });
-fs.writeFileSync(cli, `const fs=require('fs');const args=process.argv.slice(2);fs.appendFileSync(process.env.TEST_STITCH_CALLS,JSON.stringify(args)+'\\n');if(process.env.TEST_FAIL_HEALTH==='1'&&args.includes('--help'))process.exit(1);if(process.env.TEST_REQUIRE_AUTH==='1'&&args.includes('run-code')){console.log('https://accounts.google.com/signin');process.exit(0)}if(args.includes('upload')&&!args.includes('click'))process.exit(1);console.log('fixture ok');`);
+fs.writeFileSync(cli, `const fs=require('fs');const args=process.argv.slice(2);fs.appendFileSync(process.env.TEST_STITCH_CALLS,JSON.stringify(args)+'\\n');if(process.env.TEST_FAIL_HEALTH==='1'&&args.includes('--help'))process.exit(1);if(process.env.TEST_REQUIRE_AUTH==='1'&&args.includes('run-code')){console.log('https://accounts.google.com/signin');process.exit(0)}if(args.includes('upload')&&!args.includes('click')&&process.env.TEST_STITCH_UPLOAD_SCENARIO!=='fill-failure')process.exit(1);if(args.includes('fill')&&process.env.TEST_STITCH_UPLOAD_SCENARIO==='fill-failure')process.exit(1);console.log('fixture ok');`);
 const env = { ...process.env, npm_config_cache: cache, TEST_STITCH_CALLS: log };
 const invoke = (script, args) => spawnSync(process.execPath, [path.join(core, 'scripts', script), ...args], { encoding: 'utf8', env, timeout: 30000 });
 const ok = (result, label) => { assert.equal(result.status, 0, `${label}: ${result.stderr || result.stdout}`); return JSON.parse(result.stdout); };
@@ -36,7 +37,11 @@ try {
   const action = () => { const auth = ok(invoke('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']), 'authorize'); return invoke('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'sync_stitch', 'stitch-ui-importer.mjs', 'import', dir, plan]); };
   const failedUpload = action(); assert.notEqual(failedUpload.status, 0);
   const uploads = externalSubmissionIntents(dir).filter(item => item.operation === 'upload');
-  assert.equal(uploads.length, 1); assert.equal(uploads[0].status, 'submission-uncertain');
+  assert.equal(uploads.length, 1); assert.equal(uploads[0].status, fillFailure ? 'uploaded' : 'submission-uncertain');
+  const uploadEvidence = JSON.parse(fs.readFileSync(path.join(dir, 'evidence/stitch-ui-import.json')));
+  assert.equal(uploadEvidence.stage, fillFailure ? 'uploaded-unsubmitted' : 'upload-uncertain');
+  assert.equal(uploadEvidence.uploadIntentId, uploads[0].intentId);
+  assert.match(uploadEvidence.note, /do not upload again/);
   const beforeRetry = fs.readFileSync(log, 'utf8');
   assert.equal(beforeRetry.split('\n').filter(Boolean).map(JSON.parse).some(args => args.includes('submit')), false);
   const changedPlan = JSON.parse(fs.readFileSync(plan)); changedPlan.prompt = 'changed fixture'; fs.writeFileSync(plan, JSON.stringify(changedPlan));
@@ -45,5 +50,9 @@ try {
   ok(invoke('apex-router.mjs', ['cancel', project, runId, session, '取消当前执行']), 'cancel uncertain upload');
   const receipt = JSON.parse(fs.readFileSync(path.join(dir, 'cancellation-receipt.json')));
   assert.equal(receipt.externalUploads.length, 1); assert.equal(receipt.externalUploads[0].intentId, uploads[0].intentId); assert.equal(receipt.externalJobs.length, 0);
-  console.log(JSON.stringify({ status: 'passed', checks: 9, scope: 'fake-browser-upload-timeout-and-cancellation' }));
+  if (!fillFailure) {
+    const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { encoding: 'utf8', env: { ...process.env, TEST_STITCH_UPLOAD_SCENARIO: 'fill-failure' }, timeout: 120000 });
+    assert.equal(child.status, 0, child.stderr || child.stdout);
+  }
+  console.log(JSON.stringify({ status: 'passed', checks: fillFailure ? 12 : 13, scope: fillFailure ? 'fake-browser-upload-success-then-fill-failure' : 'fake-browser-upload-failure-and-fill-failure' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }
