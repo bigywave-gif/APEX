@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { adapterRecommendation } from './project-adapter.mjs';
+const detected = (...frameworks) => ({ frameworks });
+const select = (manifest, frameworks, files) => adapterRecommendation(manifest, detected(...frameworks), files);
+assert.equal(select({ dependencies: { vue: '3' } }, ['vue'], ['src/media/platform/index.ts']).id, 'vue-enterprise');
+assert.equal(select({ dependencies: { react: '19' } }, ['react'], ['src/platform/view.tsx']).id, 'react-saas');
+assert.equal(select({ dependencies: { vue: '3', qiankun: '2' } }, ['vue'], ['src/platform/index.ts']).id, 'platform-shell');
+assert.equal(select({ dependencies: { jquery: '3' } }, [], ['index.html']).id, 'legacy-multi-entry');
+assert.equal(select({}, [], ['src/platform/index.ts']).confidence, 'low');
+assert.equal(select({}, [], ['src/index.ts']).id, 'generic-saas');
+console.log(JSON.stringify({ status: 'passed', scope: 'framework and ambiguous adapter indicators' }));
