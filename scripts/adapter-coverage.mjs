@@ -23,7 +23,7 @@ for (const project of projects) {
   if (!fs.existsSync(statePath) || !fs.realpathSync(statePath).startsWith(`${runDir}${path.sep}`)) die(`Run state must belong to the current Run: ${project.id}`);
   const ledgerPath = path.join(runDir, 'run-ledger.sqlite');
   if (!fs.existsSync(ledgerPath) || !fs.realpathSync(ledgerPath).startsWith(`${runDir}${path.sep}`)) die(`Run ledger is missing or outside the current Run: ${project.id}`);
-  let state;
+  let state, verifiedOutputs;
   try {
     const db = new DatabaseSync(ledgerPath, { readOnly: true });
     try {
@@ -37,6 +37,7 @@ for (const project of projects) {
         const match = db.prepare("SELECT 1 FROM artifacts WHERE reference = ? AND sha256 = ? AND status = 'verified' LIMIT 1").get(reference, project.artifactHashes[name]);
         if (!match) throw new Error(`artifact is not currently verified in the ledger: ${name}`);
       }
+      verifiedOutputs = db.prepare("SELECT reference, sha256, metadata_json FROM artifacts WHERE status = 'verified'").all();
       db.exec('COMMIT');
     } finally { db.close(); }
   } catch (error) { die(`Run ledger verification failed for ${project.id}: ${error.message}`); }
@@ -50,6 +51,24 @@ for (const project of projects) {
   if (path.basename(runDir) !== state.runId || inventory.projectRoot !== project.projectRoot || inventory.adapterRecommendation?.id !== project.adapterId) die(`project identity, run identity, or adapter identity does not bind to supplied evidence: ${project.id}`);
   for (const [name, stateName] of Object.entries({ projectInventory: 'projectInventory', existingBaseline: 'existingBaseline', gate3: 'verificationBundle', evidenceProvenance: 'evidenceProvenance' })) if (state.artifacts?.[stateName] !== project.artifacts[name]) die(`project evidence is not the current Run artifact: ${project.id}/${name}`);
   if (state.gates?.gate3?.status !== 'passed' || (verification.verificationStatus ?? verification.gate3) !== 'passed' || provenance.status !== 'passed') die(`project Gate 3 or provenance is not truly passed: ${project.id}`);
-  for (const check of profile.requiredChecks) if (!(project.checks || []).includes(check)) die(`adapter required check is absent: ${project.id}/${check}`);
+  for (const check of profile.requiredChecks) {
+    if (!(project.checks || []).includes(check)) die(`adapter required check is absent: ${project.id}/${check}`);
+    if (check === 'gate3') continue;
+    const review = project.checkEvidence?.[check];
+    if (!review || !Array.isArray(review.evidenceIds) || !review.evidenceIds.length || typeof review.rationale !== 'string' || review.rationale.trim().length < 12) die(`adapter check needs evidence and a review rationale: ${project.id}/${check}`);
+    for (const id of review.evidenceIds) {
+      const entries = (provenance.entries || []).filter(item => item.id === id);
+      if (entries.length !== 1 || entries[0].result !== 'passed') die(`adapter check references missing or unpassed provenance: ${project.id}/${check}`);
+      const entry = entries[0], file = path.resolve(runDir, entry.path || ''), receipt = path.resolve(runDir, entry.operationReceipt || ''), operations = path.join(runDir, 'operations');
+      if (!file.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${runDir}${path.sep}`) || hash(file) !== entry.sha256 || !receipt.startsWith(`${operations}${path.sep}`) || !fs.existsSync(receipt) || !fs.realpathSync(receipt).startsWith(`${operations}${path.sep}`)) die(`adapter check evidence is missing, changed or outside the Run: ${project.id}/${check}`);
+      const operation = read(receipt);
+      if (operation.status !== 'succeeded' || operation.outputFileHashes?.[entry.path] !== entry.sha256) die(`adapter check evidence lacks a successful controlled operation: ${project.id}/${check}`);
+      const registered = verifiedOutputs.some(item => {
+        if (item.reference !== entry.path || item.sha256 !== entry.sha256) return false;
+        try { const metadata = JSON.parse(item.metadata_json); return operation.authorizationRef && operation.action && operation.script && operation.operationKey && metadata.authorizationRef === operation.authorizationRef && metadata.action === operation.action && metadata.script === operation.script && metadata.operationKey === operation.operationKey; } catch { return false; }
+      });
+      if (!registered) die(`adapter check evidence is not bound to the controlled operation in the ledger: ${project.id}/${check}`);
+    }
+  }
 }
-console.log(JSON.stringify({ status: 'passed', projects: projects.length, adapters: adapters.size }));
+console.log(JSON.stringify({ status: 'passed', projects: projects.length, adapters: adapters.size, note: 'Evidence links and review rationales are checked; semantic sufficiency and real-world independence still require professional review.' }));
