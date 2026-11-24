@@ -65,6 +65,18 @@ try {
   assert.throws(() => validateProductTaskReview(dir, state, [{ ...review[0], rationale: '' }]), /concrete reasoning/);
   assert.throws(() => validateProductTaskReview(dir, state, [{ ...review[0], verdict: 'failed' }]), /passed verdict/);
   assert.throws(() => validateProductTaskReview(dir, state, [review[0], review[0]]), /cover every confirmed task/);
+  write('manifest.json', { interactionContract: { journeys: [demoJourney, { ...demoJourney, id: 'add-alternate' }] } });
+  write('trace-alt.json', { ...trace, id: 'add-alternate' });
+  const altInteraction = { id: 'add-alternate', result: 'passed', evidence: 'trace-alt.json' };
+  write('matrix.json', { interactions: [...interactions, altInteraction] });
+  write('evidence/runtime-browser-capture.json', { status: 'passed', formalInteractions: { status: 'passed', journeys: [{ id: 'add', task: '添加项目', evidence: 'trace.json', evidenceSha256: digest('trace.json') }, { id: 'add-alternate', task: '添加项目', evidence: 'trace-alt.json', evidenceSha256: digest('trace-alt.json') }] } });
+  write('operations/capture.json', { action: 'verify', status: 'succeeded', script: 'browser-capture.mjs', outputFileHashes: { 'trace.json': digest('trace.json'), 'trace-alt.json': digest('trace-alt.json'), 'evidence/runtime-browser-capture.json': digest('evidence/runtime-browser-capture.json') } });
+  assert.throws(() => validateProductTaskReview(dir, state, review), /cover every confirmed task/);
+  const alternateReview = { ...review[0], interactionId: 'add-alternate', evidence: 'trace-alt.json' };
+  assert.equal(validateProductTaskReview(dir, state, [...review, alternateReview]).status, 'passed');
+  assert.throws(() => validateProductTaskReview(dir, state, [review[0], review[0]]), /duplicate or missing journey/);
+  write('manifest.json', { interactionContract: { journeys: [demoJourney] } });
+  write('matrix.json', { interactions });
   delete trace.steps[0].observation; capture();
   assert.throws(() => validateFormalInteractionEvidence(dir, state, interactions), /not an observed confirmed task/);
 } finally { fs.rmSync(dir, { recursive: true, force: true }); }
