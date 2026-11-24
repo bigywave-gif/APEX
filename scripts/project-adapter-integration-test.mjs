@@ -13,7 +13,11 @@ try {
     { name: 'react', dependencies: { react: '19' }, source: 'src/platform/view.tsx', adapter: 'react-saas' },
     { name: 'micro', dependencies: { vue: '3', qiankun: '2' }, source: 'src/platform/index.ts', adapter: 'platform-shell' },
     { name: 'angular', dependencies: { '@angular/core': '19' }, source: 'src/index.html', adapter: 'generic-saas', confidence: 'low' },
-    { name: 'html', dependencies: {}, source: 'index.html', adapter: 'legacy-multi-entry', confidence: 'low' }
+    { name: 'html', dependencies: {}, source: 'index.html', adapter: 'legacy-multi-entry', confidence: 'low' },
+    { name: 'preact', dependencies: { preact: '10' }, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low', framework: 'preact' },
+    { name: 'solid', dependencies: { 'solid-js': '1' }, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low', framework: 'solid' },
+    { name: 'jsx-only', dependencies: {}, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low', framework: 'jsx-compatible' },
+    { name: 'mixed', dependencies: { react: '19', vue: '3' }, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low' }
   ];
   for (const item of cases) {
     const project = path.join(base, item.name), run = 'adapter', session = 'adapter-session', runDir = path.join(project, '.apex/runs', run);
@@ -32,6 +36,7 @@ try {
     const inventory = JSON.parse(fs.readFileSync(path.join(runDir, 'project-inventory.json')));
     assert.equal(inventory.adapterRecommendation.id, item.adapter, item.name);
     if (item.confidence) assert.equal(inventory.adapterRecommendation.confidence, item.confidence, item.name);
+    if (item.framework) { assert.ok(inventory.frameworks.includes(item.framework), item.name); assert.ok(!inventory.frameworks.includes('react'), item.name); }
     assert.equal(inventory.scanCoverage.complete, true);
     if (item.name === 'vue') {
       assert.ok(inventory.ignoredPaths.includes('.custom-env'));
