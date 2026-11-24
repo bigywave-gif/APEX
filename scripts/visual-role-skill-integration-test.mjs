@@ -119,20 +119,32 @@ try {
     recommendations: [{ id: 'visual-choice', choice: 'Choose a context-appropriate hierarchy.', rationale: 'The hierarchy follows the product task.', acceptance: ['The selected direction reflects the task.'] }],
     execution: { inputTokens: 1, outputTokens: 1, usageSource: 'provider-reported', model: 'integration-fixture', sessionId: queued.payload.agentSessionId, skillBindings: queued.payload.skillBindings, leaseToken: claimed.leaseToken }, status: 'ready'
   };
+  // This fixture exercises several independent rejected submissions.
+  const attemptsDb = new DatabaseSync(runLedgerPaths(runDir).ledger);
+  attemptsDb.prepare('UPDATE agent_jobs SET max_attempts = 8 WHERE job_id = ?').run(jobId); attemptsDb.close();
+  const retryDesigner = () => {
+    const db = new DatabaseSync(runLedgerPaths(runDir).ledger);
+    db.prepare("UPDATE agent_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE job_id = ? AND status = 'queued'").run(jobId); db.close();
+    const authorization = authorize();
+    return { claim: expect(invoke(authorization, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual']), 'claim replacement designer'), authorization };
+  };
   const input = path.join(runDir, 'designer-advisory.json');
   fs.writeFileSync(input, JSON.stringify(advisory));
   const missing = invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', input]);
   assert.notEqual(missing.status, 0);
   assert.match(missing.stderr, /must report the loaded taste-skill hash/);
   advisory.execution.tasteSkillUsage = { sha256: queued.payload.tasteSkill.sha256, appliedRules: ['Use task-appropriate visual hierarchy.'], notApplicableRules: ['Do not impose landing-page motion on a dashboard.'] };
-  assert.equal(recoverAgentJobs(runDir, { force: true }).find(item => item.jobId === jobId)?.status, 'queued');
-  const replacementAuthorization = authorize();
-  const replacement = expect(invoke(replacementAuthorization, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual']), 'claim replacement designer');
+  assert.equal(agentRuntimeStatus(runDir, jobId).jobs[0].status, 'queued');
+  assert.equal(agentRuntimeStatus(runDir).tokenUsage.visual, 2);
+  const duplicateInput = path.join(runDir, 'duplicate-designer-advisory.json'); fs.writeFileSync(duplicateInput, JSON.stringify(advisory));
+  assert.notEqual(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', duplicateInput]).status, 0);
+  assert.equal(agentRuntimeStatus(runDir).tokenUsage.visual, 2, 'replaying a settled attempt must not charge twice');
+  let { authorization: replacementAuthorization, claim: replacement } = retryDesigner();
   assert.notEqual(replacement.leaseToken, claimed.leaseToken);
   assert.equal(requiredTasteLoadCurrent(runDir, jobId, replacement.attempt, replacement.leaseToken, queued.payload.tasteSkill), true);
   assert.equal(requiredTasteLoadCurrent(runDir, jobId, replacement.attempt + 1, replacement.leaseToken, queued.payload.tasteSkill), false);
   assert.equal(requiredTasteLoadCurrent(runDir, jobId, replacement.attempt, claimed.leaseToken, queued.payload.tasteSkill), false);
-  const requiredReceiptPath = path.join(runDir, 'operations', `${path.basename(replacementAuthorization, '.json')}.json`), requiredReceiptBytes = fs.readFileSync(requiredReceiptPath);
+  let requiredReceiptPath = path.join(runDir, 'operations', `${path.basename(replacementAuthorization, '.json')}.json`), requiredReceiptBytes = fs.readFileSync(requiredReceiptPath);
   const alteredReceipt = JSON.parse(requiredReceiptBytes); const alteredClaim = JSON.parse(alteredReceipt.stdout); alteredClaim.requiredSkill.content += ' tampered'; alteredReceipt.stdout = JSON.stringify(alteredClaim); fs.writeFileSync(requiredReceiptPath, JSON.stringify(alteredReceipt));
   assert.equal(requiredTasteLoadCurrent(runDir, jobId, replacement.attempt, replacement.leaseToken, queued.payload.tasteSkill), false, 'changed Skill content must invalidate the receipt');
   fs.writeFileSync(requiredReceiptPath, requiredReceiptBytes);
@@ -141,16 +153,28 @@ try {
   const stale = invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', input]);
   assert.notEqual(stale.status, 0);
   assert.match(stale.stderr, /lease token is stale or missing/);
+  assert.equal(agentRuntimeStatus(runDir, jobId).jobs[0].status, 'running');
+  assert.equal(agentRuntimeStatus(runDir).tokenUsage.visual, 2, 'a stale lease must not settle a new attempt');
   assert.equal(fs.existsSync(path.join(runDir, 'advisories', 'visual', 'ui-designer.json')), false);
   advisory.execution.leaseToken = replacement.leaseToken;
-  const failedRequiredReceipt = JSON.parse(requiredReceiptBytes); failedRequiredReceipt.status = 'failed'; fs.writeFileSync(requiredReceiptPath, JSON.stringify(failedRequiredReceipt)); fs.writeFileSync(input, JSON.stringify(advisory));
+  const failedRequiredReceipt = JSON.parse(requiredReceiptBytes); failedRequiredReceipt.status = 'failed'; fs.writeFileSync(requiredReceiptPath, JSON.stringify(failedRequiredReceipt));
+  advisory.execution.inputTokens = -1; fs.writeFileSync(input, JSON.stringify(advisory));
   const missingControlledReceipt = invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', input]); assert.notEqual(missingControlledReceipt.status, 0); assert.match(missingControlledReceipt.stderr, /successful current-attempt controlled taste-skill load receipt/);
   fs.writeFileSync(requiredReceiptPath, requiredReceiptBytes);
+  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 2, 'invalid usage must be recorded as unknown');
+  advisory.execution.inputTokens = 1;
+  ({ authorization: replacementAuthorization, claim: replacement } = retryDesigner());
+  advisory.execution.leaseToken = replacement.leaseToken;
+  requiredReceiptPath = path.join(runDir, 'operations', `${path.basename(replacementAuthorization, '.json')}.json`); requiredReceiptBytes = fs.readFileSync(requiredReceiptPath);
   expect(invoke(authorize(), 'agent-runtime.mjs', ['skill', runDir, jobId, 'visual', replacement.leaseToken, optional.name, optional.sha256]), 'reload applicable skill for the new attempt');
   fs.writeFileSync(input, JSON.stringify(advisory));
   const unreported = invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', input]);
   assert.notEqual(unreported.status, 0);
   assert.match(unreported.stderr, /report each optional skill actually loaded/);
+  ({ authorization: replacementAuthorization, claim: replacement } = retryDesigner());
+  advisory.execution.leaseToken = replacement.leaseToken;
+  requiredReceiptPath = path.join(runDir, 'operations', `${path.basename(replacementAuthorization, '.json')}.json`); requiredReceiptBytes = fs.readFileSync(requiredReceiptPath);
+  expect(invoke(authorize(), 'agent-runtime.mjs', ['skill', runDir, jobId, 'visual', replacement.leaseToken, optional.name, optional.sha256]), 'reload optional skill after rejected advisory');
   const designMd = replacement.optionalSkills.find(item => item.name === 'google-design-md'); assert.ok(designMd);
   expect(invoke(authorize(), 'agent-runtime.mjs', ['skill', runDir, jobId, 'visual', replacement.leaseToken, designMd.name, designMd.sha256]), 'load design contract skill');
   advisory.execution.optionalSkillUsage = [{ name: optional.name, sha256: optional.sha256, decision: 'applied', rationale: 'The task needs clear interaction hierarchy.', appliedRules: ['Check hierarchy and task feedback.'] }, { name: designMd.name, sha256: designMd.sha256, decision: 'applied', rationale: 'The design needs a stable implementation contract.', appliedRules: ['Bind design decisions to the design contract.'] }];
@@ -169,7 +193,7 @@ try {
   const designerFile = path.join(runDir, 'advisories', 'visual', 'ui-designer.json'), designerBytes = fs.readFileSync(designerFile);
   fs.appendFileSync(designerFile, ' '); assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', 'impeccable', 'google-design-md']), /current completed designer job/); fs.writeFileSync(designerFile, designerBytes);
 
-  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.providerReported, 1);
+  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.providerReported, 3);
   const uxId = savedSelection.agentJobs['ux-architect'];
   const uxJob = agentRuntimeStatus(runDir, uxId).jobs[0];
   let uxClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, uxId, 'visual']), 'claim UX role');
@@ -177,7 +201,7 @@ try {
   const ux = { ...advisory, roleId: 'ux-architect', execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'unmetered-fixture', sessionId: uxJob.payload.agentSessionId, skillBindings: uxJob.payload.skillBindings, leaseToken: uxClaim.leaseToken } };
   const uxInput = path.join(runDir, 'ux-advisory.json'); fs.writeFileSync(uxInput, JSON.stringify(ux));
   expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', uxInput]), 'record explicitly unmetered UX advisory');
-  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 3); // independent host, interrupted designer, and unmetered UX
+  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 3); // independent host, invalid attempt usage, and unmetered UX
   for (const roleId of savedSelection.selectedRoles.filter(id => !['ui-designer', 'ux-architect'].includes(id))) {
     const selectedJob = agentRuntimeStatus(runDir, savedSelection.agentJobs[roleId]).jobs[0];
     const claim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, selectedJob.jobId, 'visual']), `claim ${roleId}`);

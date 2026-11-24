@@ -31,7 +31,8 @@ const stageSkillBindings = {
   implementation: ['react', 'tailwind', 'andrej-karpathy-skills'],
   verify: ['playwright', 'andrej-karpathy-skills']
 };
-function die(message) { console.error(`Role advisory failed: ${message}`); process.exit(1); }
+let recordErrorsThrow = false;
+function die(message) { if (recordErrorsThrow) throw new Error(message); console.error(`Role advisory failed: ${message}`); process.exit(1); }
 function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { die(`${file}: ${error.message}`); } }
 function write(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -204,8 +205,7 @@ function rebudget(runDir, stage) {
   write(output, selection);
   console.log(JSON.stringify({ stage, selection: path.join(stageDirectory(runDir, stage), 'selection.json'), tokenBudget: selection.tokenBudget, jobs: pendingJobIds, status: 'rebudgeted' }));
 }
-function record(runDir, stage, input) {
-  const selection = loadSelection(runDir, stage); const advisory = read(path.resolve(input));
+function recordChecked(runDir, stage, selection, advisory) {
   if (stage === 'verify' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') {
     const file = path.join(runDir, 'prompt-revisions.ndjson'), binding = selection.inputBindings?.find(item => item.artifact === 'requirementRevisions');
     if (fs.existsSync(file) ? !binding || binding.path !== 'prompt-revisions.ndjson' || binding.sha256 !== hash(file) : Boolean(binding)) die('verification role revision input changed; repair the selection before recording');
@@ -281,6 +281,33 @@ function record(runDir, stage, input) {
     } finally { fs.rmSync(staged, { force: true }); }
   } else { write(output, advisory); validate('role-advisory.schema.json', output); }
   console.log(JSON.stringify({ stage, roleId: advisory.roleId, advisory: output }));
+}
+function record(runDir, stage, input) {
+  // An unreadable submission cannot identify an attempt or establish usage.
+  const selection = loadSelection(runDir, stage); const advisory = read(path.resolve(input));
+  const jobId = selection.agentJobs?.[advisory?.roleId];
+  const execution = advisory?.execution;
+  recordErrorsThrow = true;
+  try {
+    recordChecked(runDir, stage, selection, advisory);
+  } catch (error) {
+    // The ledger fences stale leases and settles each attempt atomically.
+    try {
+      const job = jobId && agentRuntimeStatus(runDir, jobId).jobs[0];
+      if (job && job.agentId === advisory.roleId && job.stage === stage && job.status === 'running' && execution?.sessionId === job.payload?.agentSessionId && typeof execution?.leaseToken === 'string') {
+        const source = execution.usageSource || 'legacy-unverified';
+        const valid = ['provider-reported', 'estimated', 'unknown', 'legacy-unverified'].includes(source) && [execution.inputTokens, execution.outputTokens].every(n => Number.isSafeInteger(n) && n >= 0) && Number.isSafeInteger(execution.inputTokens + execution.outputTokens) && (source !== 'unknown' || (execution.inputTokens === 0 && execution.outputTokens === 0));
+        const usage = valid ? { inputTokens: execution.inputTokens, outputTokens: execution.outputTokens, usageSource: source } : { inputTokens: 0, outputTokens: 0, usageSource: 'unknown' };
+        settleAgentJob(runDir, jobId, { status: 'failed', leaseToken: execution.leaseToken, error: error.message, usage });
+      }
+    } catch (settlementError) {
+      // A stale lease must not be charged to its replacement; surface all
+      // settlement failures so an unaccounted attempt is never hidden.
+      console.error(`Role advisory attempt settlement failed: ${settlementError.message}`);
+    }
+    console.error(`Role advisory failed: ${error.message}`);
+    process.exitCode = 1;
+  } finally { recordErrorsThrow = false; }
 }
 function degrade() {
   // A selected role is part of the stage's declared professional evidence.
