@@ -53,7 +53,7 @@ export const workflowNodes = Object.freeze({
   'record-selected-runtime-design-candidate': node('generate_visual', ['design-candidates.json'], actionScript('experience-evaluator.mjs')),
   'register-runtime-demo': node('register_runtime_demo', ['registrations/runtime-demo-*.json'], routerCommand('register-runtime-demo')),
   'present-run-local-runtime-demo': node('present_runtime_demo', ['presentations/runtime-demo-*.json'], routerCommand('present-runtime-demo'), { inputPolicy: 'current-run-verified-chat-fragment-or-visual-sandbox-http-fallback', completion: 'the same-source chat content reference is prepared for final output, or the current Run HTTP preview is opened, with a bound presentation receipt' }),
-  'create-stitch-candidate': node('sync_stitch', ['stitch-freeze.json'], actionScript('stitch-sync.mjs')),
+  'create-stitch-candidate': node('sync_stitch', ['evidence/stitch/freezes/stitch-freeze-*.json'], actionScript('stitch-sync.mjs')),
   'verify-stitch-candidate-parity': node('sync_stitch', ['stitch-parity-evidence.json'], actionScript('strict-replica.mjs')),
   'compile-stitch-screen-reference': node('sync_stitch', ['visual-screen-references.json'], actionScript('visual-reference-compiler.mjs')),
   'verify-stitch-candidate-screen': node('sync_stitch', ['evidence/parity/stitch-result-*.json'], actionScript('strict-replica.mjs')),

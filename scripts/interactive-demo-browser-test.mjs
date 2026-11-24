@@ -339,7 +339,17 @@ try {
   }
   const freezeAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']);
   run('apex-action.mjs', ['run', project, runId, session, freezeAuth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'freeze', runDir, selectionFile]);
-  const frozenStitch = JSON.parse(fs.readFileSync(path.join(runDir, 'stitch-freeze.json')));
+  const frozenStitch = JSON.parse(fs.readFileSync(path.join(runDir, JSON.parse(fs.readFileSync(stateFile)).artifacts.stitchFreeze)));
+  if (process.env.APEX_TEST_STITCH_COMMIT_RACE === '1') {
+    const previousRef = JSON.parse(fs.readFileSync(stateFile)).artifacts.stitchFreeze;
+    const previousFile = path.join(runDir, previousRef), previous = fs.readFileSync(previousFile);
+    const flag = path.join(runDir, 'stitch-commit-race.flag'); fs.writeFileSync(flag, 'inject concurrent ledger commit');
+    const auth = skillAuth();
+    const race = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-action.mjs'), 'run', project, runId, session, auth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'freeze', runDir, selectionFile], { encoding: 'utf8', timeout: 180000, env: { ...process.env, STITCH_HOST: mockEndpoint, STITCH_API_KEY: 'local-fixture-only', NODE_OPTIONS: `--import=${path.join(apexRoot, 'scripts', 'stitch-freeze-commit-race-fixture.mjs')}`, APEX_STITCH_COMMIT_RACE_FLAG: flag, APEX_STITCH_COMMIT_RACE_RUN: runDir } });
+    if (race.status === 0 || !race.stderr.includes('run state changed before atomic commit')) throw new Error(`Stitch freeze must reject a last-moment ledger change: ${race.stderr}`);
+    const current = JSON.parse(fs.readFileSync(stateFile));
+    if (current.artifacts.stitchFreeze !== previousRef || current.artifacts.concurrentFreezeFixture !== 'concurrent-freeze-marker.json' || !fs.readFileSync(previousFile).equals(previous)) throw new Error('failed freeze must preserve the previously committed snapshot and concurrent ledger update');
+  }
   if (legacyDownloads.some(file => fs.readFileSync(file, 'utf8') !== 'previous frozen evidence')) throw new Error('Stitch downloads must not overwrite prior frozen evidence');
   if (!invokeStitch('check', runDir).current) throw new Error('unchanged Stitch snapshot must remain current');
   if (expectedAdaptation && JSON.stringify(frozenStitch.skillAdaptation) !== JSON.stringify(expectedAdaptation)) throw new Error('Stitch freeze must preserve the loaded skill adaptation bound to the confirmed Demo and submitted prompt');

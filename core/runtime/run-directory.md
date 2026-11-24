@@ -18,7 +18,7 @@ functional-freeze.json
 gate1-visual-output.json
 visual-reference.json
 stitch-parity-evidence.json
-stitch-freeze.json
+evidence/stitch/freezes/stitch-freeze-<sha256>.json
 implementation-parity-evidence.json
 evidence/stitch/screens/<screen-id>/
 evidence/contracts/

@@ -301,10 +301,10 @@ if (command === 'list-projects') {
     if (skillAdaptation) stitchAdaptationForFreeze(runDir, state, read(pendingJob), selection);
   } catch (error) { die(error.message); }
   const freeze = { schemaVersion: '3.0', projectId: selection.projectId, canvasUrl: selection.canvasUrl, approval: selection.approval, approvedScreens: snap.approvedScreens, excludedScreens: selection.excludedScreens, ...(selection.generationInput ? { generationInput: selection.generationInput } : {}), ...(skillAdaptation ? { skillAdaptation } : {}), fingerprints: { screenSetHash: hash({ listed: snap.listedHash, approved: snap.approvedScreens }), designSystemHash: snap.designSystemHash }, syncedAt: new Date().toISOString() };
-  const freezeFile = path.join(runDir, 'stitch-freeze.json');
-  write(freezeFile, freeze);
-  write(path.join(runDir, 'stitch-raw.json'), { schemaVersion: '3.0', projectId: selection.projectId, screens: snap.rawScreens, designSystems: snap.designSystems });
-  updateState(runDir, 'stitch-freeze.json', false, false, stateSnapshot);
+  const freezeDir = path.join(runDir, 'evidence', 'stitch', 'freezes'); fs.mkdirSync(freezeDir, { recursive: true });
+  const freezeFile = saveDownload(freezeDir, 'stitch-freeze', '.json', Buffer.from(`${JSON.stringify(freeze, null, 2)}\n`)).file;
+  saveDownload(freezeDir, 'stitch-raw', '.json', Buffer.from(`${JSON.stringify({ schemaVersion: '3.0', projectId: selection.projectId, screens: snap.rawScreens, designSystems: snap.designSystems }, null, 2)}\n`));
+  updateState(runDir, path.relative(runDir, freezeFile), false, false, stateSnapshot);
   console.log(JSON.stringify({ freeze: freezeFile, status: 'provisional', next: 'run strict-replica.mjs stitch, then seal' }));
 } else if (command === 'seal') {
   const runDir = path.resolve(args[0] || '.');
@@ -339,7 +339,8 @@ if (command === 'list-projects') {
 } else if (command === 'check') {
   const runDir = path.resolve(args[0] || '.');
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
-  const freeze = read(path.join(runDir, 'stitch-freeze.json'));
+  const state = readRunState(runDir);
+  const freeze = read(path.join(runDir, state.artifacts?.stitchFreeze || 'stitch-freeze.json'));
   const selection = { schemaVersion: '3.0', projectId: freeze.projectId, canvasUrl: freeze.canvasUrl, approval: freeze.approval, approvedScreens: freeze.approvedScreens.map(({ htmlHash, imageHash, htmlPath, imagePath, ...item }) => item), excludedScreens: freeze.excludedScreens };
   const snap = await snapshot(selection, runDir);
   const approved = snap.approvedScreens.map(screen => {
