@@ -38,7 +38,12 @@ function call(session, cwd, args, runDir, outputLimit = 4000) {
   return { ok: result.status === 0, output: output.slice(-outputLimit), status: result.status, runner: cached ? 'cached-playwright-cli' : 'bridge-playwright-cli' };
 }
 function images(dir, output = []) { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) images(file, output); else if (/\.(png|jpe?g|webp)$/i.test(entry.name)) output.push(file); } return output; }
-function routeUrl(baseUrl, route) { return new URL(route, baseUrl.endsWith('/') ? baseUrl : baseUrl + '/').toString(); }
+function routeUrl(baseUrl, route) {
+  if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//') || route.includes('\\')) die('screen route must be a same-origin root path');
+  const target = new URL(route, baseUrl);
+  if (target.origin !== new URL(baseUrl).origin) die('screen route must stay on the application origin');
+  return target.href;
+}
 function resultValueFrom(output) {
   const match = output.match(/### Result\s*\n([\s\S]*?)\n### /);
   if (!match) return null;
@@ -111,6 +116,12 @@ const existingSourceSnapshot = (() => {
   };
 })();
 if (!Array.isArray(spec.screens) || !spec.screens.length) die('browser spec requires non-empty screens');
+const screenIds = new Set();
+for (const screen of spec.screens) {
+  if (!/^[A-Za-z0-9_-]+$/.test(screen?.id || '') || screenIds.has(screen.id) || !Number.isInteger(screen.width) || screen.width < 1 || !Number.isInteger(screen.height) || screen.height < 1) die('each screen requires a unique safe id and positive integer dimensions');
+  routeUrl(baseUrl, screen.route);
+  screenIds.add(screen.id);
+}
 let resourceChecks = [], resourceExemptions = [], resourceReviewBinding = null;
 if (spec.resourceChecks !== undefined) {
   if (captureAction !== 'verify' || !Array.isArray(spec.resourceChecks) || !spec.resourceChecks.length || spec.resourceChecks.length > 1000) die('resourceChecks require a bounded nonempty formal verification list');
@@ -160,7 +171,6 @@ const artifactDir = path.join(runDir, 'evidence', captureAction === 'generate_vi
 const captured = [];
 const motionSamples = [];
 for (const screen of spec.screens) {
-  if (!screen.id || !screen.route || !Number.isInteger(screen.width) || !Number.isInteger(screen.height)) die('each screen requires id, route, width and height');
   const session = `apex-${crypto.createHash('sha1').update(`${runDir}:${screen.id}`).digest('hex').slice(0, 12)}`;
   const before = new Set(images(artifactDir)); const url = routeUrl(baseUrl, screen.route);
   const open = call(session, artifactDir, ['open', url], runDir);
@@ -186,7 +196,7 @@ for (const screen of spec.screens) {
   const actualViewport = browserView?.viewport;
   const viewportMatches = actualViewport?.width === screen.width && actualViewport?.height === screen.height;
   let actualUrl = null;
-  try { if (new URL(browserView?.url).origin === new URL(url).origin) actualUrl = browserView.url; } catch {}
+  try { if (new URL(browserView?.url).href === new URL(url).href) actualUrl = browserView.url; } catch {}
 
   const domFile = html ? path.join(artifactDir, screen.id + '.dom.html') : null;
   if (domFile) fs.writeFileSync(domFile, html);
@@ -247,7 +257,7 @@ for (const screen of spec.screens) {
     const screenshot = images(artifactDir).filter(file => !beforeSample.has(file)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
     motionSamples.push({ id: sample.id, screenId: screen.id, timestampMs: sample.timestampMs, screenshot: screenshot ? path.relative(runDir, screenshot) : null, frameSha256: screenshot ? fileHash(screenshot) : null, status: sampleShot.ok && Boolean(screenshot) ? 'captured' : 'failed', logs: { wait: wait.output, screenshot: sampleShot.output } }); elapsedMs = sample.timestampMs;
   }
-  captured.push({ id: screen.id, route: screen.route, url: actualUrl, viewport: actualViewport ? String(actualViewport.width) + 'x' + String(actualViewport.height) : null, layoutMetrics: browserView?.layoutMetrics || null, ...(demoSource ? { controlInventory } : {}), screenshot: created ? path.relative(runDir, created) : null, screenshotSha256: created ? fileHash(created) : null, domHtml: domFile ? path.relative(runDir, domFile) : null, domSha256: domFile ? fileHash(domFile) : null, sourceSelections, sourceMarkers, sourceBindings: formalBindingEvidence, sourceFiles, ...(screenResourceChecks.length ? { resourceChecks: (resourceObservations || []).filter(item => item.kind !== 'not-applicable'), resourceExemptions: (resourceObservations || []).filter(item => item.kind === 'not-applicable') } : {}), status: shot.ok && Boolean(created) && Boolean(domFile) && Boolean(actualUrl) && viewportMatches && authenticated && sourceSelectionMatches && sourceBindingMatches && sourceFileMatches && controlInventoryMatches && resourceProbe.ok && resourceMatches ? 'captured' : 'failed', approved: false, runner: open.runner, logs: { open: open.output, authentication: authentication ? (authenticated ? 'authenticated' : 'authentication failed') : 'not-required', resize: resize.output, snapshot: snapshot.output, screenshot: shot.output, dom: dom.ok ? 'captured' : dom.output, viewport: viewportMatches ? 'matched' : `expected ${screen.width}x${screen.height}, observed ${actualViewport?.width || '?'}x${actualViewport?.height || '?'}`, finalUrl: actualUrl || 'missing or outside requested origin', controlInventory: controlInventoryMatches ? 'matched' : 'missing or different URL/viewport', resourceChecks: resourceMatches ? 'matched-or-not-requested' : 'resource observation or non-applicability check failed', sourceSelections: sourceSelectionMatches ? 'matched' : `missing: ${requiredSourceSelectionIds.filter(id => !sourceSelections.includes(id)).join(', ')}`, sourceBindings: sourceBindingMatches ? 'matched' : `missing selector-bound markers: ${formalBindingEvidence.filter(binding => !binding.rendered).map(binding => `${binding.selector}=${binding.sourceMarker}`).join(', ')}`, sourceBindingProbe: sourceBindingProbe.ok ? 'captured' : sourceBindingProbe.output, sourceFiles: sourceFileMatches ? 'matched' : `missing exact rendered source files`, console: consoleLog.output } });
+  captured.push({ id: screen.id, route: screen.route, url: actualUrl, viewport: actualViewport ? String(actualViewport.width) + 'x' + String(actualViewport.height) : null, layoutMetrics: browserView?.layoutMetrics || null, ...(demoSource ? { controlInventory } : {}), screenshot: created ? path.relative(runDir, created) : null, screenshotSha256: created ? fileHash(created) : null, domHtml: domFile ? path.relative(runDir, domFile) : null, domSha256: domFile ? fileHash(domFile) : null, sourceSelections, sourceMarkers, sourceBindings: formalBindingEvidence, sourceFiles, ...(screenResourceChecks.length ? { resourceChecks: (resourceObservations || []).filter(item => item.kind !== 'not-applicable'), resourceExemptions: (resourceObservations || []).filter(item => item.kind === 'not-applicable') } : {}), status: shot.ok && Boolean(created) && Boolean(domFile) && Boolean(actualUrl) && viewportMatches && authenticated && sourceSelectionMatches && sourceBindingMatches && sourceFileMatches && controlInventoryMatches && resourceProbe.ok && resourceMatches ? 'captured' : 'failed', approved: false, runner: open.runner, logs: { open: open.output, authentication: authentication ? (authenticated ? 'authenticated' : 'authentication failed') : 'not-required', resize: resize.output, snapshot: snapshot.output, screenshot: shot.output, dom: dom.ok ? 'captured' : dom.output, viewport: viewportMatches ? 'matched' : `expected ${screen.width}x${screen.height}, observed ${actualViewport?.width || '?'}x${actualViewport?.height || '?'}`, finalUrl: actualUrl || 'missing or different from requested route', controlInventory: controlInventoryMatches ? 'matched' : 'missing or different URL/viewport', resourceChecks: resourceMatches ? 'matched-or-not-requested' : 'resource observation or non-applicability check failed', sourceSelections: sourceSelectionMatches ? 'matched' : `missing: ${requiredSourceSelectionIds.filter(id => !sourceSelections.includes(id)).join(', ')}`, sourceBindings: sourceBindingMatches ? 'matched' : `missing selector-bound markers: ${formalBindingEvidence.filter(binding => !binding.rendered).map(binding => `${binding.selector}=${binding.sourceMarker}`).join(', ')}`, sourceBindingProbe: sourceBindingProbe.ok ? 'captured' : sourceBindingProbe.output, sourceFiles: sourceFileMatches ? 'matched' : `missing exact rendered source files`, console: consoleLog.output } });
   } finally {
     const close = call(session, artifactDir, ['close'], runDir);
     const entry = captured.length > priorCaptureCount ? captured[captured.length - 1] : null;

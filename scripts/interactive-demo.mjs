@@ -188,7 +188,9 @@ export async function runDemoJourney(page, input) {
   let noticeVisible = false, error = null;
   await page.route('**/*', guard);
   try {
-    await page.goto(new URL(journey.route, url).href);
+    const initialUrl = new URL(journey.route, url).href;
+    await page.goto(initialUrl);
+    if (new URL(page.url()).href !== initialUrl) throw new Error('Demo interaction did not reach the requested route');
     const label = page.locator(notice.selector);
     noticeVisible = await label.isVisible() && (await label.innerText()).includes(notice.text);
     if (!noticeVisible) throw new Error('Sample-data notice is missing');

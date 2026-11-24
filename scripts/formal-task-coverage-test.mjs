@@ -17,6 +17,9 @@ let touched = false;
 const redirectedPage = { goto: async () => {}, url: () => 'https://outside.invalid/', locator: () => { touched = true; throw new Error('external page must not be touched'); } };
 const result = await runFormalJourney(redirectedPage, { url: 'https://app.invalid/', screenshotPath: '/unused', journey: { id: 'redirect', task: '操作', route: '/', steps: [{ action: 'click', selector: '#submit' }] } });
 assert.equal(result.status, 'failed'); assert.match(result.error, /left the application origin/); assert.equal(touched, false);
+const sameOriginRedirect = { goto: async () => {}, url: () => 'https://app.invalid/login', locator: () => { touched = true; throw new Error('wrong route must not be touched'); } };
+const wrongRoute = await runFormalJourney(sameOriginRedirect, { url: 'https://app.invalid/', screenshotPath: '/unused', journey: { id: 'redirect', task: '操作', route: '/dashboard', steps: [{ action: 'click', selector: '#submit' }] } });
+assert.equal(wrongRoute.status, 'failed'); assert.match(wrongRoute.error, /requested route/); assert.equal(touched, false);
 let count = '0';
 const page = {
   goto: async () => {}, url: () => 'https://app.invalid/', waitForTimeout: async () => {},

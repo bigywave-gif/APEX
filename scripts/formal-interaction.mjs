@@ -22,8 +22,10 @@ export async function runFormalJourney(page, input) {
   let error = null, html = '';
   try {
     const ensureOrigin = () => { if (new URL(page.url()).origin !== origin) throw new Error('formal interaction left the application origin'); };
-    await page.goto(new URL(journey.route, url).href);
+    const initialUrl = new URL(journey.route, url).href;
+    await page.goto(initialUrl);
     ensureOrigin();
+    if (new URL(page.url()).href !== initialUrl) throw new Error('formal interaction did not reach the requested route');
     for (const step of journey.steps) {
       ensureOrigin();
       const before = await until(step.before), target = page.locator(step.selector);
