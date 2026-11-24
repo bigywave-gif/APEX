@@ -1,5 +1,6 @@
 /** Real-browser authentication acceptance against an isolated local fixture. */
 import assert from 'node:assert/strict';
+import { commitRunState } from './run-ledger.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,7 +32,7 @@ try {
   const stateFile = path.join(runDir, 'state.json'), state = JSON.parse(fs.readFileSync(stateFile));
   state.roleChain.confirmationModel = 'gate-summary-only';
   state.gates.gate1 = { status: 'passed', evidence: ['fixture'] }; state.gates.gate2 = { status: 'passed', evidence: ['fixture'] }; state.locks.implementationAllowed = true; state.locks.implementationApproved = true; state.artifacts.pageDelta = 'page-delta.json'; state.artifacts.implementationRegistration = 'implementation-registration.json'; state.artifacts.apiContract = 'api-contract.json'; state.phase = 'G-09 PROOF_IMPLEMENT';
-  fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{}'); fs.writeFileSync(path.join(runDir, 'implementation-registration.json'), '{}'); fs.writeFileSync(path.join(runDir, 'api-contract.json'), JSON.stringify({endpoints:[{method:'GET',path:'/api/fixture',requestSchema:'request-schema.json',responseSchema:'response-schema.json'},{method:'POST',path:'/api/create',requestSchema:'request-schema.json',responseSchema:'response-schema.json'}]})); fs.writeFileSync(path.join(runDir, 'request-schema.json'), JSON.stringify({type:'object'})); fs.writeFileSync(path.join(runDir, 'response-schema.json'), JSON.stringify({type:'object',required:['ok'],properties:{ok:{const:true}}})); fs.writeFileSync(stateFile, JSON.stringify(state));
+  fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{}'); fs.writeFileSync(path.join(runDir, 'implementation-registration.json'), '{}'); fs.writeFileSync(path.join(runDir, 'api-contract.json'), JSON.stringify({endpoints:[{method:'GET',path:'/api/fixture',requestSchema:'request-schema.json',responseSchema:'response-schema.json'},{method:'POST',path:'/api/create',requestSchema:'request-schema.json',responseSchema:'response-schema.json'}]})); fs.writeFileSync(path.join(runDir, 'request-schema.json'), JSON.stringify({type:'object'})); fs.writeFileSync(path.join(runDir, 'response-schema.json'), JSON.stringify({type:'object',required:['ok'],properties:{ok:{const:true}}})); commitRunState(runDir, state, { reason: 'formal-auth-test-fixture' });
   const step = { action: 'click', selector: '#increment', before: { selector: '#count', property: 'text', equals: '0' }, after: { selector: '#count', property: 'text', equals: '1' } };
   const spec = { authentication: { usernameEnv: 'APEX_AUTH_FIXTURE_USER', passwordEnv: 'APEX_AUTH_FIXTURE_PASSWORD', usernameSelector: '#user', passwordSelector: '#pass', submitSelector: '#submit', successSelector: '#ready' }, screens: [{ id: 'desktop', route: '/', width: 1280, height: 800 }], formalJourneys: [{ id: 'add', task: '添加项目', route: '/', steps: [step] }] };
   const specFile = path.join(runDir, 'auth-spec.json'); fs.writeFileSync(specFile, JSON.stringify(spec));

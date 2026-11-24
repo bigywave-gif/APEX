@@ -28,9 +28,14 @@ try {
   // Older guarded scripts occasionally replaced state.json without advancing
   // revision.  The compatibility layer must import the newer projection
   // rather than resurrect an earlier Gate state from the ledger.
-  const legacyProjection = { ...next, phase: 'G-03 legacy-projection' };
+  const legacyProjection = { ...next, artifacts: { legacyOutput: 'legacy-output.json' } };
   fs.writeFileSync(path.join(root, 'state.json'), `${JSON.stringify(legacyProjection, null, 2)}\n`);
   assert.deepEqual(readRunState(root), legacyProjection, 'a newer legacy projection must be imported without revision-based rollback');
+  const untrusted = { ...legacyProjection, revision: 3, gates: { gate1: { status: 'passed' } } };
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify(untrusted));
+  assert.throws(() => readRunState(root), /uncommitted state projection changes protected authority fields: gates/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8')), untrusted, 'untrusted projection must be preserved for investigation');
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify(legacyProjection));
   assert.equal(reconcileRun(root).status, 'consistent');
   fs.writeFileSync(path.join(root, 'artifact.txt'), 'immutable evidence');
   const artifactHash = 'sha256:762eae78c6f230f3e1ebea889e8e57ef06b80a5cf3a062e19a6dd569dbe772f9';

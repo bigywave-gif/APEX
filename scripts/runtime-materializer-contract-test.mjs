@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState } from './run-ledger.mjs';
 /** Regression test: a rendered runtime package must be installed with identical locked files in the project. */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -26,7 +27,7 @@ try {
   fs.writeFileSync(path.join(runDir, 'runtime-source-lock.json'), JSON.stringify({ schemaVersion: '3.0', projectRoot: root, sourceKind: 'project-installed', patterns: [{ id: 'fixture-card', sourceSelectionId: 'motion-package', visualNodes: ['card'], package: 'fixture-motion', version: '1.2.3', componentPath: 'node_modules/fixture-motion/dist/Card.js', stylePaths: ['node_modules/fixture-motion/dist/Card.css'], props: {}, completeStyle: true, noCssPatch: true, files }] }));
   // This isolated materialization fixture seeds historical pre-confirmation gates.
   state.roleChain.confirmationModel = 'gate-summary-only';
-  state.gates.gate1 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.gates.gate2 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.locks.requirementsApproved = true; state.locks.implementationAllowed = true; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  state.gates.gate1 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.gates.gate2 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.locks.requirementsApproved = true; state.locks.implementationAllowed = true; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
   const audit = expect(run(router, ['authorize', root, 'run-runtime-material', 'runtime-material-session', 'verify']), 'runtime audit authorization');
   expect(run(action, ['run', root, 'run-runtime-material', 'runtime-material-session', audit.authorizationRef, 'verify', 'runtime-materializer.mjs', 'audit', runDir, root]), 'exact runtime audit');
   fs.writeFileSync(style, '.card { color: substitute; }');

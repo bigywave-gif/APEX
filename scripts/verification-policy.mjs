@@ -24,6 +24,7 @@ export function ledgerBoundOutput(runDir, receipt, reference, digest, required =
       if (`sha256:${crypto.createHash('sha256').update(JSON.stringify(durable)).digest('hex')}` !== snapshot.state_hash) return false;
       const needsLedger = required || projectionRequiresLedger || durable?.roleChain?.confirmationModel === 'two-confirmations';
       if (!needsLedger) return true;
+      if (!projection || `sha256:${crypto.createHash('sha256').update(JSON.stringify(projection)).digest('hex')}` !== snapshot.state_hash) return false;
       if (!receipt?.authorizationRef || !receipt.action || !receipt.script || !receipt.operationKey) return false;
       return db.prepare("SELECT metadata_json FROM artifacts WHERE reference = ? AND sha256 = ? AND status = 'verified'").all(reference, digest).some(row => {
         try { const metadata = JSON.parse(row.metadata_json); return ['authorizationRef', 'action', 'script', 'operationKey'].every(key => metadata[key] === receipt[key]); } catch { return false; }

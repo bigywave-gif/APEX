@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState } from './run-ledger.mjs';
 /** Regression test: only a confirmed selected source file may be transferred and must remain byte-identical. */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,7 +36,7 @@ try {
   const iconHash = `sha256:${(await import('node:crypto')).createHash('sha256').update(fs.readFileSync(icon)).digest('hex')}`;
   fs.writeFileSync(path.join(runDir, 'runtime-source-lock.json'), JSON.stringify({ schemaVersion: '3.0', projectRoot: root, runtimeRoot: 'visual-sandbox', sourceKind: 'visual-sandbox', patterns: [{ id: 'lucide-alert-pattern', sourceSelectionId: 'lucide-alert', visualNodes: ['alert-icon'], package: 'lucide', version: '0.468.0', componentPath: 'node_modules/lucide/icons/triangle-alert.svg', stylePaths: ['node_modules/lucide/icons/triangle-alert.svg'], props: {}, completeStyle: true, noCssPatch: true, files: [{ path: 'node_modules/lucide/icons/triangle-alert.svg', sha256: iconHash }] }] }));
   fs.writeFileSync(path.join(runDir, 'visual-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', sources: [{ id: 'lucide-alert-source', planSourceSelectionId: 'lucide-alert', materialization: 'inline-transfer', resolvedFiles: [{ path: 'node_modules/lucide/icons/triangle-alert.svg', sha256: iconHash }] }] }));
-  state.locks.stitchSkipped = false; fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`); const presentationAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'present_runtime_demo']), 'runtime Demo presentation authorization'); expect(run(router, ['present-runtime-demo', root, 'run-assets', 'asset-session', presentationAuth.authorizationRef, 'asset-demo']), 'runtime Demo presentation'); const presentedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); presentedState.locks.stitchSkipped = true; presentedState.locks.stitchApproved = true; presentedState.phase = 'G-07 COMPILE'; fs.writeFileSync(stateFile, `${JSON.stringify(presentedState, null, 2)}\n`);
+  state.locks.stitchSkipped = false; commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' }); const presentationAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'present_runtime_demo']), 'runtime Demo presentation authorization'); expect(run(router, ['present-runtime-demo', root, 'run-assets', 'asset-session', presentationAuth.authorizationRef, 'asset-demo']), 'runtime Demo presentation'); const presentedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); presentedState.locks.stitchSkipped = true; presentedState.locks.stitchApproved = true; presentedState.phase = 'G-07 COMPILE'; commitRunState(path.dirname(stateFile), presentedState, { reason: 'state-authority-test-fixture' });
   const selections = path.join(root, 'materialization-selection.json');
   fs.writeFileSync(selections, JSON.stringify({ items: [{ selectionId: 'lucide-alert', sourcePath: icon, projectPath: 'src/icons/triangle-alert.svg', license: 'ISC' }] }));
   const collectAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'compile_visual_bundle']), 'collect authorization');
@@ -43,11 +44,11 @@ try {
   const collected = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   if (!collected.artifacts.materializedAssets) throw new Error('materialized asset manifest was not registered');
   collected.gates.gate2 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; collected.locks.implementationAllowed = true;
-  fs.writeFileSync(stateFile, `${JSON.stringify(collected, null, 2)}\n`);
+  commitRunState(path.dirname(stateFile), collected, { reason: 'state-authority-test-fixture' });
   const lease = expect(run(router, ['lease', root, 'run-assets', 'asset-session']), 'lease');
   const applyAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'apply authorization');
   expect(run(action, ['run', root, 'run-assets', 'asset-session', applyAuth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, root]), 'apply selected asset');
-  const appliedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); appliedState.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); fs.writeFileSync(stateFile, `${JSON.stringify(appliedState, null, 2)}\n`);
+  const appliedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); appliedState.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); commitRunState(path.dirname(stateFile), appliedState, { reason: 'state-authority-test-fixture' });
   const auditAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'verify']), 'audit authorization');
   expect(run(action, ['run', root, 'run-assets', 'asset-session', auditAuth.authorizationRef, 'verify', 'asset-materializer.mjs', 'audit', runDir, root]), 'audit selected asset');
   fs.writeFileSync(path.join(root, 'src', 'icons', 'triangle-alert.svg'), '<svg data-lucide="substitute"/>');

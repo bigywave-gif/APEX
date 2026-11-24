@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { reserveProjectExternalIntent, releaseUnsubmittedProjectIntent, updateProjectExternalObservation } from './project-external-registry.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
@@ -1051,6 +1052,11 @@ export function readRunState(runDir) {
   if (durable.lifecycle === 'cancelled' && (!disk || stateHash(disk) !== snapshot.state_hash)) {
     atomicWrite(file, `${JSON.stringify(durable, null, 2)}\n`);
     return durable;
+  }
+  const authorityFields = ['runId', 'track', 'scope', 'authorization', 'lifecycle', 'phase', 'gates', 'locks', 'roleChain', 'confirmationEpochs', 'deliveryRoute', 'pendingDeliveryRoute', 'pendingDeliveryRouteReceipt', 'handoff'];
+  if (disk && stateHash(disk) !== snapshot.state_hash) {
+    const changed = authorityFields.filter(key => !isDeepStrictEqual(disk[key], durable[key]));
+    if (changed.length) throw new Error(`uncommitted state projection changes protected authority fields: ${changed.join(', ')}; preserve and investigate the projection`);
   }
   const durableRevision = Number(durable.revision || 0);
   const diskRevision = Number(disk?.revision || -1);

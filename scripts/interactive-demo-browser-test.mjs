@@ -63,7 +63,7 @@ try {
   const selections = ['layout-a', 'chart-b', 'style-a', 'font-a', 'content-a'].map((id, index) => ({ id, kind: ['layout', 'component', 'style', 'font', 'content'][index], visualNodes: ['demo-root'], sourceType: 'native-web', sourceId: 'web', resourceId: id, version: 'current', materialization: 'native-web', parameters: index === 4 ? { origin: 'mock', fields: ['count'], implementation: 'local counter' } : {} }));
   const designText = '# Fixture design contract\n'; fs.writeFileSync(path.join(runDir, 'DESIGN.md'), designText);
   write('visual-execution-plan.json', { sourceSelections: selections, selectionAnalysis: { designContract: { path: 'DESIGN.md', sha256: `sha256:${crypto.createHash('sha256').update(designText).digest('hex')}` } } });
-  state.gates.gate1 = { status: 'passed', evidence: ['test-fixture'] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; fs.writeFileSync(stateFile, JSON.stringify(state));
+  state.gates.gate1 = { status: 'passed', evidence: ['test-fixture'] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; commitRunState(runDir, state, { reason: 'interactive-browser-test-fixture' });
   const tokenHash = `sha256:${crypto.createHash('sha256').update('{}').digest('hex')}`;
   const markedFragment = demoFragment.replace('<div id="apex-chat-example"', `<div data-apex-node="demo-root" data-apex-component="demo-root" data-apex-component-kind="panel" data-apex-token-hash="${tokenHash}" id="apex-chat-example"`) + '\n<!-- data-apex-source-selection="comment-only-source" -->';
   const input = write('demo-source-input.json', { schemaVersion: '3.0', entrypoint: 'index.html', interactionContract: demoContract, chatPreview: { fragment: 'preview.html' }, files: [{ path: 'preview.html', content: markedFragment }], sourceBindings: selections.map(item => ({ sourceSelectionId: item.id, files: ['preview.html'] })) });
@@ -162,7 +162,7 @@ try {
   const demoState = JSON.parse(fs.readFileSync(stateFile));
   demoState.roleChain.confirmationModel = 'two-confirmations'; demoState.locks.effectApproved = true; demoState.locks.visualApproved = true; demoState.phase = 'G-06 SYNC_FREEZE';
   for (const [key, file] of Object.entries({ designCandidates: 'design-candidates.json' })) { write(file, { testFixture: key }); demoState.artifacts[key] = file; }
-  fs.writeFileSync(stateFile, JSON.stringify(demoState));
+  commitRunState(runDir, demoState, { reason: 'interactive-browser-test-fixture' });
   const presentationAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'present_runtime_demo']);
   const presented = run('apex-router.mjs', ['present-runtime-demo', project, runId, session, presentationAuth.authorizationRef, 'real-browser-demo', 'chat-inline']);
   if (presented.nextRequiredDecision?.id !== 'demo-confirmation') throw new Error('real Demo must await explicit user confirmation');
@@ -182,7 +182,7 @@ try {
     directState.artifacts.experienceStrategy = 'fixture-product-strategy.json';
     directState.gates.gate2 = { status: 'passed', evidence: ['test-fixture'] }; directState.locks.implementationAllowed = true; directState.locks.implementationApproved = true; directState.artifacts.pageDelta = 'page-delta.json'; directState.phase = 'G-09 PROOF_IMPLEMENT';
     seedImplementationSeal(directState);
-    write('page-delta.json', { status: 'fixture' }); seedImplementationRegistration(directState); fs.writeFileSync(stateFile, JSON.stringify(directState));
+    write('page-delta.json', { status: 'fixture' }); seedImplementationRegistration(directState); commitRunState(runDir, directState, { reason: 'interactive-browser-test-fixture' });
     fs.writeFileSync(mobileScreenshot, Buffer.concat([originalScreenshot, Buffer.from('post-gate-change')]));
     const staleAfterGate = run('apex-router.mjs', ['status', project, runId, session]);
     if (staleAfterGate.nextRequiredAction !== 'revoke_visual' || staleAfterGate.allowedActions.includes('implement') || staleAfterGate.allowedActions.includes('verify')) throw new Error('changed confirmed Demo must revoke post-Gate-2 implementation and verification authority');
@@ -352,7 +352,7 @@ try {
   const formalState = JSON.parse(fs.readFileSync(stateFile));
   formalState.gates.gate2 = { status: 'passed', evidence: ['test-fixture'] }; formalState.locks.implementationAllowed = true; formalState.locks.implementationApproved = true; formalState.artifacts.pageDelta = 'page-delta.json'; formalState.phase = 'G-09 PROOF_IMPLEMENT';
   seedImplementationSeal(formalState);
-  write('page-delta.json', { status: 'fixture' }); seedImplementationRegistration(formalState); fs.writeFileSync(stateFile, JSON.stringify(formalState));
+  write('page-delta.json', { status: 'fixture' }); seedImplementationRegistration(formalState); commitRunState(runDir, formalState, { reason: 'interactive-browser-test-fixture' });
   const formalCaptureAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
   run('apex-action.mjs', ['run', project, runId, session, formalCaptureAuth.authorizationRef, 'verify', 'browser-capture.mjs', 'capture', runDir, runtime.url, spec]);
   for (const screen of screens) {

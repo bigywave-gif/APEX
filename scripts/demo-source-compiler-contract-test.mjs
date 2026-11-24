@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState } from './run-ledger.mjs';
 /** Proves the visual-confirmation chain compiles a source manifest before sandbox materialization. */
 import fs from 'node:fs';
 import { demoContract, demoFragment, seedDesignContract } from './interactive-demo-test-fixture.mjs';
@@ -24,7 +25,7 @@ try {
     { id: 'layout-a', kind: 'layout', visualNodes: ['demo-root'] }, { id: 'chart-b', kind: 'component', visualNodes: ['demo-root'] },
     { id: 'style-a', kind: 'style', visualNodes: ['demo-root'] }, { id: 'font-a', kind: 'font', visualNodes: ['demo-root'] },
     { id: 'content-a', kind: 'content', visualNodes: ['demo-root'], parameters: { origin: 'test.intent', fields: ['title'], implementation: 'render title' } }
-  ] })); fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  ] })); commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
   const input = path.join(runDir, 'demo-source-input.json');
   fs.writeFileSync(input, JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'src/App.tsx', files: [{ path: 'src/App.tsx', encoding: 'utf8', content: 'export const App = () => <main><div data-apex-source-selection="layout-a"/><div data-apex-source-selection="chart-b"/><div data-apex-source-selection="style-a"/><div data-apex-source-selection="font-a"/><div data-apex-source-selection="content-a"/>Demo</main>;\n' }, { path: 'package.json', encoding: 'utf8', content: '{"private":true}' }], sourceBindings: [{ sourceSelectionId: 'layout-a', files: ['src/App.tsx'] }, { sourceSelectionId: 'chart-b', files: ['src/App.tsx'] }, { sourceSelectionId: 'style-a', files: ['src/App.tsx'] }, { sourceSelectionId: 'font-a', files: ['src/App.tsx'] }, { sourceSelectionId: 'content-a', files: ['src/App.tsx'] }] }));
   const invalidInput = path.join(runDir, 'invalid-demo-source-input.json');

@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { appendLedgerEvent, readRunState, recordExternalSubmissionObservation } from './run-ledger.mjs';
+import { appendLedgerEvent, commitRunState, readRunState, recordExternalSubmissionObservation } from './run-ledger.mjs';
 import { availableStitchSkills, loadStitchSkill } from './required-visual-skill.mjs';
 import { stitchAdaptationForFreeze } from './stitch-adaptation.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
@@ -191,7 +191,7 @@ function updateState(runDir, reference, current, automatic = false) {
   if (current && state.locks.visualApproved) state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE';
   state.revision = Number(state.revision || 0) + 1;
   state.updatedAt = new Date().toISOString();
-  write(stateFile, state);
+  commitRunState(runDir, state, { reason: 'stitch-freeze-state-update' });
 }
 
 const [command, ...args] = process.argv.slice(2);

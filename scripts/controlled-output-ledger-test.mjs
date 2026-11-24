@@ -26,6 +26,9 @@ try {
   assert.equal(controlledOutput(run, ref, [metadata.script], [], ['record_context']), false, 'the wrong action cannot satisfy a seal');
   writeReceipt({ ...receipt, operationKey: 'another-operation' });
   assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'a receipt for a different operation cannot borrow an artifact');
+  writeReceipt(receipt);
+  fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify({ ...state, artifacts: { changed: 'other.json' } }));
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'a diverged projection cannot validate evidence against a different durable state');
   fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify({ ...state, roleChain: { confirmationModel: 'gate-summary-only' } }));
   assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'changing the projection cannot downgrade the durable confirmation model');
   fs.rmSync(path.join(run, 'state.json'));

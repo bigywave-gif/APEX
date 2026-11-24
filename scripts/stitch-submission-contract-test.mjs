@@ -1,3 +1,4 @@
+import { commitRunState } from './run-ledger.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,10 +29,10 @@ try {
   write('visual-sandbox/index.html', '<main>fixture</main>'); write('visual-sandbox-files.json', { entrypoint: 'visual-sandbox/index.html' });
   write('visual-sandbox-runtime.json', { runId, runtimeRoot: 'visual-sandbox', url: 'http://127.0.0.1:4173/', status: 'running' }); write('runtime-demo.json', { url: 'http://127.0.0.1:4173/' });
   write('presentations/runtime-demo.json', { schemaVersion: '3.0', type: 'runtime-demo-presentation', projectId: `project_${crypto.createHash('sha256').update(project).digest('hex').slice(0, 24)}`, runId, sessionId: session, url: 'http://127.0.0.1:4173/', runtimeDemo: { sha256: digest(path.join(dir, 'runtime-demo.json')) }, visualSandboxRuntime: { sha256: digest(path.join(dir, 'visual-sandbox-runtime.json')) }, visualSandboxFiles: { sha256: digest(path.join(dir, 'visual-sandbox-files.json')) } });
-  fs.writeFileSync(stateFile, JSON.stringify(state));
+  commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
   const presentAuth = ok(invoke('apex-router.mjs', ['authorize', project, runId, session, 'present_runtime_demo']), 'authorize presentation');
   ok(invoke('apex-router.mjs', ['present-runtime-demo', project, runId, session, presentAuth.authorizationRef, 'fixture-demo']), 'present fixture');
-  const presentedState = JSON.parse(fs.readFileSync(stateFile)); presentedState.deliveryRoute = 'stitch'; fs.writeFileSync(stateFile, JSON.stringify(presentedState));
+  const presentedState = JSON.parse(fs.readFileSync(stateFile)); presentedState.deliveryRoute = 'stitch'; commitRunState(path.dirname(stateFile), presentedState, { reason: 'state-authority-test-fixture' });
   const image = write('fixture.png', 'image fixture'), plan = write('stitch-input.json', { url: 'https://stitch.withgoogle.com/', imagePath: image, prompt: 'fixture', uploadTriggerRef: 'upload', promptRef: 'prompt', submitRef: 'submit', projectId: 'fixture' });
   const action = () => { const auth = ok(invoke('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']), 'authorize'); return invoke('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'sync_stitch', 'stitch-ui-importer.mjs', 'import', dir, plan]); };
   const stitchSkillAction = args => { const auth = ok(invoke('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']), 'authorize Stitch skill'); return invoke('apex-action.mjs', ['run', project, runId, session, auth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'skills', dir, ...args]); };

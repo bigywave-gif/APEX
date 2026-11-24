@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState } from './run-ledger.mjs';
 import fs from 'node:fs';
 import { demoContract, seedDesignContract } from './interactive-demo-test-fixture.mjs';
 import os from 'node:os';
@@ -26,7 +27,7 @@ try {
     { id: 'style', kind: 'style', visualNodes: ['demo-root'] }, { id: 'font', kind: 'font', visualNodes: ['demo-root'] },
     { id: 'content', kind: 'content', visualNodes: ['demo-root'], parameters: { origin: 'test.intent', fields: ['title'], implementation: 'render title' } }
   ] }));
-  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
   const input = path.join(runDir, 'demo-source.json');
   fs.writeFileSync(input, JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'src/App.tsx', files: [{ path: 'src/App.tsx', encoding: 'utf8', content: 'export const App = () => <main>Demo</main>;\n' }, { path: 'package.json', encoding: 'utf8', content: '{"private":true}' }] }));
   const badInput = path.join(runDir, 'bad-demo-source.json');

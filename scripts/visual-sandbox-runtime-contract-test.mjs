@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState } from './run-ledger.mjs';
 /** Proves a materialized Demo receives a real run-local URL rather than a status-only handoff. */
 import fs from 'node:fs';
 import { demoContract, seedDesignContract } from './interactive-demo-test-fixture.mjs';
@@ -31,7 +32,7 @@ try {
   fs.mkdirSync(path.join(project, 'data'), { recursive: true }); fs.mkdirSync(path.join(project, 'logs'), { recursive: true }); fs.writeFileSync(path.join(project, 'data', 'runtime.json'), '{"revision":0}\n'); fs.writeFileSync(path.join(project, 'logs', 'output.log'), 'runtime started\n');
   fs.mkdirSync(path.join(runDir, 'visual-sandbox'), { recursive: true }); fs.writeFileSync(path.join(runDir, 'visual-sandbox', 'index.html'), '<main data-apex-source-selection="native-layout">Runtime Demo</main>');
   fs.writeFileSync(path.join(runDir, 'demo-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'index.html', files: [{ path: 'index.html', encoding: 'utf8', content: '<main data-apex-source-selection="native-layout">Runtime Demo</main>' }], sourceBindings: [{ sourceSelectionId: 'native-layout', files: ['index.html'] }] }));
-  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, status: 'materialized', entrypoint: 'visual-sandbox/index.html' })); fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, status: 'materialized', entrypoint: 'visual-sandbox/index.html' })); commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
   const beforeStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'materialized Demo status');
   if (beforeStart.executionDirective?.currentStep?.id !== 'start-run-local-demo' || beforeStart.terminalResponseContract?.allowed !== false) throw new Error('a materialized but unstarted Demo must expose the exact automatic start step, never a null step or user prompt');
   const authorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'runtime start authorization');
@@ -46,7 +47,7 @@ try {
   const afterStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'started Demo status');
   if (afterStart.executionDirective?.currentStep?.id !== 'capture-runtime-browser-evidence' || afterStart.terminalResponseContract?.allowed !== false) throw new Error('a started Demo must advance to browser capture automatically instead of ending the chain');
   fs.unlinkSync(path.join(runDir, 'visual-sandbox-runtime.json')); delete JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime;
-  const restartState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); delete restartState.artifacts.visualSandboxRuntime; fs.writeFileSync(stateFile, `${JSON.stringify(restartState, null, 2)}\n`);
+  const restartState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); delete restartState.artifacts.visualSandboxRuntime; commitRunState(path.dirname(stateFile), restartState, { reason: 'state-authority-test-fixture' });
   const formalChangeAuthorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'formal-change start authorization');
   // The boundary check surrounds an asynchronous local-server startup. Start
   // a proven-live mutator before the synchronous action begins; a one-shot
