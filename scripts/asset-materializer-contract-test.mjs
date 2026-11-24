@@ -40,6 +40,13 @@ try {
   fs.writeFileSync(path.join(runDir, 'visual-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', sources: [{ id: 'lucide-alert-source', planSourceSelectionId: 'lucide-alert', materialization: 'inline-transfer', resolvedFiles: [{ path: 'node_modules/lucide/icons/triangle-alert.svg', sha256: iconHash }] }] }));
   state.locks.stitchSkipped = false; commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' }); const presentationAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'present_runtime_demo']), 'runtime Demo presentation authorization'); expect(run(router, ['present-runtime-demo', root, 'run-assets', 'asset-session', presentationAuth.authorizationRef, 'asset-demo']), 'runtime Demo presentation'); const presentedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); presentedState.locks.stitchSkipped = true; presentedState.locks.stitchApproved = true; presentedState.phase = 'G-07 COMPILE'; commitRunState(path.dirname(stateFile), presentedState, { reason: 'state-authority-test-fixture' });
   const selections = path.join(root, 'materialization-selection.json');
+  const externalSource = path.join(root, 'outside-source.svg'), linkedSource = path.join(runDir, 'linked-source.svg');
+  fs.writeFileSync(externalSource, '<svg/>'); fs.symlinkSync(externalSource, linkedSource);
+  fs.writeFileSync(selections, JSON.stringify({ items: [{ selectionId: 'lucide-alert', sourcePath: linkedSource, projectPath: 'src/icons/triangle-alert.svg' }] }));
+  const escapeCollectAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'compile_visual_bundle']), 'escaped source authorization');
+  const escapedCollect = run(action, ['run', root, 'run-assets', 'asset-session', escapeCollectAuth.authorizationRef, 'compile_visual_bundle', 'asset-materializer.mjs', 'collect', runDir, selections]);
+  reject(escapedCollect, 'collect must reject source outside run'); assert.match(escapedCollect.stderr, /invalid materialization item/);
+  const repairedSourceState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); repairedSourceState.fixtureBoundary = 'source-repaired'; commitRunState(runDir, repairedSourceState, { reason: 'state-authority-test-fixture' });
   fs.writeFileSync(selections, JSON.stringify({ items: [{ selectionId: 'lucide-alert', sourcePath: icon, projectPath: 'src/icons/triangle-alert.svg', license: 'ISC' }] }));
   const collectAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'compile_visual_bundle']), 'collect authorization');
   expect(run(action, ['run', root, 'run-assets', 'asset-session', collectAuth.authorizationRef, 'compile_visual_bundle', 'asset-materializer.mjs', 'collect', runDir, selections]), 'collect selected asset');
@@ -48,6 +55,27 @@ try {
   collected.gates.gate2 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; collected.locks.implementationAllowed = true;
   commitRunState(path.dirname(stateFile), collected, { reason: 'state-authority-test-fixture' });
   const lease = expect(run(router, ['lease', root, 'run-assets', 'asset-session']), 'lease');
+  const escapeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-asset-write-escape-'));
+  try {
+    fs.mkdirSync(path.join(escapeRoot, 'icons'));
+    const external = path.join(escapeRoot, 'icons', 'triangle-alert.svg');
+    fs.writeFileSync(external, 'outside sentinel');
+    fs.symlinkSync(escapeRoot, path.join(root, 'src'));
+    let auth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'ancestor escape authorization');
+    let blocked = run(action, ['run', root, 'run-assets', 'asset-session', auth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, root]);
+    reject(blocked, 'apply must reject an external parent symlink'); assert.match(blocked.stdout, /project materialization path missing or outside project/);
+    assert.equal(fs.readFileSync(external, 'utf8'), 'outside sentinel');
+    fs.unlinkSync(path.join(root, 'src'));
+    fs.mkdirSync(path.join(root, 'src', 'icons'), { recursive: true });
+    fs.symlinkSync(external, path.join(root, 'src', 'icons', 'triangle-alert.svg'));
+    let changed = JSON.parse(fs.readFileSync(stateFile, 'utf8')); changed.fixtureBoundary = 'target-link'; commitRunState(runDir, changed, { reason: 'state-authority-test-fixture' });
+    auth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'target escape authorization');
+    blocked = run(action, ['run', root, 'run-assets', 'asset-session', auth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, root]);
+    reject(blocked, 'apply must reject an external file symlink'); assert.match(blocked.stdout, /project materialization path missing or outside project/);
+    assert.equal(fs.readFileSync(external, 'utf8'), 'outside sentinel');
+    fs.unlinkSync(path.join(root, 'src', 'icons', 'triangle-alert.svg'));
+    changed = JSON.parse(fs.readFileSync(stateFile, 'utf8')); changed.fixtureBoundary = 'repaired'; commitRunState(runDir, changed, { reason: 'state-authority-test-fixture' });
+  } finally { fs.rmSync(escapeRoot, { recursive: true, force: true }); }
   const applyAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'apply authorization');
   expect(run(action, ['run', root, 'run-assets', 'asset-session', applyAuth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, root]), 'apply selected asset');
   const appliedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); appliedState.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); commitRunState(path.dirname(stateFile), appliedState, { reason: 'state-authority-test-fixture' });
@@ -62,5 +90,5 @@ try {
   assert.throws(() => assertMaterializationCurrent(runDir, root, materialState, plan), /materialized source changed/);
   const changedAuditAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'verify']), 'changed audit authorization');
   reject(run(action, ['run', root, 'run-assets', 'asset-session', changedAuditAuth.authorizationRef, 'verify', 'asset-materializer.mjs', 'audit', runDir, root]), 'audit must reject a substituted selected asset');
-  console.log(JSON.stringify({ status: 'passed', checks: 4 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 7 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

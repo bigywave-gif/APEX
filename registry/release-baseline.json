@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T15:32:42.358Z",
+  "generatedAt": "2026-11-24T15:46:35.531Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -83,8 +83,8 @@
     "scripts/api-mutation-journal.mjs": "940f35a7291908e423cd03355c37581357bb9143cb0a25e279e78f28485b2013",
     "scripts/api-sample-schema-test.mjs": "44c43a0fe15efdc0eb08a56ecf241d00985a7c15fb7157f8ee4f870b22190ed9",
     "scripts/api-sample-schema.mjs": "1f30c42606f2e59e19c3dbad1f2e8d66f0a6533ce4a18a22c114b6cf9c0d0930",
-    "scripts/asset-materializer-contract-test.mjs": "45aaa11446ed8c5a9e8c6aa3b7c9dfae93c1206870da1aab3eb8b10a5a929f61",
-    "scripts/asset-materializer.mjs": "44493801e8dcc43a0a9bf33c6f6ccc4a5264fc0c5667abb63439021a7cb3f6c0",
+    "scripts/asset-materializer-contract-test.mjs": "cffe33adbe4779e63d98cd9c73170b1e6ae5a087441c9d745282be91c4c0516d",
+    "scripts/asset-materializer.mjs": "c55cecdc4351ab2531df57ea3e37aea57521a14af6dd781dab18d5c4cdaefc44",
     "scripts/asset-resolver.mjs": "95e0ef1ddb982555c6dafc4648a2f6ed75bee32cb7edceff203e5eeac7a19cdb",
     "scripts/baseline-collector.mjs": "749687461030d458596b6c9ae4f60e4cd3e8a0034ee0ef94fdc6589ebe6d2076",
     "scripts/bridge-confirmation-contract-test.mjs": "b8e9055439ddeeb7f5644ea2c26c30f3384fbc4d82b69ea7b264574dd9a801d8",
