@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T21:34:06.668Z",
+  "generatedAt": "2026-11-24T21:42:46.779Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -119,8 +119,8 @@
     "scripts/design-contract-evidence.mjs": "f0be72ea1a1597f05464d6cd41cccc3fab597c67a839a9a1f1a7f0ad19b680bf",
     "scripts/evidence-provenance.mjs": "ec1725afc9db49574ff08b04739deed7fdf09b04c79ef3e02d9abef2787bc650",
     "scripts/existing-baseline-browser-test.mjs": "7ae5b6b8fb1685e9755456a553eba9e1d5f75459340ff2d1ff3c63c20f83f461",
-    "scripts/existing-code-reference.mjs": "fc34f1031fc64fd7ddca0b6169ffe9670d942b12cc7879804a3cfa4741fd75e8",
-    "scripts/existing-reference-resolution-test.mjs": "7395eaa7047de4aa5398dffefb3783957d0038f9fafb13b66dce3d91e2599fbb",
+    "scripts/existing-code-reference.mjs": "5c0966d86c1297dfb5f89d323d9b03226539a9e800c555c69f3fdfeb22b7e036",
+    "scripts/existing-reference-resolution-test.mjs": "c5833591e7f0f79c21f1323ee7adcbb59bb5ebf9a2aa77314cd82acddc68ba34",
     "scripts/existing-resource-freshness.mjs": "80b573e37592a86c42e97b385878eba1dc783ff70b7397bc3fdf5bf48960c2b4",
     "scripts/existing-resource-runtime.mjs": "f103ed456c99dc108075575bde80e9f05c7933351b0791f5d2e1c08c9f6b1438",
     "scripts/experience-evaluator.mjs": "97034f0159a68bcd3d6cbba36edd8d8d62074879659b24dd38decb77d7e78ea6",

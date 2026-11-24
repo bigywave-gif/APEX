@@ -201,5 +201,21 @@ try {
   assert.equal(changedPackageStatus.executionDirective?.currentStep?.id, 'freeze-code-reference');
   assert.match(changedPackageStatus.executionDirective.currentStep.details, /apps\/client\/package\.json/);
   assert.notEqual(nestedCapture().reused, true);
+  put('shared/widget/package.json', '{"dependencies":{"preact":"10"}}');
+  put('shared/widget/index.ts', 'export const widget = true;');
+  put('apps/client/src/main.tsx', "import '../../../shared/widget/index.js'; export const App = () => <main>App</main>;");
+  assert.notEqual(nestedCapture().reused, true);
+  assert.ok(paths().has('shared/widget/index.ts')); assert.ok(paths().has('shared/widget/package.json'), 'a transitive source package must be frozen even outside declared workspaces');
+  assert.equal(nestedCapture().reused, true);
+  put('shared/widget/tsconfig.json', '{"compilerOptions":{}}');
+  const addedDependencyConfig = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(addedDependencyConfig.executionDirective?.currentStep?.id, 'freeze-code-reference');
+  assert.match(addedDependencyConfig.executionDirective.currentStep.details, /shared\/widget\/tsconfig\.json/);
+  assert.notEqual(nestedCapture().reused, true); assert.ok(paths().has('shared/widget/tsconfig.json'));
+  put('shared/widget/package.json', '{"dependencies":{"preact":"11"}}');
+  const changedDependencyPackage = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(changedDependencyPackage.executionDirective?.currentStep?.id, 'freeze-code-reference');
+  assert.match(changedDependencyPackage.executionDirective.currentStep.details, /shared\/widget\/package\.json/);
+  assert.notEqual(nestedCapture().reused, true);
   console.log(JSON.stringify({ status: 'passed', scope: 'public paths, TypeScript imports, aliases, workspace sources and cache invalidation' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

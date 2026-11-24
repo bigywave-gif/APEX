@@ -8,11 +8,12 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { newlyAvailableConfigs } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '8';
+const CAPTURE_VERSION = '9';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -131,21 +132,27 @@ if (realProjectRoot !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || 
 tsconfigFile = path.join(projectRoot, 'tsconfig.json');
 const absentConfigCandidates = new Set();
 function projectConfig(file) { const real = fs.realpathSync(file); if (!inside(realProjectRoot, real)) throw new Error(`project configuration is outside the project: ${rel(projectRoot, file)}`); return fs.readFileSync(file, 'utf8'); }
+const checkedConfigDirectories = new Set();
+function collectAncestorConfigs(source) {
+  const found = []; let current = path.dirname(source);
+  while (inside(projectRoot, current) && !checkedConfigDirectories.has(current)) {
+    checkedConfigDirectories.add(current);
+    for (const name of ['package.json', 'tsconfig.json']) {
+      const file = path.join(current, name);
+      let present = false;
+      try { fs.lstatSync(file); present = true; } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+      if (present) { projectConfig(file); found.push(file); }
+      else absentConfigCandidates.add(rel(projectRoot, file));
+    }
+    if (current === projectRoot) break;
+    current = path.dirname(current);
+  }
+  return found;
+}
 try {
   for (const entry of entries) {
     if (!inside(projectRoot, entry)) throw new Error('target code entrypoint is outside the project');
-    let current = path.dirname(entry);
-    while (inside(projectRoot, current)) {
-      for (const name of ['package.json', 'tsconfig.json']) {
-        const file = path.join(current, name);
-        let present = false;
-        try { fs.lstatSync(file); present = true; } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
-        if (present) { projectConfig(file); configFiles.push(file); }
-        else absentConfigCandidates.add(rel(projectRoot, file));
-      }
-      if (current === projectRoot) break;
-      current = path.dirname(current);
-    }
+    configFiles.push(...collectAncestorConfigs(entry));
   }
   if (fs.existsSync(tsconfigFile)) { compilerOptions = parseJsonComments(projectConfig(tsconfigFile)).compilerOptions || {}; configFiles.push(tsconfigFile); }
   const manifestFile = path.join(projectRoot, 'package.json');
@@ -196,7 +203,7 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
     const prior = JSON.parse(fs.readFileSync(priorReferenceFile, 'utf8')); const index = JSON.parse(fs.readFileSync(integrityIndexFile, 'utf8'));
     const requestedEntries = entries.map(entry => rel(projectRoot, entry)).sort(); const indexedEntries = (index.entrypoints || []).slice().sort();
     const scopeHash = sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: requestedEntries, configHash, publicRoots })));
-    const unchanged = prior.complete === true && index.captureVersion === CAPTURE_VERSION && index.scopeHash === scopeHash && JSON.stringify(requestedEntries) === JSON.stringify(indexedEntries) && (index.files || []).length === (prior.files || []).length && (index.files || []).every(item => sameFingerprint(item.sourceFingerprint, path.join(projectRoot, item.path)) && sameFingerprint(item.copyFingerprint, path.join(runDir, item.copyPath))) && Array.isArray(index.missingCandidates) && index.missingCandidates.every(file => !fs.existsSync(path.join(projectRoot, file)));
+    const unchanged = prior.complete === true && index.captureVersion === CAPTURE_VERSION && index.scopeHash === scopeHash && JSON.stringify(requestedEntries) === JSON.stringify(indexedEntries) && (index.files || []).length === (prior.files || []).length && (index.files || []).every(item => sameFingerprint(item.sourceFingerprint, path.join(projectRoot, item.path)) && sameFingerprint(item.copyFingerprint, path.join(runDir, item.copyPath))) && Array.isArray(index.missingCandidates) && index.missingCandidates.every(file => !fs.existsSync(path.join(projectRoot, file))) && Array.isArray(prior.absentConfigCandidates) && newlyAvailableConfigs(prior, projectRoot).length === 0;
     if (unchanged) {
       state.artifacts.codeReference = 'code-reference.json'; state.artifacts.pageSkeleton = 'page-skeleton.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'existing-code-reference-state-update', expectedStateHash });
       console.log(JSON.stringify({ codeReference: priorReferenceFile, pageSkeleton: path.join(runDir, 'page-skeleton.json'), complete: true, reused: true, sourceFileCount: prior.sourceFileCount, totalBytes: prior.totalBytes, sourceTreeHash: prior.sourceTreeHash }));
@@ -205,7 +212,7 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
   } catch { /* A malformed cache is never trusted; rebuild it below. */ }
 }
 const pending = [...entries, ...configFiles]; const selected = new Set();
-while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); if (/\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file)) { const content = fs.readFileSync(file, 'utf8'); for (const dependency of imports(projectRoot, file, content)) if (!selected.has(dependency)) pending.push(dependency); } }
+while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } if (/\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file)) { const content = fs.readFileSync(file, 'utf8'); for (const dependency of imports(projectRoot, file, content)) if (!selected.has(dependency)) pending.push(dependency); } }
 fs.mkdirSync(copies, { recursive: true });
 const aggregate = crypto.createHash('sha256'); let totalBytes = 0; const nodes = [];
 const integrityFiles = [];
