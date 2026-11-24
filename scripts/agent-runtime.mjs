@@ -9,9 +9,10 @@ import { availableAgentSkills, loadTasteSkill, loadAgentSkill, requiredTasteLoad
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
 const [command, runArg, ...args] = process.argv.slice(2);
 const runDir = path.resolve(runArg || '.');
-if (!command || !runArg) fail('usage: register|enqueue|claim|succeed|fail|tokens|trace-start|trace-end|status <run-dir> ...');
+if (!command || !runArg) fail('usage: register|enqueue|claim|skill|renew|succeed|fail|tokens-observed|reconcile-attempt-usage|reconcile-observed-usage|run-budget|trace-start|trace-end|status <run-dir> ... (tokens is for legacy Runs only)');
 const stageAction = { baseline: 'collect_existing_baseline', gate1: 'analyze_requirement', visual: 'plan_visual', implementation: 'compile_visual_bundle', verify: 'verify' };
 const readJson = value => { try { return JSON.parse(value); } catch { fail('JSON argument is invalid'); } };
+const tokenInteger = (value, name) => { if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error(`${name} must be a non-negative safe integer`); return Number(value); };
 try {
   if (command === 'status') { requireRouterAction(runDir, Object.values(stageAction)); console.log(JSON.stringify(agentRuntimeStatus(runDir), null, 2)); }
   else if (command === 'register') {
@@ -63,7 +64,7 @@ try {
   } else if (command === 'tokens-observed') {
     const [stage, observationKey, input, output, usageSource, limit = 'null'] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     if (input === undefined || output === undefined) fail('tokens-observed requires input and output counts');
-    requireRouterAction(runDir, action); console.log(JSON.stringify(recordObservedTokenUsage(runDir, { stage, observationKey, inputTokens: Number(input), outputTokens: Number(output), usageSource, limit: limit === 'null' ? null : Number(limit) })));
+    requireRouterAction(runDir, action); console.log(JSON.stringify(recordObservedTokenUsage(runDir, { stage, observationKey, inputTokens: tokenInteger(input, 'input tokens'), outputTokens: tokenInteger(output, 'output tokens'), usageSource, limit: limit === 'null' ? null : tokenInteger(limit, 'token limit') })));
   } else if (command === 'reconcile-attempt-usage') {
     const [stage, jobId, attempt, usageJson] = args, action = stageAction[stage];
     if (!action || !jobId || !attempt || !usageJson) fail('reconcile-attempt-usage requires current stage, job ID, attempt and usage JSON');
@@ -75,7 +76,7 @@ try {
   } else if (command === 'run-budget') {
     const [stage, limit, verificationReserve, recoveryReserve = '0'] = args, action = stageAction[stage];
     if (!action || limit === undefined || verificationReserve === undefined) fail('run-budget requires stage, total limit, verification reserve and optional recovery reserve');
-    requireRouterAction(runDir, action); console.log(JSON.stringify(configureRunTokenBudget(runDir, { limit: Number(limit), verificationReserve: Number(verificationReserve), recoveryReserve: Number(recoveryReserve) })));
+    requireRouterAction(runDir, action); console.log(JSON.stringify(configureRunTokenBudget(runDir, { limit: tokenInteger(limit, 'run budget'), verificationReserve: tokenInteger(verificationReserve, 'verification reserve'), recoveryReserve: tokenInteger(recoveryReserve, 'recovery reserve') })));
   } else if (command === 'trace-start') {
     const [stage, name, kind = 'agent', attributes = '{}'] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     requireRouterAction(runDir, action); console.log(JSON.stringify(startTraceSpan(runDir, { name, kind, attributes: readJson(attributes) })));

@@ -58,6 +58,11 @@ try {
   const rejectedLegacyUsage = invoke(authorize(), 'agent-runtime.mjs', ['tokens', runDir, 'visual', '1500', '0', '10']);
   assert.notEqual(rejectedLegacyUsage.status, 0); assert.match(rejectedLegacyUsage.stderr, /use tokens-observed/);
   assert.equal(agentRuntimeStatus(runDir).tokenUsage.visual || 0, 0, 'a rejected legacy report must not create an ambiguous usage record');
+  const blankUsage = invoke(authorize(), 'agent-runtime.mjs', ['tokens-observed', runDir, 'visual', 'blank_host_usage_0001', ' ', '0', 'provider-reported']);
+  assert.notEqual(blankUsage.status, 0); assert.match(blankUsage.stderr, /input tokens must be a non-negative safe integer/);
+  const blankReserve = invoke(authorize(), 'agent-runtime.mjs', ['run-budget', runDir, 'visual', '100', ' ']);
+  assert.notEqual(blankReserve.status, 0); assert.match(blankReserve.stderr, /verification reserve must be a non-negative safe integer/);
+  assert.equal(agentRuntimeStatus(runDir).tokenUsage.visual || 0, 0, 'invalid numeric input must not be recorded as zero');
   const hostUsage = expect(invoke(authorize(), 'agent-runtime.mjs', ['tokens-observed', runDir, 'visual', 'independent_host_0001', '0', '0', 'unknown']), 'record independent host usage');
   assert.equal(hostUsage.budgetScope, 'reported-usage-only');
   assert.equal(hostUsage.idempotent, false);

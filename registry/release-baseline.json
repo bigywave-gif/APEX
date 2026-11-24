@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T20:46:08.226Z",
+  "generatedAt": "2026-11-24T20:54:52.311Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -63,7 +63,7 @@
     "scripts/agent-budget-reservation-test.mjs": "4642a667a906db13e98e4f1d7385a49a0525c46be60c110442a86749ebcf63e3",
     "scripts/agent-concurrency-contract-test.mjs": "086bfbb0c9e2b0a29749a45932e2ba1f3ad00fa0a0a2b914c55af588e4b70a7b",
     "scripts/agent-runtime-contract-test.mjs": "864f0e4300a07b9a922090ed6235631cb3431dd72175b9085cb8649218a51839",
-    "scripts/agent-runtime.mjs": "af446a8bd0540ce94114debc169ac5b3147a98963164559f42a1e87a01987db8",
+    "scripts/agent-runtime.mjs": "36c9677e7a95894cc13bf6dbf4beac28645f23aa9c56059d1b2850a566b0e87d",
     "scripts/apex-action.mjs": "e835f74288f2912f4c7adecc6404b26a3d3d69766a8a7146108730b97ebfda6b",
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-reconcile.mjs": "b827d327e518916fa6187df1e4a1f52c8d49bdffe1bd4402e944b13ed5c5877a",
@@ -250,7 +250,7 @@
     "scripts/visual-reference-compiler.mjs": "f73887397be7d64142e438e1069e2f52e6e06cd1514035bdbf842d342fe7c120",
     "scripts/visual-revision-binding-test.mjs": "9dcc1c1c40f34b5db2a0f2daf69f963c13e8ad44bfdcac51b4f3de06720d99eb",
     "scripts/visual-revision-binding.mjs": "6e2d276b7255de99198d6f5480993470d33635636753aa9f76d75d97a168408b",
-    "scripts/visual-role-skill-integration-test.mjs": "9de938e4610bfcfaac78b9bf223d5b0b8f4cdedd8b63807793807c8bf8757487",
+    "scripts/visual-role-skill-integration-test.mjs": "9b640683f5d75188abcdcd262b78f70361fa3102555e130a6af95f3df63dcb9b",
     "scripts/visual-sandbox-dependency.mjs": "af95637d97f233dd75b103c23fc9dcdb12d9f5757a21176b004fdd2f6edcde89",
     "scripts/visual-sandbox-runtime-contract-test.mjs": "42c7cf0486fe591a37c107d9cd350b87e8730350d3e7047e7a6a2bbe88a88c21",
     "scripts/visual-sandbox-runtime.mjs": "cc0dc5b7885404f1b8a433cc6b4d5a8d8c439b09ad40bed56af68a7b59e12f27",
