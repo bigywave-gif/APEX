@@ -217,6 +217,7 @@ export function initializeLedger(runDir, state, reason = 'run-initialized') {
     database.exec('BEGIN IMMEDIATE');
     const currentSnapshot = latestSnapshot(database);
     if (currentSnapshot && JSON.parse(currentSnapshot.state_json).lifecycle === 'cancelled' && state.lifecycle !== 'cancelled') throw new Error('cannot import an active state to a cancelled run');
+    if (!currentSnapshot && reason === 'run-initialized') database.prepare('INSERT OR REPLACE INTO ledger_meta (key, value) VALUES (?, ?)').run('projectionPolicy', 'ledger-authoritative');
     appendSnapshot(database, state, reason);
     database.prepare('INSERT OR REPLACE INTO ledger_meta (key, value) VALUES (?, ?)').run('schemaVersion', '1.0');
     database.exec('COMMIT');
@@ -1030,10 +1031,11 @@ export function readRunState(runDir) {
     return disk;
   }
   const database = open(runDir);
-  let snapshot, recovered = null;
+  let snapshot, projectionPolicy, recovered = null;
   try {
     database.exec('BEGIN IMMEDIATE');
     snapshot = latestSnapshot(database);
+    projectionPolicy = database.prepare("SELECT value FROM ledger_meta WHERE key = 'projectionPolicy'").get()?.value || null;
     const currentProjection = parseState(file);
     // A previously committed projection can remain after a crash between the
     // next ledger commit and projection write. Never import it as a new edit.
@@ -1062,6 +1064,7 @@ export function readRunState(runDir) {
   if (disk && stateHash(disk) !== snapshot.state_hash) {
     const changed = authorityFields.filter(key => !isDeepStrictEqual(disk[key], durable[key]));
     if (changed.length) throw new Error(`uncommitted state projection changes protected authority fields: ${changed.join(', ')}; preserve and investigate the projection`);
+    if (projectionPolicy === 'ledger-authoritative') throw new Error('uncommitted state projection differs from the durable ledger; preserve and investigate the projection');
   }
   const durableRevision = Number(durable.revision || 0);
   const diskRevision = Number(disk?.revision || -1);

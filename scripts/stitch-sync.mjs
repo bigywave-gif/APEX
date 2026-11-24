@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { appendLedgerEvent, commitRunState, readRunState, recordExternalSubmissionObservation } from './run-ledger.mjs';
+import { appendLedgerEvent, commitRunState, readRunState, readRunStateForUpdate, recordExternalSubmissionObservation } from './run-ledger.mjs';
 import { availableStitchSkills, loadStitchSkill } from './required-visual-skill.mjs';
 import { stitchAdaptationForFreeze } from './stitch-adaptation.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
@@ -184,14 +184,14 @@ function imageInputTools(tools) {
 function updateState(runDir, reference, current, automatic = false) {
   const stateFile = path.join(runDir, 'state.json');
   if (!fs.existsSync(stateFile)) return;
-  const state = read(stateFile);
+  const { state, expectedStateHash } = readRunStateForUpdate(runDir);
   state.artifacts.stitchFreeze = reference;
   state.locks.stitchCurrent = current;
   if (automatic) state.locks.stitchApproved = true;
   if (current && state.locks.visualApproved) state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE';
   state.revision = Number(state.revision || 0) + 1;
   state.updatedAt = new Date().toISOString();
-  commitRunState(runDir, state, { reason: 'stitch-freeze-state-update' });
+  commitRunState(runDir, state, { reason: 'stitch-freeze-state-update', expectedStateHash });
 }
 
 const [command, ...args] = process.argv.slice(2);

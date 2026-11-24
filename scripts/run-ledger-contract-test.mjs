@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { commitRunState, readRunState, reconcileRun, recordArtifact, runLedgerPaths } from './run-ledger.mjs';
+import { commitRunState, initializeLedger, readRunState, reconcileRun, recordArtifact, runLedgerPaths } from './run-ledger.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-ledger-'));
 try {
@@ -22,6 +22,13 @@ try {
   fs.writeFileSync(path.join(casRoot, 'state.json'), JSON.stringify(next));
   assert.deepEqual(readRunState(casRoot), newer, 'previously committed projection must recover the latest durable state');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(casRoot, 'state.json'), 'utf8')), newer, 'recovery must repair the projection');
+
+  const strictRoot = path.join(root, 'strict'); fs.mkdirSync(strictRoot);
+  fs.writeFileSync(path.join(strictRoot, 'state.json'), JSON.stringify(initial)); initializeLedger(strictRoot, initial, 'run-initialized');
+  const changedArtifact = { ...initial, artifacts: { visualReference: 'untrusted.json' } };
+  fs.writeFileSync(path.join(strictRoot, 'state.json'), JSON.stringify(changedArtifact));
+  assert.throws(() => readRunState(strictRoot), /uncommitted state projection differs/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(strictRoot, 'state.json'), 'utf8')), changedArtifact, 'new Run must preserve an uncommitted projection for investigation');
 
   fs.writeFileSync(path.join(root, 'state.json'), '{broken');
   assert.deepEqual(readRunState(root), next, 'ledger must recover a broken compatibility projection');

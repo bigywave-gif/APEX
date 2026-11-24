@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { archiveArtifacts } from './run-ledger.mjs';
+import { archiveArtifacts, commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { resolveStitchScreenReference } from './stitch-screen-binding.mjs';
 import { resolveImplementationReference, resolveDirectImplementationReference } from './implementation-reference.mjs';
 
@@ -59,8 +59,9 @@ function structuralDiff(visual, candidateContract, stage, candidateHash) {
 const [command, runArg, stage, inputArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'compare' || !runArg || !['stitch', 'implementation'].includes(stage) || !inputArg) die('usage: compare <run-dir> <stitch|implementation> <parity-input.json>');
-const runDir = path.resolve(runArg), input = read(path.resolve(inputArg)), state = read(path.join(runDir, 'state.json'));
+const runDir = path.resolve(runArg), input = read(path.resolve(inputArg));
 try { requireRouterAction(runDir, stage === 'stitch' ? ['sync_stitch', 'compile_visual_bundle', 'validate_stitch'] : 'verify'); } catch (error) { die(error.message); }
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 let visual = read(path.join(runDir, state.artifacts.visualReference || 'visual-reference.json'));
 let screenReference = null;
 if (stage === 'stitch') {
@@ -132,6 +133,6 @@ if (stage === 'implementation' && input.captureId && ['stitch', 'effect-image'].
   if (fs.existsSync(screenEvidence)) archiveArtifacts(runDir, [path.relative(runDir, screenEvidence)], 'implementation-screen-parity-superseded');
   write(screenEvidence, { ...artifact, captureId: input.captureId, screenId: implementationBaseline.screenId });
 }
-state.artifacts[stage === 'stitch' ? 'stitchParityEvidence' : 'implementationParityEvidence'] = name; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(path.join(runDir, 'state.json'), state);
+state.artifacts[stage === 'stitch' ? 'stitchParityEvidence' : 'implementationParityEvidence'] = name; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-parity-state-update', expectedStateHash });
 console.log(JSON.stringify({ evidence: path.join(runDir, name), ...(screenEvidence ? { screenEvidence } : {}), status, checks, pixelExact, structureFailures, diff }));
 if (status !== 'passed') process.exitCode = 2;

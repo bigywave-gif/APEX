@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Experience evaluator failed: ${message}`); process.exit(1); }
@@ -57,18 +58,18 @@ function evaluate(strategy) {
   const score = dimensions.reduce((total, item) => total + item.score, 0);
   return { schemaVersion: '3.0', status: score >= 85 && !criticalFailures.length ? 'passed' : 'failed', score, threshold: 85, dimensions, criticalFailures, checkedAt: new Date().toISOString() };
 }
-function updateState(runDir, artifacts) {
-  const file = path.join(runDir, 'state.json'); const state = read(file);
+function updateState(runDir, artifacts, state, expectedStateHash) {
   Object.assign(state.artifacts, artifacts);
-  state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(file, state);
+  state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'experience-evaluator-state-update', expectedStateHash });
 }
 const [command, runArg, inputArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (!['evaluate', 'candidates'].includes(command) || !runArg || !inputArg) die('usage: evaluate <run-dir> <experience-strategy.json> | candidates <run-dir> <design-candidates.json>');
 const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, command === 'evaluate' ? 'analyze_requirement' : ['generate_visual', 'compile_visual_bundle']); } catch (error) { die(error.message); }
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 if (command === 'evaluate') {
-  if (read(path.join(runDir, 'state.json')).gates?.gate1?.status === 'passed') die('experience strategy is frozen after Gate 1; use restart for a requirements change');
+  if (state.gates?.gate1?.status === 'passed') die('experience strategy is frozen after Gate 1; use restart for a requirements change');
   const sourceStrategy = path.resolve(inputArg);
   if (!fs.existsSync(sourceStrategy) || !fs.statSync(sourceStrategy).isFile()) die(`experience strategy does not exist: ${sourceStrategy}`);
   // A run may only reference its own immutable copy. This keeps the quality
@@ -78,10 +79,10 @@ if (command === 'evaluate') {
   if (sourceStrategy !== strategyFile) write(strategyFile, read(sourceStrategy));
   const result = evaluate(read(strategyFile)); result.strategyHash = hash(strategyFile);
   const output = path.join(runDir, 'experience-quality-evidence.json'); write(output, result);
-  updateState(runDir, { experienceStrategy: 'experience-strategy.json', experienceQualityEvidence: 'experience-quality-evidence.json' });
+  updateState(runDir, { experienceStrategy: 'experience-strategy.json', experienceQualityEvidence: 'experience-quality-evidence.json' }, state, expectedStateHash);
   console.log(JSON.stringify({ strategy: strategyFile, evidence: output, status: result.status, score: result.score, threshold: result.threshold })); if (result.status !== 'passed') process.exitCode = 2;
 } else {
-  const candidatesFile = path.resolve(inputArg); const candidates = read(candidatesFile); const state = read(path.join(runDir, 'state.json')); const strategyFile = path.join(runDir, state.artifacts.experienceStrategy || 'experience-strategy.json');
+  const candidatesFile = path.resolve(inputArg); const candidates = read(candidatesFile); const strategyFile = path.join(runDir, state.artifacts.experienceStrategy || 'experience-strategy.json');
   const output = path.join(runDir, 'design-candidates.json');
   // Downstream bundle workers may re-check the selected candidate. That is a
   // read-only verification, not a replacement of the user-approved choice.
@@ -103,7 +104,7 @@ if (command === 'evaluate') {
   for (const item of candidates.candidates || []) { const image = path.resolve(runDir, item.image.path); if (!fs.existsSync(image) || !fs.realpathSync(image).startsWith(`${fs.realpathSync(runDir)}${path.sep}`) || hash(image) !== item.image.sha256) die(`candidate image is missing, outside the current run, or hash-mismatched: ${item.id}`); }
   if (!frozenVerification) {
     if (candidatesFile !== output) write(output, candidates);
-    updateState(runDir, { designCandidates: 'design-candidates.json' });
+    updateState(runDir, { designCandidates: 'design-candidates.json' }, state, expectedStateHash);
   }
   console.log(JSON.stringify({ candidates: output, status: 'passed', mode: frozenVerification ? 'verified-frozen-candidates' : 'recorded-candidates', selectedCandidateId: candidates.selectedCandidateId }));
 }
