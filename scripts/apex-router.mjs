@@ -1845,7 +1845,7 @@ function automaticWorkStep(state, runDir, action) {
     if (state.track === 'existing' && usesCombinedPlan(state)) {
       try {
         const resourceReview = assessResourceVerification(runDir, state);
-        if (resourceReview.status === 'unverified') return step('capture-formal-resource-evidence', '验证范围内未定位的页面资源', ['resource-browser-spec.json', 'evidence/runtime-browser-capture.json'], `在原正式浏览器采集配置中保留全部已确认页面、视口与 formalJourneys，并为每项待验证引用填写 resourceChecks（source、reference、screenId、selector）。仅当前页面视口内已解码的同源 img 可用此方式证明资源已加载；CSS 背景、字体、视频、跨域资源及其他状态不能借此判定通过；旧快照缺少引用类型时，回退受影响的基线阶段重采并重审。无法核实时保持未验证。待验证：${resourceReview.pending.length} 项。`);
+        if (resourceReview.status === 'unverified') return step('capture-formal-resource-evidence', '验证范围内未定位的页面资源', ['resource-browser-spec.json', 'evidence/runtime-browser-capture.json'], `在原正式浏览器采集配置中保留全部已确认页面、视口与 formalJourneys，并为每项待验证引用填写 resourceChecks（source、reference、screenId、selector）。当前支持同源 img 和元素实际采用的 CSS 背景图片；背景图片解码可能再次读取该 URL。字体、视频、跨域资源及其他状态不能借此判定通过；旧快照缺少引用类型时，回退受影响的基线阶段重采并重审。无法核实时保持未验证。待验证：${resourceReview.pending.length} 项。`);
       } catch (error) {
         return step('repair-existing-resource-review', '修复既有网站资源审查证据', ['role-advisory-manifest.json'], `基线资源审查不可用：${error.message}。恢复原始受控审查及其输入；无法恢复时，按 Router 回退受影响的基线阶段重新采集，不得跳过。`);
       }

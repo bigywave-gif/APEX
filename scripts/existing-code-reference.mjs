@@ -11,7 +11,7 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '6';
+const CAPTURE_VERSION = '7';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -110,7 +110,10 @@ function imports(projectRoot, file, content) {
     }
   }
   if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/gi)) localReference(match[1], 'css-import');
-  if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/\burl\(\s*(?:"([^"]*)"|'([^']*)'|([^'"()\s]+))\s*\)/gi)) localReference(match[1] ?? match[2] ?? match[3], 'css-url');
+  if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/\burl\(\s*(?:"([^"]*)"|'([^']*)'|([^'"()\s]+))\s*\)/gi)) {
+    const property = content.slice(0, match.index).match(/(?:^|[;{}])\s*([-\w]+)\s*:\s*[^;{}]*$/)?.[1]?.toLowerCase();
+    localReference(match[1] ?? match[2] ?? match[3], ['background', 'background-image'].includes(property) ? 'css-background-url' : 'css-url');
+  }
   return [...found];
 }
 function markers(content) { const text = content.toString('utf8'); const result = []; const tags = [...text.matchAll(/<([A-Za-z][\w.-]*)\b[^>]*>/g)].map(match => match[1]); const tests = [...text.matchAll(/data-testid=["']([^"']+)["']/g)].map(match => `testid:${match[1]}`); [...tags, ...tests].forEach((marker, index) => result.push({ marker: `${marker}#${index + 1}`, kind: marker.startsWith('testid:') ? 'test-anchor' : 'dom-element' })); return result; }

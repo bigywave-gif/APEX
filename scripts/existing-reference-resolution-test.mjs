@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { newlyAvailableResources, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
-import { assessResourceVerification, observeResourceImages, resourceVerificationBinding } from './existing-resource-runtime.mjs';
+import { assessResourceVerification, observeResourceImages, observeBackgroundImages, resourceVerificationBinding } from './existing-resource-runtime.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-reference-resolution-'));
@@ -38,6 +38,7 @@ try {
   for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/components/Button.vue', 'src/components/button.ts', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
   const initial = JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json')));
   assert.deepEqual(initial.unresolvedResources.map(item => item.reference), ['/late.png']);
+  assert.deepEqual(initial.unresolvedResources[0].contexts, ['css-background-url']);
   assert.deepEqual(resourceCoverage(initial), { status: 'unverified', unresolvedCount: 1 });
   assert.deepEqual(assertResourceCoverage(initial, { codeReference: { resourceCoverage: resourceCoverage(initial) } }), { status: 'unverified', unresolvedCount: 1 });
   assert.throws(() => assertResourceCoverage(initial, { codeReference: { resourceCoverage: { status: 'no-unresolved-detected', unresolvedCount: 0 } } }), /does not match/);
@@ -80,6 +81,10 @@ try {
   writeCapture(runtimeCapture); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'verified-visible-images');
   writeReview('reference.json', initial); writeDecision(review);
   writeCapture({ ...runtimeCapture, resourceReviewBinding: resourceVerificationBinding(reviewDir, reviewState) }); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'unverified', 'a CSS reference cannot be cleared by an unrelated image');
+  const backgroundCapture = { ...runtimeCapture, resourceReviewBinding: resourceVerificationBinding(reviewDir, reviewState), evidence: [{ ...runtimeCapture.evidence[0], resourceChecks: [{ ...imageCheck, kind: 'background-image', status: 'passed' }] }] };
+  writeCapture(backgroundCapture); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'verified-visible-images');
+  writeReview('reference.json', { ...initial, unresolvedResources: initial.unresolvedResources.map(item => ({ ...item, contexts: ['css-url'] })) }); writeDecision(review);
+  writeCapture({ ...backgroundCapture, resourceReviewBinding: resourceVerificationBinding(reviewDir, reviewState) }); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'unverified', 'font and unknown CSS URLs cannot use background evidence');
   writeReview('reference.json', reviewReference); writeDecision(review); writeCapture(runtimeCapture);
   writeReview('evidence/page.html', { fixture: 'changed' }); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'unverified');
   writeReview('evidence/page.html', { fixture: 'dom' });
@@ -93,6 +98,15 @@ try {
   image.complete = false; assert.equal(observeResourceImages([imageCheck])[0].status, 'unverified'); image.complete = true;
   image.currentSrc = 'http://other.example/late.png'; assert.equal(observeResourceImages([imageCheck])[0].status, 'unverified');
   image.currentSrc = 'http://localhost/late.png'; image.getBoundingClientRect = () => ({ width: 10, height: 10, top: 700, left: 0, right: 10, bottom: 710 }); assert.equal(observeResourceImages([imageCheck])[0].status, 'unverified');
+  image.getBoundingClientRect = () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 });
+  globalThis.Image = class { constructor() { this.naturalWidth = 10; this.naturalHeight = 10; } decode() { return Promise.resolve(); } };
+  globalThis.getComputedStyle = () => ({ visibility: 'visible', display: 'block', opacity: '1', backgroundImage: 'linear-gradient(red, blue), url("http://localhost/late.png")' });
+  assert.equal((await observeBackgroundImages([imageCheck]))[0].status, 'passed');
+  globalThis.getComputedStyle = () => ({ visibility: 'visible', display: 'block', opacity: '1', backgroundImage: 'url("http://localhost/other.png")' });
+  assert.equal((await observeBackgroundImages([imageCheck]))[0].status, 'unverified');
+  globalThis.getComputedStyle = () => ({ visibility: 'visible', display: 'block', opacity: '1', backgroundImage: 'url("http://localhost/late.png")' });
+  globalThis.Image = class { decode() { return Promise.reject(new Error('invalid image')); } };
+  assert.equal((await observeBackgroundImages([imageCheck]))[0].status, 'unverified');
   writeReview('reference.json', { ...initial, unresolvedResources: undefined }); assert.throws(() => currentResourceReview(reviewDir, reviewState), /not recorded/); writeReview('reference.json', reviewReference);
   writeDecision({ ...review, decision: 'out-of-scope' }); assert.equal(currentResourceReview(reviewDir, reviewState).status, 'reviewed-out-of-scope');
   writeReview('scope.json', { mode: 'changed' }); assert.throws(() => currentResourceReview(reviewDir, reviewState), /input is stale/);
