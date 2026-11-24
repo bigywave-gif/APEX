@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T10:05:35.486Z",
+  "generatedAt": "2026-11-24T10:16:13.830Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -160,7 +160,7 @@
     "scripts/portable-install-contract-test.mjs": "7909ec69b6983034413e592506a039d7e5077f36df97fd45a9f7ec544a2c7468",
     "scripts/preflight-contract-test.mjs": "5acebc66bf723777a7e0b0f3acf9af89c6ef9c9302a25b92b9cb2d1bd296a228",
     "scripts/preflight.mjs": "5df44889bb2d8ccc6410d3ee9535bf0305f5252e68748fbd66acd4f84f5e8701",
-    "scripts/product-to-demo-browser-test.mjs": "8158f418a1f5c96764a2dddcda339a9fffff54a0abe430e3d40de482aac1adad",
+    "scripts/product-to-demo-browser-test.mjs": "ca74b50fd269c5c391e4d78f97f1facf6d11dcd78ae30ce619d0a4d953313519",
     "scripts/product-to-visual-handoff-test.mjs": "8382fea59fd5f777ac06f96e63810b8e8005a1a9f98bfb9fa256f35f3db1779b",
     "scripts/project-adapter-integration-test.mjs": "60b33a9117084c4668f39e61b3eb197e54f8a5783ecf15a78691513ceedf0bf0",
     "scripts/project-adapter-test.mjs": "49f7baea577c50a510b8b250c910a4b98a91d40282d635510c5179ca9db0d52e",
