@@ -26,6 +26,28 @@ export function codePositions(text) {
   return code;
 }
 
+// Inspect only script bodies in markup; HTML comments and non-script template
+// text must not turn example imports into missing project dependencies.
+export function embeddedScriptPositions(text) {
+  const code = new Uint8Array(text.length);
+  const opening = /<!--[\s\S]*?-->|<script\b(?:[^"'>]|"[^"]*"|'[^']*')*>/gi;
+  let match;
+  while ((match = opening.exec(text))) {
+    if (match[0].startsWith('<!--')) continue;
+    const end = /<\/script\s*>/gi; end.lastIndex = opening.lastIndex;
+    const closing = end.exec(text); if (!closing) break;
+    const attributes = [...match[0].matchAll(/(?:^|\s)([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)];
+    const type = attributes.find(item => item[1].toLowerCase() === 'type');
+    const typeValue = (type?.[2] ?? type?.[3] ?? type?.[4] ?? '').trim().toLowerCase();
+    if (!attributes.some(item => item[1].toLowerCase() === 'src') && ['', 'module', 'text/javascript', 'application/javascript'].includes(typeValue)) {
+      const body = text.slice(opening.lastIndex, closing.index);
+      code.set(codePositions(body), opening.lastIndex);
+    }
+    opening.lastIndex = end.lastIndex;
+  }
+  return code;
+}
+
 const marker = 'APEX_UNRESOLVED_LOCAL_IMPORTS:';
 function digest(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function safePath(root, relative) {
