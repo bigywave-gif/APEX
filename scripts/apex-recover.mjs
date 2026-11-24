@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { appendLedgerEvent, archiveArtifacts, commitRunState, invalidationEvents, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
+import { appendLedgerEvent, archiveArtifacts, commitRunState, invalidationEvents, pendingRevisionTransactions, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
 import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
 import { inspectRunningOperations, markInterruptedOperations } from './operation-recovery.mjs';
 import { archivedMissingReferences } from './recovery-archive.mjs';
@@ -23,6 +23,16 @@ const operationInspection = inspectRunningOperations(runDir, process.env.APEX_RO
 if (operationInspection.deferred.length) {
   console.log(JSON.stringify({ status: 'waiting', deferredOperations: operationInspection.deferred, note: 'Existing operations may still be running or cannot be verified; no interrupted status or remote outcome was inferred.' }));
   process.exit(0);
+}
+const pendingRevisions = pendingRevisionTransactions(runDir);
+if (pendingRevisions.length) {
+  const active = pendingRevisions.some(item => {
+    if (!Number.isInteger(item.ownerPid) || item.ownerPid <= 0) return true;
+    try { process.kill(item.ownerPid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; }
+  });
+  console.log(JSON.stringify({ status: active ? 'waiting' : 'revision-recovery-required', transactions: pendingRevisions.map(item => ({ transactionId: item.transactionId, checkpoint: item.checkpoint, startedAt: item.at })), note: active ? 'The revision owner may still be running; its state and files are not modified.' : 'The interrupted revision retains its original request; automatic replay is not yet available.' }));
+  if (!active) process.exitCode = 2;
+  process.exit();
 }
 let implementationSealRecovery = null;
 if (state.roleChain?.confirmationModel === 'two-confirmations' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed) {

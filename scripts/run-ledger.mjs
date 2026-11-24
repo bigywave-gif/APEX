@@ -389,6 +389,39 @@ export function invalidationEvents(runDir) {
   } finally { database.close(); }
 }
 
+function pendingRevisionsFromDatabase(database) {
+    const rows = database.prepare("SELECT event_type, payload_json FROM events WHERE event_type IN ('prompt-revision-transaction-started', 'prompt-revision-transaction-completed') ORDER BY id").all();
+    const pending = new Map(), seen = new Set();
+    for (const row of rows) {
+      const event = parseJson(row.payload_json);
+      if (!event?.transactionId) throw new Error('revision transaction event is missing its identity');
+      if (row.event_type === 'prompt-revision-transaction-started') {
+        if (seen.has(event.transactionId)) throw new Error('duplicate revision transaction identity');
+        seen.add(event.transactionId); pending.set(event.transactionId, event);
+      } else {
+        if (!pending.has(event.transactionId)) throw new Error('revision completion has no active transaction');
+        pending.delete(event.transactionId);
+      }
+    }
+    return [...pending.values()];
+}
+export function pendingRevisionTransactions(runDir) {
+  const database = open(runDir);
+  try { return pendingRevisionsFromDatabase(database); } finally { database.close(); }
+}
+export function beginRevisionTransaction(runDir, event) {
+  const database = open(runDir);
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    if (pendingRevisionsFromDatabase(database).length) throw new Error('an earlier prompt revision must be recovered before another revision');
+    const snapshot = latestSnapshot(database), state = JSON.parse(snapshot?.state_json || '{}');
+    if (state.lifecycle === 'cancelled') throw new Error('cannot revise a cancelled run');
+    if (!snapshot || Number(snapshot.revision) !== event.stateRevision) throw new Error('revision base state changed before transaction began');
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('prompt-revision-transaction-started', now(), JSON.stringify(event));
+    database.exec('COMMIT');
+  } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
+}
+
 export function stitchAdaptationSkillLoads(runDir) {
   const database = open(runDir);
   try { return database.prepare("SELECT payload_json FROM events WHERE event_type = 'stitch-adaptation-skill-loaded' ORDER BY id").all().map(row => parseJson(row.payload_json)); }
@@ -1025,6 +1058,7 @@ export function reconcileRun(runDir) {
   }
   for (const edge of edges) if (!registered.some(item => item.artifact_id === edge.parent_artifact_id) || !registered.some(item => item.artifact_id === edge.child_artifact_id)) issues.push({ type: 'artifact-lineage-broken', parentArtifactId: edge.parent_artifact_id, childArtifactId: edge.child_artifact_id });
   const agentRuntime = agentRuntimeStatus(runDir);
+  if (state.lifecycle !== 'cancelled') for (const transaction of pendingRevisionTransactions(runDir)) issues.push({ type: 'prompt-revision-pending', transactionId: transaction.transactionId, checkpoint: transaction.checkpoint, startedAt: transaction.at });
   for (const job of agentRuntime.jobs.filter(item => item.status === 'dead-letter')) issues.push({ type: 'agent-job-dead-letter', jobId: job.jobId, agentId: job.agentId, stage: job.stage, error: job.error || null });
   for (const job of running) {
     const expiry = job.lease_expires_at ? Date.parse(job.lease_expires_at) : job.started_at ? Date.parse(job.started_at) + AGENT_JOB_LEASE_MS : NaN;
