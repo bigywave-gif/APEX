@@ -73,6 +73,8 @@ export const workflowNodes = Object.freeze({
   'restore-product-plan-before-demo': node('generate_visual', ['experience-strategy.json'], { kind: 'host-controlled-implementation' }, { completion: 'restore the original confirmed product plan through authorized recovery or return to the appropriate earlier phase', failurePolicy: 'do not fabricate product tasks or repeatedly generate a Demo without the plan', retry: 'retry only after the product plan evidence has changed or been restored' }),
   'inspect-pending-stitch-upload': node('sync_stitch', ['run-ledger.sqlite'], { kind: 'host-controlled-implementation' }, { inputPolicy: 'current-run-and-project-external-submission-records', completion: 'inspect the durable upload and preserve uncertain external effects', failurePolicy: 'never repeat an upload or generation while its outcome is unresolved', retry: 'retry only after independently establishing the remote outcome' }),
   'capture-formal-runtime-source-provenance': node('verify', ['evidence/runtime-browser-capture.json'], actionScript('browser-capture.mjs')),
+  'capture-formal-resource-evidence': node('verify', ['evidence/runtime-browser-capture.json'], actionScript('browser-capture.mjs')),
+  'repair-existing-resource-review': node('verify', ['role-advisory-manifest.json'], { kind: 'host-controlled-implementation' }),
   'compile-formal-screen-reference': node('verify', ['visual-screen-references.json'], actionScript('visual-reference-compiler.mjs')),
   'verify-formal-direct-screen': node('verify', ['evidence/parity/implementation-result-*.json'], actionScript('strict-replica.mjs')),
   'verify-formal-stitch-screen': node('verify', ['evidence/parity/implementation-result-*.json'], actionScript('strict-replica.mjs')),

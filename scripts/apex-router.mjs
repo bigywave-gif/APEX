@@ -28,6 +28,7 @@ import { implementationSealCurrent } from './implementation-seal.mjs';
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
+import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, commitRunState, externalSubmissionIntents, fenceRunCancellation, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 
@@ -1840,6 +1841,14 @@ function automaticWorkStep(state, runDir, action) {
     if (provenance.enforce && !provenance.ready) {
       if (!formalCaptureSourceReady(state, runDir)) return step('capture-formal-runtime-source-provenance', '采集正式页面的来源选择证据', ['evidence/runtime-browser-capture.json'], `以 verify 调用 browser-capture.mjs，从冻结 Visual Source Manifest 采集实际 DOM 来源标记，并在 formalJourneys 中执行每项已确认任务、记录前后状态和受控回执。当前原因：${provenance.reason}。`);
       return step('capture-runtime-state-matrix', '校验正式页面状态与交互矩阵', ['runtime-state-matrix.json'], '根据真实浏览器截图、响应式范围、状态与已确认任务的 formalJourneys 前后变化证据构建矩阵输入，以 verify 调用 stability-evidence.mjs verify <run-dir> <matrix-input.json>；脚本校验并登记矩阵与来源证据。');
+    }
+    if (state.track === 'existing' && usesCombinedPlan(state)) {
+      try {
+        const resourceReview = assessResourceVerification(runDir, state);
+        if (resourceReview.status === 'unverified') return step('capture-formal-resource-evidence', '验证范围内未定位的页面资源', ['resource-browser-spec.json', 'evidence/runtime-browser-capture.json'], `在原正式浏览器采集配置中保留全部已确认页面、视口与 formalJourneys，并为每项待验证引用填写 resourceChecks（source、reference、screenId、selector）。仅当前页面视口内已解码的同源 img 可用此方式证明资源已加载；CSS 背景、字体、视频、跨域资源及其他状态不能借此判定通过；旧快照缺少引用类型时，回退受影响的基线阶段重采并重审。无法核实时保持未验证。待验证：${resourceReview.pending.length} 项。`);
+      } catch (error) {
+        return step('repair-existing-resource-review', '修复既有网站资源审查证据', ['role-advisory-manifest.json'], `基线资源审查不可用：${error.message}。恢复原始受控审查及其输入；无法恢复时，按 Router 回退受影响的基线阶段重新采集，不得跳过。`);
+      }
     }
     if (usesCombinedPlan(state) && runFile('runtimeVisualBaseline')) {
       const baseline = read(artifactFile(runDir, state.artifacts.runtimeVisualBaseline));

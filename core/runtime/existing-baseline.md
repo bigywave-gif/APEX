@@ -12,7 +12,9 @@ HTML 和 CSS 中可静态定位的本地图片、媒体、字体等资源也纳�
 
 新冻结的 Existing 基线在 `codeReference.resourceCoverage` 显示未定位数量及 `unverified`、`no-unresolved-detected` 或历史数据 `not-recorded`。Router 和 Gate 校验该状态与源码清单一致；`no-unresolved-detected` 只表示静态扫描未发现待核查项，不证明视觉素材均已加载或正确。产品、设计和前端角色应读取引用清单并针对本次范围核查，状态本身不增加用户确认。
 
-新基线的 `resourceReviewProtocol` 要求实际运行的 `existing-baseline-analyst` 对每项未定位引用填写 `resourceReviews`，绑定代码引用、Existing 基线和变更范围，说明属于范围外还是仍需验证及其理由。范围外是专业判断，不是资源已加载的机器证明；范围内仍需验证的项进入验证包 `unverified`，不得通过 Gate 3。资源可定位后重采并重新复核；当前尚无通用机制能自动证明所有运行时生成资源的正确性。旧基线保持原协议，不补造历史角色意见。
+新基线的 `resourceReviewProtocol` 要求实际运行的 `existing-baseline-analyst` 对每项未定位引用填写 `resourceReviews`，绑定代码引用、Existing 基线和变更范围，说明属于范围外还是仍需验证及其理由。范围外是专业判断，不是资源已加载的机器证明；范围内仍需验证的项进入验证包 `unverified`，不得通过 Gate 3。资源可定位后重采并重新复核。旧基线保持原协议，不补造历史角色意见。
+
+对于范围内由运行时提供的同源图片，可以在正式 `verify` 浏览器采集配置中增加 `resourceChecks`：每项填写源码 `source`、原始根路径 `reference`、现有 `screenId` 和对应图片元素的 `selector`，覆盖全部待核查项，并保留原有正式页面、视口和 `formalJourneys`。源码快照必须证明该引用只作为 `img src` 出现；旧快照没有引用类型时须重采，混用其他用途也不能仅凭图片检查放行。浏览器读取当前页面，不额外发起请求；只有目标为指定同源 URL、已解码且布局盒与当前视口相交的 `img` 才能通过。结果绑定当前基线、分析师意见、实施登记、正式采集回执、截图及 DOM 哈希；输入或证据变化后须重新核验。该证据仅说明所采集页面与状态中的图片已加载并位于视口，不证明图片内容或审美正确、元素未被遮挡，也不证明其他视口和状态。CSS 背景、字体、视频、跨域资源及无法用此方式观察的引用仍须保持未验证，不能借用其他图片回执冒充通过；用户确认的 Demo 和正式页面仍需执行各自的视觉、交互与响应式验证。
 
 这两个脚本均只能使用 `collect_existing_baseline` 授权，经 Action Gateway 运行：
 

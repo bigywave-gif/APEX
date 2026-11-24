@@ -11,7 +11,7 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '5';
+const CAPTURE_VERSION = '6';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -86,26 +86,31 @@ function imports(projectRoot, file, content) {
   }
   // HTML entrypoints often load their real styles/scripts outside JS imports.
   // Follow local references so the Existing protected complement includes them.
-  const localReference = value => {
+  const localReference = (value, context) => {
     const clean = value.split(/[?#]/, 1)[0];
     if (!clean || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(clean)) return;
     const targets = clean.startsWith('/') ? [path.resolve(projectRoot, `.${clean}`), ...publicRoots.map(root => path.resolve(root, `.${clean}`))] : [path.resolve(path.dirname(file), clean)];
     const local = targets.filter(candidate => inside(projectRoot, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile());
     const alias = !clean.startsWith('.') && !clean.startsWith('/') ? resolveImport(projectRoot, file, clean) : null;
     if (local.length || alias) { for (const target of local) found.add(target); if (alias) found.add(alias); }
-    else missingResources.set(JSON.stringify([rel(projectRoot, file), value]), { source: rel(projectRoot, file), reference: value, candidates: targets.filter(candidate => inside(projectRoot, candidate)).map(candidate => rel(projectRoot, candidate)) });
+    else {
+      const key = JSON.stringify([rel(projectRoot, file), value]);
+      const entry = missingResources.get(key) || { source: rel(projectRoot, file), reference: value, candidates: targets.filter(candidate => inside(projectRoot, candidate)).map(candidate => rel(projectRoot, candidate)), contexts: [] };
+      if (!entry.contexts.includes(context)) entry.contexts.push(context);
+      missingResources.set(key, entry);
+    }
   };
   if (/\.(?:html?|vue|svelte)$/i.test(file)) {
     for (const match of content.matchAll(/<(link|script|img|source|video|audio)\b[^>]*>/gi)) {
       const tag = match[0], type = match[1].toLowerCase(), attribute = type === 'link' ? 'href' : 'src';
       if (type === 'link' && !/\brel\s*=\s*["'][^"']*\b(?:stylesheet|icon|preload)\b/i.test(tag)) continue;
       const source = tag.match(new RegExp(`(?:^|\\s)${attribute}\\s*=\\s*["']([^"']+)["']`, 'i'));
-      if (source) localReference(source[1]);
-      if (type === 'video') { const poster = tag.match(/(?:^|\s)poster\s*=\s*["']([^"']+)["']/i); if (poster) localReference(poster[1]); }
+      if (source) localReference(source[1], `${type}-${attribute}`);
+      if (type === 'video') { const poster = tag.match(/(?:^|\s)poster\s*=\s*["']([^"']+)["']/i); if (poster) localReference(poster[1], 'video-poster'); }
     }
   }
-  if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/gi)) localReference(match[1]);
-  if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/\burl\(\s*(?:"([^"]*)"|'([^']*)'|([^'"()\s]+))\s*\)/gi)) localReference(match[1] ?? match[2] ?? match[3]);
+  if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/gi)) localReference(match[1], 'css-import');
+  if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/\burl\(\s*(?:"([^"]*)"|'([^']*)'|([^'"()\s]+))\s*\)/gi)) localReference(match[1] ?? match[2] ?? match[3], 'css-url');
   return [...found];
 }
 function markers(content) { const text = content.toString('utf8'); const result = []; const tags = [...text.matchAll(/<([A-Za-z][\w.-]*)\b[^>]*>/g)].map(match => match[1]); const tests = [...text.matchAll(/data-testid=["']([^"']+)["']/g)].map(match => `testid:${match[1]}`); [...tags, ...tests].forEach((marker, index) => result.push({ marker: `${marker}#${index + 1}`, kind: marker.startsWith('testid:') ? 'test-anchor' : 'dom-element' })); return result; }

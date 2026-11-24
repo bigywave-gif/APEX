@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { newlyAvailableResources, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, assertResourceCoverage, validateResourceReviews } from './existing-resource-freshness.mjs';
+import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
 import { validateRuntimeMotionSamples, validateVisualOutputSource } from './runtime-baseline-contract.mjs';
@@ -513,7 +514,7 @@ function validateGate2(runDir, { machineSealPending = false, stateFile } = {}) {
 
 function validateGate3(runDir) {
   const { state, contract } = validateGate1(runDir);
-  const resourceReview = currentResourceReview(runDir, state);
+  const resourceReview = assessResourceVerification(runDir, state);
   if (resourceReview.status === 'unverified') throw new Error(`Existing in-scope resources remain unverified: ${resourceReview.pending.length}`);
   if (state.gates.gate2.status !== 'passed' || !state.locks.implementationAllowed) throw new Error('Gate 2 has not passed or implementation is not allowed');
   if (!implementationRegistrationCurrent(runDir, state, path.dirname(path.dirname(path.dirname(runDir))))) throw new Error('formal implementation registration is missing or stale');
