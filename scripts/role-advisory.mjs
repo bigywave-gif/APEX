@@ -10,6 +10,7 @@ import { archiveArtifacts, commitRunState, readRunState, visualSkillLoads } from
 import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, rebudgetAgentJobs, registerAgent, settleAgentJob, startTraceSpan, supersedeQueuedAgentJobs } from './run-ledger.mjs';
 import { resolveTasteSkill, loadTasteSkill, requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
 import { formalReviewBindings, validateProductTaskReview } from './formal-interaction-evidence.mjs';
+import { validateResourceReviews } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const registryFile = path.join(apexRoot, 'registry', 'agency-role-registry.json');
@@ -209,6 +210,10 @@ function record(runDir, stage, input) {
   }
   if (selection.inputBindings.some(item => !advisory.inputBindings.some(binding => binding.artifact === item.artifact))) die('advisory must bind every current stage input artifact');
   assertFindingEvidenceBindings(selection, advisory);
+  if (stage === 'baseline' && advisory.roleId === 'existing-baseline-analyst' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') {
+    const state = stateFor(runDir), baseline = read(path.join(runDir, state.artifacts.existingBaseline));
+    if (baseline.codeReference?.resourceReviewProtocol === '1.0') validateResourceReviews(read(path.join(runDir, state.artifacts.codeReference)), advisory.resourceReviews);
+  }
   if (stage === 'verify' && advisory.roleId === 'product-manager' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') validateProductTaskReview(runDir, stateFor(runDir), advisory.productReview);
   const floors = advisoryTokenFloors(runDir, selection.inputBindings, advisory);
   const usageSource = advisory.execution.usageSource || 'legacy-unverified';

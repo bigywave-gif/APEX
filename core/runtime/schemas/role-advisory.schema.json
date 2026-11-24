@@ -258,6 +258,21 @@
       },
       "additionalProperties": false
     },
+    "resourceReviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "reference", "decision", "rationale", "evidence"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "reference": { "type": "string", "minLength": 1 },
+          "decision": { "enum": ["out-of-scope", "requires-verification"] },
+          "rationale": { "type": "string", "minLength": 12 },
+          "evidence": { "type": "array", "minItems": 3, "items": { "type": "string", "minLength": 1 } }
+        },
+        "additionalProperties": false
+      }
+    },
     "productReview": {
       "type": "array",
       "minItems": 1,

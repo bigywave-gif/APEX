@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
 import { validateRuntimeMotionSamples, validateVisualOutputSource } from './runtime-baseline-contract.mjs';
@@ -220,6 +220,10 @@ function validateRoleStage(runDir, state, stage) {
     const receipt = item.operationReceipt && operationIndex[item.operationReceipt];
     if (!file.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(file) || hashFile(file) !== item.sha256 || receipt?.status !== 'succeeded' || receipt.script !== 'role-advisory.mjs' || receipt.outputFileHashes?.[item.path] !== item.sha256) throw new Error(`controlled role advisory is missing, stale, or not a controlled output: ${item.roleId}`);
     const advisory = validateFile('role-advisory.schema.json', file);
+    if (stage === 'baseline' && item.roleId === 'existing-baseline-analyst' && state.roleChain?.confirmationModel === 'two-confirmations') {
+      const baseline = readJson(requireArtifact(runDir, state, 'existingBaseline', 'existing-baseline.json'));
+      if (baseline.codeReference?.resourceReviewProtocol === '1.0') validateResourceReviews(readJson(requireArtifact(runDir, state, 'codeReference', 'code-reference.json')), advisory.resourceReviews);
+    }
     if (advisory.findings.some(finding => finding.classification === 'unverified')) throw new Error(`selected role advisory is not evidence-complete: ${item.roleId}`);
   }
 }
@@ -509,6 +513,8 @@ function validateGate2(runDir, { machineSealPending = false, stateFile } = {}) {
 
 function validateGate3(runDir) {
   const { state, contract } = validateGate1(runDir);
+  const resourceReview = currentResourceReview(runDir, state);
+  if (resourceReview.status === 'unverified') throw new Error(`Existing in-scope resources remain unverified: ${resourceReview.pending.length}`);
   if (state.gates.gate2.status !== 'passed' || !state.locks.implementationAllowed) throw new Error('Gate 2 has not passed or implementation is not allowed');
   if (!implementationRegistrationCurrent(runDir, state, path.dirname(path.dirname(path.dirname(runDir))))) throw new Error('formal implementation registration is missing or stale');
   if (!['passed', 'not-required'].includes(state.gates.proof.status)) throw new Error('Proof Gate has not passed');

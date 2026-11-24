@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { newlyAvailableResources, resourceCoverage, assertResourceCoverage } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-reference-resolution-'));
@@ -52,6 +52,26 @@ try {
   const baselineResult = action('baseline-collector.mjs', ['capture', dir, baselineInput, project]);
   assert.deepEqual(baselineResult.resourceCoverage, { status: 'unverified', unresolvedCount: 1 });
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'existing-baseline.json'))).codeReference.resourceCoverage, baselineResult.resourceCoverage);
+  const unresolved = initial.unresolvedResources[0], review = { source: unresolved.source, reference: unresolved.reference, decision: 'requires-verification', rationale: '资源影响当前页面，需要实际运行验证。', evidence: ['codeReference', 'existingBaseline', 'changeScope'] };
+  assert.throws(() => validateResourceReviews(initial, []), /review every/);
+  assert.equal(validateResourceReviews(initial, [review]).status, 'unverified');
+  assert.equal(validateResourceReviews(initial, [{ ...review, decision: 'out-of-scope' }]).status, 'reviewed-out-of-scope');
+  assert.throws(() => validateResourceReviews(initial, [{ ...review, evidence: ['codeReference'] }]), /frozen baseline evidence/);
+  const reviewDir = path.join(dir, 'fixture-resource-review'); fs.mkdirSync(path.join(reviewDir, 'operations'), { recursive: true });
+  const writeReview = (name, value) => { const file = path.join(reviewDir, name); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value)); };
+  writeReview('reference.json', initial); writeReview('baseline.json', JSON.parse(fs.readFileSync(path.join(dir, 'existing-baseline.json')))); writeReview('scope.json', { mode: 'fixture' });
+  const reviewState = { track: 'existing', roleChain: { confirmationModel: 'two-confirmations' }, artifacts: { codeReference: 'reference.json', existingBaseline: 'baseline.json', changeScope: 'scope.json', roleAdvisoryManifest: 'manifest.json' } };
+  const bindings = ['codeReference', 'existingBaseline', 'changeScope'].map(artifact => ({ artifact, path: reviewState.artifacts[artifact], sha256: digest(path.join(reviewDir, reviewState.artifacts[artifact])) }));
+  const writeDecision = value => {
+    writeReview('analyst.json', { inputBindings: bindings, resourceReviews: [value] });
+    const sha256 = digest(path.join(reviewDir, 'analyst.json'));
+    writeReview('operations/review.json', { status: 'succeeded', action: 'collect_existing_baseline', script: 'role-advisory.mjs', outputFileHashes: { 'analyst.json': sha256 } });
+    writeReview('manifest.json', { stages: { baseline: { advisories: [{ roleId: 'existing-baseline-analyst', path: 'analyst.json', sha256, operationReceipt: 'operations/review.json' }] } } });
+  };
+  writeDecision(review); assert.equal(currentResourceReview(reviewDir, reviewState).status, 'unverified');
+  writeReview('reference.json', { ...initial, unresolvedResources: undefined }); assert.throws(() => currentResourceReview(reviewDir, reviewState), /not recorded/); writeReview('reference.json', initial);
+  writeDecision({ ...review, decision: 'out-of-scope' }); assert.equal(currentResourceReview(reviewDir, reviewState).status, 'reviewed-out-of-scope');
+  writeReview('scope.json', { mode: 'changed' }); assert.throws(() => currentResourceReview(reviewDir, reviewState), /input is stale/);
   assert.equal(capture().reused, true);
   put('public/late.png', 'late fixture image');
   const staleStatus = call('apex-router.mjs', ['status', project, run, session]);

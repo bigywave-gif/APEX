@@ -73,7 +73,7 @@ if (!sourceSnapshot || sourceSnapshot.codeReference !== state.artifacts.codeRefe
 const baseline = read(path.resolve(inputArg));
 baseline.schemaVersion = '3.0';
 baseline.capturedAt = new Date().toISOString();
-baseline.codeReference = { path: state.artifacts.codeReference, sourceTreeHash: codeReference.sourceTreeHash, sourceFileCount: codeReference.sourceFileCount, complete: true, pageSkeletonPath: state.artifacts.pageSkeleton, pageSkeletonHash: pageSkeleton.skeletonHash, resourceCoverage: resourceCoverage(codeReference) };
+baseline.codeReference = { path: state.artifacts.codeReference, sourceTreeHash: codeReference.sourceTreeHash, sourceFileCount: codeReference.sourceFileCount, complete: true, pageSkeletonPath: state.artifacts.pageSkeleton, pageSkeletonHash: pageSkeleton.skeletonHash, resourceCoverage: resourceCoverage(codeReference), resourceReviewProtocol: '1.0' };
 baseline.displayEvidence = { path: path.relative(runDir, displayPath), hash: hash(fs.readFileSync(displayPath)), capturedRoutes: display.evidence.map(item => item.route) };
 for (const screen of baseline.screens || []) {
   requireProjectFile(projectRoot, screen.path, `screen evidence for ${screen.viewport}`);

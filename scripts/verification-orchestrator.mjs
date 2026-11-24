@@ -11,6 +11,7 @@ import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 import { visualQualityEvidence } from './visual-quality-evidence.mjs';
 import { apiContractEvidenceCurrent, apiContractEvidenceAssessment } from './api-contract-evidence.mjs';
 import { apiObservationCurrent } from './api-http-observation.mjs';
+import { currentResourceReview } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -89,6 +90,12 @@ const categoryForRequirement = {
 const required = [...new Set((deliveryContract.verificationRequirements || []).map(requirement => categoryForRequirement[requirement]).filter(Boolean))];
 for (const category of ['responsive', 'console']) if (plan.categories?.[category]?.length) required.push(category);
 const bundle = { schemaVersion: '3.0', code: [], runtime: [], visual: [], functional: [], siteRegression: [], responsive: [], accessibility: [], console: [], performance: [], contract: [], unverified: [], gate3: 'pending' };
+if (policy && state.track === 'existing') {
+  try {
+    const resourceReview = currentResourceReview(runDir, state);
+    if (resourceReview.status === 'unverified') bundle.unverified.push({ category: 'visual', id: 'existing-unresolved-resources', status: 'unverified', reason: `${resourceReview.pending.length} in-scope resource(s) still require verification` });
+  } catch (error) { bundle.unverified.push({ category: 'visual', id: 'existing-resource-review', status: 'unverified', reason: error.message }); }
+}
 for (const category of required) {
   const checks = plan.categories?.[category] || [];
   if (!checks.length) bundle.unverified.push({ category, reason: 'no-checks' });

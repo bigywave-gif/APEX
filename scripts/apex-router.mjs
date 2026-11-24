@@ -1749,7 +1749,7 @@ function automaticWorkStep(state, runDir, action) {
     if (!scope.ready) return step('freeze-change-scope', '刷新本次受影响闭包与未改动保护补集', ['change-scope-input.json', 'change-scope.json'], `内部从最新完整代码引用生成局部变更闭包，再以 record_context 调用 contract-recorder.mjs scope。当前原因：${scope.reason}。`, 'record_context');
     if (!functionalFreezeStatus(runDir, state).ready) return step('compile-functional-freeze', '从冻结页面骨架、代码快照和变更闭包生成可验证功能冻结', ['functional-freeze.json'], `内部通过 collect_existing_baseline 调用 functional-freeze-compiler.mjs compile；当前原因：${functionalFreezeStatus(runDir, state).reason}。不得使用初始化模板、空数组或人工改写状态。`);
     const roles = roleStageState(state, runDir, 'baseline');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`baseline-role-${roles}`, '完成 Existing 基线专业角色汇总', ['advisories/baseline/selection.json', 'advisories/baseline/*.json', 'advisories/baseline/role-decision-summary.md'], roles === 'wait' ? roleWait : `通过 collect_existing_baseline 调用 role-advisory.mjs ${roles}；已选角色必须形成可验证结论，失败保留受控回执并停止当前 Gate。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`baseline-role-${roles}`, '完成 Existing 基线专业角色汇总', ['advisories/baseline/selection.json', 'advisories/baseline/*.json', 'advisories/baseline/role-decision-summary.md'], roles === 'wait' ? roleWait : `通过 collect_existing_baseline 调用 role-advisory.mjs ${roles}；基线分析师须对每个未定位资源填写 resourceReviews，依据代码、现状和变更范围判断 out-of-scope 或 requires-verification 并说明理由。已选角色必须形成可验证结论，失败保留受控回执并停止当前 Gate。`);
     return step('continue-gate1-analysis', '转入 Gate 1 需求与交付方案编译', [], 'Existing 基线已有效；重新读取 Router 后必须授权 analyze_requirement 并继续完整 Gate 1 链。', 'analyze_requirement');
   }
   if (action === 'analyze_requirement') {
