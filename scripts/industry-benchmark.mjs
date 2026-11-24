@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import crypto from 'node:crypto'; import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process'; import { fileURLToPath } from 'node:url'; import { requireRouterAction } from './apex-runtime-guard.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Industry benchmark failed: ${message}`); process.exit(1); }
@@ -7,7 +8,7 @@ function hash(file) { return `sha256:${crypto.createHash('sha256').update(fs.rea
 function inside(runDir, value, label) { const target = path.resolve(runDir, value || ''); if (!target.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(target)) die(`${label} must be an existing artifact inside this run`); return target; }
 const [command, runArg, reviewArg] = process.argv.slice(2); if (command !== 'verify' || !runArg || !reviewArg) die('usage: industry-benchmark.mjs verify <run-dir> <industry-benchmark-review.json>');
 const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
-const state = read(path.join(runDir, 'state.json'));
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const planFile = inside(runDir, state.artifacts.visualExecutionPlan, 'visual execution plan');
 const provenanceFile = inside(runDir, state.artifacts.evidenceProvenance, 'evidence provenance');
 const reviewFile = inside(runDir, reviewArg, 'industry review');
@@ -34,4 +35,4 @@ for (const criterion of benchmark.criteria) {
 }
 const average = scores.reduce((sum, item) => sum + item.verifiedScore, 0) / scores.length;
 const output = { schemaVersion: '1.1', assessmentMode: 'evidence-bound-review', visualPlanHash: hash(planFile), provenanceHash: hash(provenanceFile), benchmarkId: benchmark.id, reviewPath: reviewRelative, reviewHash: hash(reviewFile), reviewReceipt: path.relative(runDir, receiptFile), scores, average, status: average >= 4 && scores.every(item => item.result === 'passed') ? 'passed' : scores.some(item => item.result === 'unverified') ? 'unverified' : 'failed' };
-fs.writeFileSync(path.join(runDir, 'industry-benchmark-evidence.json'), `${JSON.stringify(output, null, 2)}\n`); state.artifacts.industryBenchmarkEvidence = 'industry-benchmark-evidence.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); fs.writeFileSync(path.join(runDir, 'state.json'), `${JSON.stringify(state, null, 2)}\n`); console.log(JSON.stringify({ evidence: path.join(runDir, 'industry-benchmark-evidence.json'), benchmark: benchmark.id, average, status: output.status })); if (output.status !== 'passed') process.exitCode = 2;
+fs.writeFileSync(path.join(runDir, 'industry-benchmark-evidence.json'), `${JSON.stringify(output, null, 2)}\n`); state.artifacts.industryBenchmarkEvidence = 'industry-benchmark-evidence.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'industry-benchmark-state-update', expectedStateHash }); console.log(JSON.stringify({ evidence: path.join(runDir, 'industry-benchmark-evidence.json'), benchmark: benchmark.id, average, status: output.status })); if (output.status !== 'passed') process.exitCode = 2;

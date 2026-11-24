@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Validates real multi-viewport, state and interaction evidence before Gate 3. */
 import fs from 'node:fs';
@@ -20,7 +21,7 @@ const [command, runArg, matrixArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'verify' || !runArg || !matrixArg) die('usage: verify <run-dir> <runtime-state-matrix.json>');
 const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
-const matrix = read(path.resolve(matrixArg)); const stateFile = path.join(runDir, 'state.json'); const state = read(stateFile);
+const matrix = read(path.resolve(matrixArg)); const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const failures = []; const names = new Set();
 const sourceProvenance = (() => {
   const evidencePath = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
@@ -80,5 +81,5 @@ if (validationFailure) die(`runtime state matrix schema validation failed: ${val
 // The normal invocation passes the canonical output path as matrixArg.  Always
 // write after enrichment; conditional writes here silently discarded the
 // newly derived provenance while still reporting success.
-const output = path.join(runDir, 'runtime-state-matrix.json'); write(output, matrix); state.artifacts.runtimeStateMatrix = 'runtime-state-matrix.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+const output = path.join(runDir, 'runtime-state-matrix.json'); write(output, matrix); state.artifacts.runtimeStateMatrix = 'runtime-state-matrix.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'stability-evidence-state-update', expectedStateHash });
 console.log(JSON.stringify({ evidence: output, status: 'passed', viewports: matrix.viewports.length, states: matrix.states.length }));

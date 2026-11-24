@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +22,7 @@ if (command !== 'generate' || !runArg) die('usage: generate <run-dir>');
 const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
-const state = read(stateFile);
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const inventoryRef = state.roleChain?.confirmationModel === 'two-confirmations' ? state.artifacts.verificationInventory : state.artifacts.projectInventory;
 if (!inventoryRef) die('current verification inventory has not been registered; run the controlled project scan first');
 const inventory = read(path.join(runDir, inventoryRef));
@@ -51,5 +52,5 @@ if (validation.status !== 0) die((validation.stderr || validation.stdout).trim()
 state.artifacts.verificationPlan = 'verification-plan.generated.json';
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
-write(stateFile, state);
+commitRunState(runDir, state, { reason: 'verification-planner-state-update', expectedStateHash });
 console.log(JSON.stringify({ verificationPlan: output, generatedChecks: Object.values(plan.categories).flat().length, warnings: plan.warnings }));

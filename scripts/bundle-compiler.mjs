@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +20,7 @@ if (command !== 'compile' || !runArg || !specArg) die('usage: compile <run-dir> 
 const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'compile_visual_bundle'); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json');
-const state = read(stateFile);
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 // New runs compile the proposed map first; implementation roles review that
 // exact map before Gate 2. Legacy runs keep their original ordering.
 if (state.roleChain?.enabled && state.roleChain?.confirmationModel !== 'two-confirmations') {
@@ -144,5 +145,5 @@ state.artifacts.motionImplementationMap = motionImplementation ? 'motion-impleme
 // presentation/repair chain and created an unrecoverable phase skip.
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
-write(stateFile, state);
+commitRunState(runDir, state, { reason: 'bundle-compiler-state-update', expectedStateHash });
 console.log(JSON.stringify({ visualBundle: path.join(runDir, 'visual-bundle.json'), implementationMap: path.join(runDir, 'implementation-map.json'), components: implementation.entries.length }));

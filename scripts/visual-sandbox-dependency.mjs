@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Resolves an approved visual dependency in a run-local sandbox, never in the project. */
 import crypto from 'node:crypto';
@@ -33,5 +34,5 @@ const after = projectDependencySnapshot(projectRoot); if (JSON.stringify(before)
 if (!fs.existsSync(installed) || read(installed).version !== version) die(`sandbox package version is not exact: ${packageName}`);
 const manifest = { schemaVersion: '3.0', sourceKind: 'visual-sandbox', runtimeRoot: 'visual-sandbox', projectDependencySnapshot: before, packages: [{ name: packageName, version, packageJson: path.relative(runDir, installed), sha256: hash(installed) }] };
 write(path.join(runDir, 'visual-sandbox-dependency.json'), manifest);
-const stateFile = path.join(runDir, 'state.json'), state = read(stateFile); state.artifacts.visualSandboxDependency = 'visual-sandbox-dependency.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir); state.artifacts.visualSandboxDependency = 'visual-sandbox-dependency.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-sandbox-dependency-state-update', expectedStateHash });
 console.log(JSON.stringify({ sandbox: sandboxRoot, package: `${packageName}@${version}`, projectDependencyFilesChanged: false }));

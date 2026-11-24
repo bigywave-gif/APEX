@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Records verifiable runtime evidence for every approved WebGL/WebGPU scene. */
 import fs from 'node:fs';
@@ -18,7 +19,7 @@ const [command, runArg, inputArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'record' || !runArg || !inputArg) die('usage: three-d-evidence.mjs record <run-dir> <input.json>');
 const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
-const stateFile = path.join(runDir, 'state.json'); const state = read(stateFile);
+const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const planFile = path.join(runDir, state.artifacts.visualExecutionPlan || 'visual-execution-plan.json'); const plan = read(planFile);
 if (!plan.threeD?.length) die('the frozen visual execution plan has no 3D scene');
 const input = read(path.resolve(inputArg));
@@ -30,5 +31,5 @@ for (const planned of plan.threeD) {
   scenes.push({ id: planned.id, renderer: planned.renderer, assetSelectionIds, screenshot: inside(runDir, provided.screenshot, `${planned.id} screenshot`), performanceEvidence: inside(runDir, provided.performanceEvidence, `${planned.id} performance evidence`), fallbackEvidence: inside(runDir, provided.fallbackEvidence, `${planned.id} fallback evidence`), reducedMotionEvidence: inside(runDir, provided.reducedMotionEvidence, `${planned.id} reducedMotion evidence`), result: 'passed' });
 }
 const evidence = { schemaVersion: '3.0', visualExecutionPlanHash: hash(planFile), scenes, status: 'passed' };
-write(path.join(runDir, 'three-d-evidence.json'), evidence); state.artifacts.threeDEvidence = 'three-d-evidence.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+write(path.join(runDir, 'three-d-evidence.json'), evidence); state.artifacts.threeDEvidence = 'three-d-evidence.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'three-d-evidence-state-update', expectedStateHash });
 console.log(JSON.stringify({ evidence: path.join(runDir, 'three-d-evidence.json'), scenes: scenes.length }));

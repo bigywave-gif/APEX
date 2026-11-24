@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes the concrete source identity for every visual node before code generation. */
 import fs from 'node:fs';
@@ -20,7 +21,7 @@ const [command, runArg, inputArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'compile' || !runArg || !inputArg) die('usage: visual-source.mjs compile <run-dir> <visual-source-input.json>');
 const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'compile_visual_bundle'); } catch (error) { die(error.message); }
-const stateFile = path.join(runDir, 'state.json'), state = read(stateFile), input = read(path.resolve(inputArg));
+const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir); const input = read(path.resolve(inputArg));
 if (input.schemaVersion !== '3.0' || !Array.isArray(input.sources) || !Array.isArray(input.bindings)) die('source manifest needs schemaVersion 3.0, sources, and bindings');
 const visualReference = read(path.join(runDir, state.artifacts.visualReference || 'visual-reference.json'));
 if (input.visualReferenceHash !== visualReference.referenceImage?.sha256) die('source manifest must bind the current approved visual reference image');
@@ -47,5 +48,5 @@ const bindings = new Map(); for (const binding of input.bindings) { if (!binding
 for (const binding of input.bindings) if (!runtimeLock.patterns.some(pattern => pattern.visualNodes.includes(binding.visualNode)) && !runtimeLock.nativeSelections?.some(selection => selection.visualNodes.includes(binding.visualNode))) die(`${binding.visualNode}: no complete runtime source is locked for this visual node`);
 const outputBindings = input.bindings.map(binding => { const ids = [binding.layoutSourceId, binding.componentSourceId, binding.styleSourceId, binding.fontSourceId, binding.contentSourceId, ...(binding.iconSourceIds || []), ...(binding.assetSourceIds || [])].sort(); return { ...binding, sourceMarker: `apex-source-${crypto.createHash('sha256').update(`${binding.visualNode}\0${ids.join('\0')}`).digest('hex').slice(0, 16)}` }; });
 const output = { schemaVersion: '3.0', visualReferenceHash: input.visualReferenceHash, deliveryNarrative: narrative, designCapabilities, ...(planAnalysis.skillRuleDecisions ? { skillRuleDecisions: planAnalysis.skillRuleDecisions } : {}), designContract: planAnalysis.designContract, aestheticAssessment: planAnalysis.aestheticAssessment, libraryComparisons: planAnalysis.libraryComparisons, sources: [...sources.values()], bindings: outputBindings, source: { path: path.relative(runDir, path.resolve(inputArg)), sha256: hash(path.resolve(inputArg)) } };
-write(path.join(runDir, 'visual-source-manifest.json'), output); state.artifacts.visualSourceManifest = 'visual-source-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+write(path.join(runDir, 'visual-source-manifest.json'), output); state.artifacts.visualSourceManifest = 'visual-source-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-source-state-update', expectedStateHash });
 console.log(JSON.stringify({ visualSourceManifest: path.join(runDir, 'visual-source-manifest.json'), sources: sources.size, bindings: bindings.size }));

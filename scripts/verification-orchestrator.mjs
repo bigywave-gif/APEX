@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +62,7 @@ const runDir = path.resolve(runArg);
 try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); }
 const projectRoot = path.resolve(projectArg || path.join(runDir, '..', '..', '..'));
 const stateFile = path.join(runDir, 'state.json');
-const state = read(stateFile);
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 let policy = null;
 if (state.roleChain?.confirmationModel === 'two-confirmations') {
   const expectedPlan = state.artifacts?.verificationPlan;
@@ -112,6 +113,6 @@ write(path.join(runDir, 'verification-bundle.json'), bundle);
 state.artifacts.verificationBundle = 'verification-bundle.json';
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
-write(stateFile, state);
+commitRunState(runDir, state, { reason: 'verification-orchestrator-state-update', expectedStateHash });
 console.log(JSON.stringify({ verificationStatus, gate3: bundle.gate3, unverified: bundle.unverified.length, verificationBundle: path.join(runDir, 'verification-bundle.json') }));
 if (verificationStatus !== 'passed') process.exitCode = 2;

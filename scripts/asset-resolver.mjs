@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -80,5 +81,5 @@ for (const item of selection.items || []) {
 const lock = { schemaVersion: '3.0', resolvedAt: new Date().toISOString(), items: output };
 write(path.join(runDir, 'dependency-lock.json'), lock);
 const stateFile = path.join(runDir, 'state.json');
-if (fs.existsSync(stateFile)) { const state = read(stateFile); state.artifacts.dependencyLock = 'dependency-lock.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state); }
+if (fs.existsSync(stateFile)) { const { state, expectedStateHash } = readRunStateForUpdate(runDir); state.artifacts.dependencyLock = 'dependency-lock.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'asset-resolver-state-update', expectedStateHash }); }
 console.log(JSON.stringify({ dependencyLock: path.join(runDir, 'dependency-lock.json'), resolved: output.length }));

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes a visual baseline rendered from complete package patterns or native Web sources. */
 import fs from 'node:fs';
@@ -132,5 +133,5 @@ const baselineFile = path.join(runDir, 'runtime-visual-baseline.json'); write(ba
 let chatPreview;
 try { chatPreview = readChatPreview(runDir, read(path.join(runDir, 'visual-sandbox-files.json'))); } catch (error) { die(error.message); }
 const demoFile = path.join(runDir, 'runtime-demo.json'); write(demoFile, { schemaVersion: '3.0', runtimeVisualBaseline: 'runtime-visual-baseline.json', ...baseline.runtimeDemo, ...interactiveDemo, interactionEvidence: { path: 'evidence/demo-browser-capture.json', sha256: hash(demoCaptureFile) }, ...(chatPreview ? { chatPreview } : {}), presentation: demoPresentation(runDir, { chatPreview }), sourceLockHash: baseline.sourceLockHash, browserCaptureHash: baseline.browserCapture.sha256 });
-const stateFile = path.join(runDir, 'state.json'), state = read(stateFile); state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.runtimeVisualBaseline = 'runtime-visual-baseline.json'; state.artifacts.runtimeDemo = 'runtime-demo.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir); state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.runtimeVisualBaseline = 'runtime-visual-baseline.json'; state.artifacts.runtimeDemo = 'runtime-demo.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'runtime-visual-baseline-state-update', expectedStateHash });
 console.log(JSON.stringify({ runtimeSourceLock: lockFile, runtimeVisualBaseline: baselineFile, runtimeDemo: demoFile, demoUrl: baseline.runtimeDemo.url, patterns: patterns.length, nativeSelections: nativeSelections.length }));

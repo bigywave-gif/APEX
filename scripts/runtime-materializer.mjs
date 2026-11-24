@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Installs and verifies only the exact runtime packages and pattern files used by the approved effect image. */
 import crypto from 'node:crypto';
@@ -27,7 +28,7 @@ if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX 
 if (!['install', 'audit'].includes(command) || !runArg || !projectArg) die('usage: install|audit <run-dir> <project-root>');
 const runDir = path.resolve(runArg), projectRoot = path.resolve(projectArg);
 try { requireRouterAction(runDir, command === 'install' ? 'implement' : 'verify'); } catch (error) { die(error.message); }
-const stateFile = path.join(runDir, 'state.json'), state = read(stateFile);
+const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const plan = read(path.join(runDir, state.artifacts.visualExecutionPlan || 'visual-execution-plan.json'));
 const lock = read(path.join(runDir, state.artifacts.runtimeSourceLock || 'runtime-source-lock.json'));
 const selections = new Map((plan.sourceSelections || []).map(selection => [selection.id, selection]));
@@ -63,5 +64,5 @@ for (const item of packages) {
 const result = { schemaVersion: '3.0', status: errors.length ? 'failed' : 'passed', packages: verified, errors, verifiedAt: new Date().toISOString() };
 if (command === 'install') { write(path.join(runDir, 'runtime-materialization.json'), result); state.artifacts.runtimeMaterialization = 'runtime-materialization.json'; }
 else { write(path.join(runDir, 'evidence', 'runtime-materialization-audit.json'), result); state.artifacts.runtimeMaterializationAudit = 'evidence/runtime-materialization-audit.json'; }
-state.updatedAt = new Date().toISOString(); write(stateFile, state);
+state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'runtime-materializer-state-update', expectedStateHash });
 console.log(JSON.stringify({ status: result.status, packages: verified.length, errors: errors.length })); if (errors.length) process.exitCode = 2;

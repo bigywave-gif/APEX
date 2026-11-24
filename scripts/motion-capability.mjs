@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Freezes the motion capabilities that the visual stage is allowed to use. */
 import fs from 'node:fs';
@@ -25,7 +26,7 @@ const runDir = path.resolve(runArg), projectRoot = path.resolve(projectArg); try
 const manifestFile = path.join(projectRoot, 'package.json'); const manifest = fs.existsSync(manifestFile) ? read(manifestFile) : { dependencies: {}, devDependencies: {} }; const dependencies = { ...(manifest.dependencies || {}), ...(manifest.devDependencies || {}) };
 const inventory = { schemaVersion: '3.0', projectRoot, runtime: fs.existsSync(manifestFile) ? ['node'] : [], installedPackages: Object.entries(dependencies).filter(([name]) => supported.has(name)).map(([name, version]) => ({ name, version })).sort((a, b) => a.name.localeCompare(b.name)), motionAssets: assets(projectRoot), hostCapabilities: ['ui-ux-pro-max-skill', 'shadcn-ui-reference', 'motion-ai-kit', 'framer-motion'] };
 const inventoryFile = path.join(runDir, 'motion-capability-inventory.json'); write(inventoryFile, inventory);
-const stateFile = path.join(runDir, 'state.json'), state = read(stateFile);
+const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const visualPlan = read(path.join(runDir, state.artifacts.visualExecutionPlan || 'visual-execution-plan.json'));
 const sourceSelections = new Map((visualPlan.sourceSelections || []).map(item => [item.id, item]));
 const plannedMotions = new Map((visualPlan.motion || []).map(item => [item.id, item]));
@@ -34,5 +35,5 @@ const selection = { schemaVersion: '3.0', inventoryHash: hash(inventoryFile), de
 if (!selection.designSkills.includes('ui-ux-pro-max-skill') || !selection.componentSources.length) die('selection must include ui-ux-pro-max-skill and at least one component source');
 for (const binding of selection.bindings) { const planned = plannedMotions.get(binding.motionId); const sourceSelection = sourceSelections.get(binding.sourceSelectionId); if (!binding.motionId || !binding.sourceSelectionId || !['existing-project', 'native-web', 'approved-candidate'].includes(binding.sourceType) || !['css', 'waapi', 'framer-motion', 'gsap'].includes(binding.engine) || !binding.capabilityId || !binding.implementationPath || !binding.api || !Array.isArray(binding.previewTimestampsMs) || binding.previewTimestampsMs.length < 2 || !planned || planned.sourceSelectionId !== binding.sourceSelectionId || !sourceSelection || sourceSelection.kind !== 'motion' || sourceSelection.sourceId !== binding.capabilityId || sourceSelection.sourceType !== binding.sourceType) die(`invalid or unselected capability binding: ${binding.motionId || '<unknown>'}`); if (binding.sourceType === 'existing-project' && !inventory.installedPackages.some(item => item.name === binding.capabilityId) && !inventory.motionAssets.length) die(`existing-project capability is not present: ${binding.capabilityId}`); if (binding.sourceType === 'approved-candidate' && (!binding.dependency?.package || !binding.dependency?.version || !['installed', 'planned'].includes(binding.dependency.status) || !binding.dependency.source || binding.dependency.package !== sourceSelection.sourceId || binding.dependency.version !== sourceSelection.version)) die(`online motion candidate needs an exact selected dependency plan: ${binding.motionId}`); }
 const selectionFile = path.join(runDir, 'motion-capability-selection.json'); write(selectionFile, selection);
-state.artifacts.motionCapabilityInventory = 'motion-capability-inventory.json'; state.artifacts.motionCapabilitySelection = 'motion-capability-selection.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+state.artifacts.motionCapabilityInventory = 'motion-capability-inventory.json'; state.artifacts.motionCapabilitySelection = 'motion-capability-selection.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'motion-capability-state-update', expectedStateHash });
 console.log(JSON.stringify({ inventory: inventoryFile, selection: selectionFile, bindings: selection.bindings.length }));
