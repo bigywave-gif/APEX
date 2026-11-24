@@ -21,6 +21,7 @@ import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
 import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
+import { stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schemas = path.join(root, 'core/runtime/schemas');
@@ -499,6 +500,7 @@ function validateGate2(runDir, { machineSealPending = false, stateFile } = {}) {
   if (!state.locks.stitchApproved) throw new Error('Stitch user approval is missing');
   if (!state.locks.implementationApproved && !(machineSealPending && state.roleChain?.confirmationModel === 'two-confirmations')) throw new Error('pre-implementation approval or eligible machine seal is missing');
   if (!state.locks.stitchCurrent && !stitchSkipped) throw new Error('stitchCurrent is false');
+  if (stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state)) throw new Error('Stitch machine seal is missing or stale');
   return state;
 }
 

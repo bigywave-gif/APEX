@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { validateImplementationCoverage } from './implementation-coverage.mjs';
+import { stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -32,6 +33,7 @@ if (state.roleChain?.enabled && state.roleChain?.confirmationModel !== 'two-conf
 }
 if (state.gates.gate1.status !== 'passed') die('Gate 1 has not passed');
 if (!state.locks.visualApproved || (!state.locks.stitchCurrent && !state.locks.stitchSkipped)) die('latest Stitch canvas must be approved and current, or the Stitch stage must be explicitly skipped');
+if (stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state)) die('Stitch machine seal is missing or stale; revalidate the current candidate before compiling');
 const site = read(path.join(runDir, state.artifacts.siteContract || 'site-contract.json'));
 const freeze = state.locks.stitchSkipped ? null : read(path.join(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json'));
 const visualReference = state.locks.stitchSkipped ? read(path.join(runDir, state.artifacts.visualReference || 'visual-reference.json')) : null;

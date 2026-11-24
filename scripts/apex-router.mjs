@@ -26,6 +26,7 @@ import { formalRouteCoverage } from './formal-route-coverage.mjs';
 import { formalStitchProgress } from './formal-stitch-progress.mjs';
 import { formalDirectProgress } from './formal-direct-progress.mjs';
 import { implementationSealCurrent } from './implementation-seal.mjs';
+import { stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { validateRequirementReview } from './requirement-review.mjs';
@@ -43,6 +44,7 @@ const bridgeSync = path.join(apexRoot, 'scripts', 'sync-codex-bridge.mjs');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
 const DEFAULT_LEASE_MS = 15 * 60 * 1000;
 const usesCombinedPlan = state => state.roleChain?.confirmationModel === 'two-confirmations';
+const stitchSealStale = (state, runDir) => Boolean(runDir && state.locks?.stitchApproved && state.locks?.stitchCurrent && stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state));
 const confirmationEpoch = (state, gate) => Number(state.confirmationEpochs?.[gate] || 0);
 function invalidateConfirmationEpochs(state, gates) {
   state.confirmationEpochs = { ...(state.confirmationEpochs || {}) };
@@ -1927,7 +1929,7 @@ function automaticWorkStep(state, runDir, action) {
       }
     }
     if (!runFile('stitchParityEvidence')) return step('verify-stitch-candidate-parity', '采集 Stitch 候选与运行时 Demo 的严格一致性证据', ['stitch-parity-evidence.json'], usesCombinedPlan(state) ? '以 sync_stitch 对当前冻结候选执行结构与视觉一致性校验；一致时自动封存，存在真实差异时展示差异并提供用户选择。' : '以 sync_stitch 对当前冻结候选执行结构与视觉一致性校验；完成后重新读取 Router，并完整展示候选、差异、来源、风险与调整项，再仅呈现“确认 Stitch 内容”。');
-    if (usesCombinedPlan(state) && !state.locks?.stitchApproved) return step('seal-unchanged-stitch-candidate', '校验并自动冻结与 Demo 一致的 Stitch 候选', ['machine-seals/stitch.json'], '以 sync_stitch 调用 stitch-sync.mjs seal；仅当当前候选、结构、画面、内容及 Demo 基线全部通过校验时自动冻结。存在差异时保留真实失败证据，不得静默替换用户确认的 Demo。');
+    if (usesCombinedPlan(state) && (!state.locks?.stitchApproved || stitchSealStale(state, runDir))) return step('seal-unchanged-stitch-candidate', '校验并自动冻结与 Demo 一致的 Stitch 候选', ['machine-seals/stitch-*.json'], '以 sync_stitch 调用 stitch-sync.mjs seal；仅当当前候选、结构、画面、内容及 Demo 基线全部通过校验时自动冻结。存在差异时保留真实失败证据，不得静默替换用户确认的 Demo。');
     if (!durableConfirmationPresentationReady(state, runDir, 'stitch', stitchPresentationSections, ['stitchFreeze', 'stitchParityEvidence'], 'sync_stitch')) return step('compile-stitch-confirmation-presentation', '编译来源绑定的 Stitch 确认正文', ['stitch-presentation.md', 'stitch-presentation-manifest.json'], '以 sync_stitch 调用 confirmation-presentation.mjs compile <run-dir> stitch。正文必须绑定当前候选、冻结页面、来源锁与严格一致性证据；不得以文件清单、短摘要或临时聊天拼接替代。');
     return step('publish-complete-stitch-presentation', '整理完整 Stitch 候选确认内容', [state.artifacts.stitchFreeze, 'stitch-parity-evidence.json'], '当前候选与一致性证据已齐备；重新读取 Router 以打开唯一的 Stitch 确认点。不得以进度文字或通用“继续”结束。');
   }
@@ -2066,6 +2068,7 @@ function allowedActions(state, runDir = null) {
     else if (usesCombinedPlan(state) && !confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state)) { actions.add('revoke_visual'); if (!state.deliveryRoute && !state.locks?.stitchApproved && !state.locks?.stitchSkipped && demoConfirmationReferences({ runDir, runId: state.runId }, state)) actions.add('confirm_runtime_demo'); }
     else if (!state.locks?.stitchApproved && !state.locks?.stitchSkipped && !state.deliveryRoute) ['select_delivery_route', 'revoke_visual'].forEach(action => actions.add(action));
     else if (currentStitchDifference(state, runDir)) { actions.add('select_delivery_route'); actions.add('revoke_visual'); }
+    else if (stitchSealStale(state, runDir)) ['sync_stitch', 'revoke_visual'].forEach(action => actions.add(action));
     else if (!state.locks?.stitchApproved && !state.locks?.stitchSkipped && state.deliveryRoute === 'stitch') {
       ['sync_stitch', 'observe_stitch', 'validate_stitch', 'revoke_visual'].forEach(action => actions.add(action));
       if (checkpointReady(state, runDir, 'stitch')) actions.add('request_stitch_approval');
@@ -2141,6 +2144,7 @@ function nextRequiredAction(state, runDir = null) {
   if (state.lifecycle === 'active' && usesCombinedPlan(state) && state.locks?.effectApproved && runtimeDemoPresentationReadyForState(state, runDir) && !demoConfirmationReferences({ runDir, runId: state.runId }, state)) return 'revoke_visual';
   if (state.lifecycle === 'active' && usesCombinedPlan(state) && state.locks?.effectApproved && (state.deliveryRoute || state.locks?.stitchSkipped || state.locks?.stitchApproved) && !confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state)) return 'revoke_visual';
   if (currentStitchDifference(state, runDir)) return null;
+  if (state.lifecycle === 'active' && state.gates?.gate2?.status !== 'passed' && stitchSealStale(state, runDir)) return 'sync_stitch';
   // Choosing a delivery route is the last user decision before the next
   // checkpoint.  The work that makes that checkpoint reviewable must not turn
   // into a silent no-input state: run it automatically and only then expose

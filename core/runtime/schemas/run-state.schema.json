@@ -478,6 +478,9 @@
             "null"
           ]
         },
+        "stitchMachineSeal": {
+          "type": ["string", "null"]
+        },
         "visualReference": {
           "type": [
             "string",

@@ -15,6 +15,7 @@ import { validateFormalInteractionEvidence } from './formal-interaction-evidence
 import { formalJourneyCode } from './formal-interaction.mjs';
 import { npmCacheRoot } from './apex-paths.mjs';
 import { buildStitchPrompt } from './stitch-adaptation.mjs';
+import { stitchMachineSealCurrent } from './stitch-machine-seal.mjs';
 import { commitRunState, agentRuntimeStatus } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -379,10 +380,32 @@ try {
   const tamperedSeal = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'pre-stitch-machine-seal', runDir], { encoding: 'utf8', timeout: 30000 });
   if (tamperedSeal.status === 0 || !tamperedSeal.stderr.includes('multi-screen Stitch evidence incomplete')) throw new Error('changed screen parity evidence must block the multi-screen seal');
   fs.writeFileSync(firstEvidence, originalEvidence);
+  if (process.env.APEX_TEST_STITCH_COMMIT_RACE === '1') {
+    const flag = path.join(runDir, 'stitch-seal-race.flag'); fs.writeFileSync(flag, 'inject concurrent ledger commit');
+    const auth = skillAuth();
+    const race = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-action.mjs'), 'run', project, runId, session, auth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'seal', runDir], { encoding: 'utf8', timeout: 180000, env: { ...process.env, STITCH_HOST: mockEndpoint, STITCH_API_KEY: 'local-fixture-only', NODE_OPTIONS: `--import=${path.join(apexRoot, 'scripts', 'stitch-freeze-commit-race-fixture.mjs')}`, APEX_STITCH_COMMIT_RACE_FLAG: flag, APEX_STITCH_COMMIT_RACE_RUN: runDir, APEX_STITCH_COMMIT_RACE_TARGET: '/machine-seals/stitch-' } });
+    if (race.status === 0 || !race.stderr.includes('run state changed before atomic commit')) throw new Error(`Stitch seal must reject a concurrent ledger update: ${race.stderr}`);
+    const state = JSON.parse(fs.readFileSync(stateFile));
+    if (state.locks.stitchCurrent || state.locks.stitchApproved || state.artifacts.stitchMachineSeal || state.artifacts.concurrentFreezeFixture !== 'concurrent-freeze-marker.json') throw new Error('failed seal must not publish machine approval');
+  }
   const sealAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']);
   const seal = run('apex-action.mjs', ['run', project, runId, session, sealAuth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'seal', runDir]);
   const receipt = JSON.parse(fs.readFileSync(seal.machineSeal));
   if (!seal.sealed || receipt.screens?.length !== 2) throw new Error('machine seal must bind both screen parity records');
+  const sealedState = JSON.parse(fs.readFileSync(stateFile));
+  if (!stitchMachineSealCurrent(runDir, sealedState)) throw new Error('committed Stitch machine seal must bind the current evidence');
+  const sealBytes = fs.readFileSync(seal.machineSeal); fs.appendFileSync(seal.machineSeal, ' ');
+  const staleSeal = run('apex-router.mjs', ['status', project, runId, session]);
+  if (staleSeal.nextRequiredAction !== 'recover' || staleSeal.allowedActions.includes('compile_visual_bundle')) throw new Error('tampered registered Stitch seal must require integrity recovery');
+  fs.writeFileSync(seal.machineSeal, sealBytes);
+  const legacyState = JSON.parse(fs.readFileSync(stateFile)), sealRef = legacyState.artifacts.stitchMachineSeal;
+  legacyState.artifacts.stitchMachineSeal = null; legacyState.revision += 1; commitRunState(runDir, legacyState, { reason: 'legacy-stitch-seal-fixture' });
+  const legacySeal = run('apex-router.mjs', ['status', project, runId, session]);
+  if (legacySeal.nextRequiredAction !== 'sync_stitch' || legacySeal.executionDirective?.currentStep?.id !== 'seal-unchanged-stitch-candidate' || !legacySeal.allowedActions.includes('sync_stitch')) throw new Error('missing Stitch seal binding must return to authorized revalidation');
+  const restoredState = JSON.parse(fs.readFileSync(stateFile)); restoredState.artifacts.stitchMachineSeal = sealRef; restoredState.revision += 1; commitRunState(runDir, restoredState, { reason: 'restore-stitch-seal-fixture' });
+  fs.appendFileSync(firstEvidence, ' ');
+  if (stitchMachineSealCurrent(runDir, sealedState)) throw new Error('changed screen parity must invalidate the committed machine seal');
+  fs.writeFileSync(firstEvidence, originalEvidence);
   // Isolate formal parity plumbing: Gate 2 and pageDelta are seeded fixtures,
   // while both screenshots and DOM files were captured by the real browser.
   const formalState = JSON.parse(fs.readFileSync(stateFile));

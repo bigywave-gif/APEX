@@ -212,11 +212,12 @@ function imageInputTools(tools) {
     return /(?:upload|attach|add)[_-]?(?:reference[_-]?)?(?:image|screenshot|wireframe)|(?:reference|source)[_-]?(?:image|screenshot|wireframe)|image[_-]?(?:upload|input|reference)|wireframe[_-]?upload/i.test(`${name} ${description}`);
   });
 }
-function updateState(runDir, reference, current, automatic = false, snapshot) {
+function updateState(runDir, reference, current, automatic = false, snapshot, machineSeal = null) {
   const stateFile = path.join(runDir, 'state.json');
   if (!fs.existsSync(stateFile)) return;
   const { state, expectedStateHash } = snapshot;
   state.artifacts.stitchFreeze = reference;
+  state.artifacts.stitchMachineSeal = machineSeal;
   state.locks.stitchCurrent = current;
   if (automatic) state.locks.stitchApproved = true;
   if (current && state.locks.visualApproved) state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE';
@@ -312,8 +313,10 @@ if (command === 'list-projects') {
   const stateFile = path.join(runDir, 'state.json');
   const stateSnapshot = readRunStateForUpdate(runDir), { state } = stateSnapshot;
   if (!state.locks.effectApproved) die('a confirmed runtime Demo is required before sealing Stitch');
+  const sealInputs = captureInputs(runDir, [state.artifacts.stitchFreeze, state.artifacts.stitchParityEvidence, state.artifacts.visualReference, state.artifacts.runtimeVisualBaseline, state.artifacts.visualScreenReferences]);
   const automatic = state.roleChain?.confirmationModel === 'two-confirmations';
   if (!automatic && !state.locks.stitchApproved) die('Stitch approval is required before sealing Stitch');
+  let machineSeal = null;
   if (automatic) {
     const validation = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'pre-stitch-machine-seal', runDir], { encoding: 'utf8' });
     if (validation.status !== 0) die((validation.stderr || validation.stdout).trim());
@@ -326,16 +329,22 @@ if (command === 'list-projects') {
   if (!fs.existsSync(contractFile) || hash(fs.readFileSync(contractFile)) !== evidence.structuralVerification.contractHash) die('strict Stitch structure contract is missing or changed');
   const contract = read(contractFile);
   if (contract.source !== 'stitch-screen-export' || contract.sourceImageHash !== evidence.stitchImageHash || contract.verification?.status !== 'passed') die('strict Stitch structure contract is not a passed export of the compared screen');
+  try { assertInputsUnchanged(runDir, sealInputs); } catch (error) { die(error.message); }
   if (readRunStateForUpdate(runDir).expectedStateHash !== stateSnapshot.expectedStateHash) die('run state changed during Stitch seal; re-evaluate the current Demo and parity evidence');
   if (automatic) {
     const freeze = read(path.join(runDir, state.artifacts.stitchFreeze));
     const reference = read(path.join(runDir, state.artifacts.visualReference));
     const multi = freeze.approvedScreens.length > 1 ? validateMultiStitch(runDir, state, freeze, reference) : null;
-    const receipt = { schemaVersion: '3.0', type: 'stitch-machine-seal', status: 'validated', runId: state.runId, freeze: { path: state.artifacts.stitchFreeze, sha256: hash(fs.readFileSync(path.join(runDir, state.artifacts.stitchFreeze))) }, parity: { path: state.artifacts.stitchParityEvidence, sha256: hash(fs.readFileSync(evidenceFile)) }, ...(multi ? { screens: multi.screens } : {}), validatedAt: new Date().toISOString() };
-    const receiptFile = path.join(runDir, 'machine-seals', 'stitch.json'); fs.mkdirSync(path.dirname(receiptFile), { recursive: true }); const temporary = `${receiptFile}.${process.pid}.tmp`; write(temporary, receipt); fs.renameSync(temporary, receiptFile);
+    const screenProofs = (multi?.screens || []).map(screen => read(path.join(runDir, screen.evidence)));
+    const sealedInputs = captureInputs(runDir, [...sealInputs.map(item => item.file), contractFile, reference.referenceImage?.path, ...freeze.approvedScreens.flatMap(screen => [screen.imagePath, screen.htmlPath]), ...(multi?.screens || []).flatMap(screen => [screen.evidence, screen.reference]), ...screenProofs.map(proof => proof.structuralVerification?.contractPath)]);
+    if (sealedInputs.some(item => item.missing)) die('Stitch seal input is missing');
+    const receipt = { schemaVersion: '3.0', type: 'stitch-machine-seal', status: 'validated', runId: state.runId, freeze: { path: state.artifacts.stitchFreeze, sha256: hash(fs.readFileSync(path.join(runDir, state.artifacts.stitchFreeze))) }, parity: { path: state.artifacts.stitchParityEvidence, sha256: hash(fs.readFileSync(evidenceFile)) }, inputs: sealedInputs.map(item => ({ path: path.relative(fs.realpathSync(runDir), item.file), sha256: item.sha256 })), ...(multi ? { screens: multi.screens } : {}), validatedAt: new Date().toISOString() };
+    const receiptDir = path.join(runDir, 'machine-seals'); fs.mkdirSync(receiptDir, { recursive: true });
+    machineSeal = path.relative(runDir, saveDownload(receiptDir, 'stitch', '.json', Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`)).file);
+    try { assertInputsUnchanged(runDir, sealedInputs); } catch (error) { die(error.message); }
   }
-  updateState(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json', true, automatic, stateSnapshot);
-  console.log(JSON.stringify({ sealed: true, stitchFreeze: state.artifacts.stitchFreeze || 'stitch-freeze.json', ...(automatic ? { machineSeal: path.join(runDir, 'machine-seals', 'stitch.json') } : {}) }));
+  updateState(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json', true, automatic, stateSnapshot, machineSeal);
+  console.log(JSON.stringify({ sealed: true, stitchFreeze: state.artifacts.stitchFreeze || 'stitch-freeze.json', ...(automatic ? { machineSeal: path.join(runDir, machineSeal) } : {}) }));
 } else if (command === 'check') {
   const runDir = path.resolve(args[0] || '.');
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }

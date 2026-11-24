@@ -57,7 +57,7 @@ export const workflowNodes = Object.freeze({
   'verify-stitch-candidate-parity': node('sync_stitch', ['stitch-parity-evidence.json'], actionScript('strict-replica.mjs')),
   'compile-stitch-screen-reference': node('sync_stitch', ['visual-screen-references.json'], actionScript('visual-reference-compiler.mjs')),
   'verify-stitch-candidate-screen': node('sync_stitch', ['evidence/parity/stitch-result-*.json'], actionScript('strict-replica.mjs')),
-  'seal-unchanged-stitch-candidate': node('sync_stitch', ['machine-seals/stitch.json'], actionScript('stitch-sync.mjs')),
+  'seal-unchanged-stitch-candidate': node('sync_stitch', ['machine-seals/stitch-*.json'], actionScript('stitch-sync.mjs')),
   'compile-stitch-confirmation-presentation': node('sync_stitch', ['stitch-presentation.md', 'stitch-presentation-manifest.json'], actionScript('confirmation-presentation.mjs')),
   'publish-complete-stitch-presentation': node('sync_stitch', ['stitch-presentation.md', 'stitch-presentation-manifest.json'], routerCommand('status')),
   'derive-site-contract': node('compile_visual_bundle', ['site-contract.json'], actionScript('contract-recorder.mjs')),
