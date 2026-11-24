@@ -46,8 +46,10 @@ if (command === 'serve') {
       const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
       const file = inside(realRoot, relative);
       if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) { response.writeHead(404); response.end('Not found'); return; }
+      const realFile = fs.realpathSync(file);
+      if (!realFile.startsWith(`${realRoot}${path.sep}`)) { response.writeHead(404); response.end('Not found'); return; }
       response.writeHead(200, { 'content-type': contentType(file), 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-      fs.createReadStream(file).pipe(response);
+      fs.createReadStream(realFile).pipe(response);
     } catch { response.writeHead(400); response.end('Bad request'); }
   });
   server.listen(port, host);
@@ -61,10 +63,13 @@ if (command === 'serve') {
   const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
   const filesRef = state.artifacts?.visualSandboxFiles;
   const filesManifest = filesRef && inside(runDir, filesRef);
-  if (!filesManifest || !fs.existsSync(filesManifest)) die('a materialized visual-sandbox-files.json is required');
+  const realRun = fs.realpathSync(runDir);
+  if (!filesManifest || !fs.existsSync(filesManifest) || !fs.realpathSync(filesManifest).startsWith(`${realRun}${path.sep}`)) die('a run-local materialized visual-sandbox-files.json is required');
   const manifest = read(filesManifest); const entrypoint = inside(runDir, manifest.entrypoint);
   if (manifest.status !== 'materialized' || !entrypoint || !fs.existsSync(entrypoint)) die('visual sandbox materialization is incomplete');
   const sandboxRoot = fs.realpathSync(path.dirname(entrypoint));
+  const expectedRoot = path.join(realRun, 'visual-sandbox');
+  if (sandboxRoot !== expectedRoot || !fs.realpathSync(entrypoint).startsWith(`${sandboxRoot}${path.sep}`) || !fs.statSync(entrypoint).isFile()) die('visual sandbox entrypoint must resolve inside the current Run sandbox');
   const runtimeFile = path.join(runDir, 'visual-sandbox-runtime.json');
   if (fs.existsSync(runtimeFile)) {
     let prior = null; try { prior = read(runtimeFile); } catch {}
@@ -77,7 +82,7 @@ if (command === 'serve') {
   const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port), '--apex-run-id', runId, '--bind-host', host], { detached: true, stdio: 'ignore' }); child.unref();
   const url = loopbackUrl(host, port);
   let ready = false; for (let attempt = 0; attempt < 20 && !ready; attempt += 1) { await new Promise(resolve => setTimeout(resolve, 100)); ready = await reachable(url); }
-  if (!ready) die('run-local Demo server did not become reachable');
+  if (!ready) { child.kill('SIGTERM'); die('run-local Demo server did not become reachable'); }
   const output = { schemaVersion: '3.0', runId, runtimeRoot: path.relative(fs.realpathSync(runDir), sandboxRoot), entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), url, pid: child.pid, startedAt: new Date().toISOString(), status: 'running' };
   write(runtimeFile, output);
   write(path.join(runDir, 'runtime-services.json'), { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: child.pid, url, runtimeRoot: output.runtimeRoot, startedAt: output.startedAt }] });

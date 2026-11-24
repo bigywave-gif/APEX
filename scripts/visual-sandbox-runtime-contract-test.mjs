@@ -35,6 +35,16 @@ try {
   fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, status: 'materialized', entrypoint: 'visual-sandbox/index.html' })); commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
   const beforeStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'materialized Demo status');
   if (beforeStart.executionDirective?.currentStep?.id !== 'start-run-local-demo' || beforeStart.terminalResponseContract?.allowed !== false) throw new Error('a materialized but unstarted Demo must expose the exact automatic start step, never a null step or user prompt');
+  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-demo-foreign-'));
+  try {
+    const manifestFile = path.join(runDir, 'visual-sandbox-files.json'), original = fs.readFileSync(manifestFile), alias = path.join(runDir, 'visual-sandbox', 'foreign');
+    fs.writeFileSync(path.join(foreign, 'index.html'), '<main data-apex-source-selection="native-layout">Foreign</main>'); fs.symlinkSync(foreign, alias);
+    const altered = JSON.parse(original); altered.entrypoint = 'visual-sandbox/foreign/index.html'; fs.writeFileSync(manifestFile, JSON.stringify(altered));
+    const wrongAuth = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'foreign sandbox authorization');
+    const rejected = run(action, ['run', project, 'run-runtime', 'session-runtime', wrongAuth.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir]);
+    if (rejected.status === 0 || !rejected.stderr.includes('visual sandbox entrypoint must resolve inside the current Run sandbox') || fs.existsSync(path.join(runDir, 'visual-sandbox-runtime.json'))) throw new Error('Demo start must reject an entrypoint outside the Run sandbox');
+    fs.unlinkSync(alias); fs.writeFileSync(manifestFile, original);
+  } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
   const authorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'runtime start authorization');
   // PM2-style runtime writes are deliberately outside the frozen formal source
   // closure. They must not make a run-local Demo look like it edited production
@@ -44,6 +54,12 @@ try {
   const receipt = JSON.parse(fs.readFileSync(output.visualSandboxRuntime, 'utf8')); pids.push(receipt.pid);
   const serviceRegistry = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-services.json'), 'utf8'));
   if (!output.url || await fetchStatus(output.url) !== 200 || !fs.existsSync(path.join(runDir, 'visual-sandbox-runtime.json')) || JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime !== 'visual-sandbox-runtime.json' || serviceRegistry.services?.[0]?.record !== 'visual-sandbox-runtime.json' || serviceRegistry.services?.[0]?.pid !== receipt.pid) throw new Error('runtime start must write a reachable, current-run-only Demo URL, artifact, and service registry');
+  const sandbox = path.join(runDir, 'visual-sandbox');
+  fs.symlinkSync(path.join(project, 'server', 'api.js'), path.join(sandbox, 'outside.js'));
+  fs.symlinkSync('index.html', path.join(sandbox, 'local.html'));
+  if (await fetchStatus(new URL('outside.js', output.url)) !== 404) throw new Error('Demo server must not serve a file linked outside the sandbox');
+  if (await fetchStatus(new URL('local.html', output.url)) !== 200) throw new Error('Demo server should serve an in-sandbox symlink');
+  fs.unlinkSync(path.join(sandbox, 'outside.js')); fs.unlinkSync(path.join(sandbox, 'local.html'));
   const afterStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'started Demo status');
   if (afterStart.executionDirective?.currentStep?.id !== 'capture-runtime-browser-evidence' || afterStart.terminalResponseContract?.allowed !== false) throw new Error('a started Demo must advance to browser capture automatically instead of ending the chain');
   fs.unlinkSync(path.join(runDir, 'visual-sandbox-runtime.json')); delete JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime;
@@ -62,7 +78,7 @@ try {
   if (formalReceipt.productionBoundary?.snapshotMode !== 'formal-source-discovery' || formalReceipt.productionBoundary?.changedFiles?.[0]?.path !== 'server/api.js' || !String(formalReceipt.stderr).includes('server/api.js')) throw new Error('a formal source boundary failure must identify its protected snapshot mode and exact changed file');
   pids.push(JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-runtime.json'), 'utf8')).pid);
   if (fs.existsSync(path.join(project, 'index.html'))) throw new Error('runtime start must not materialize files outside the run-local sandbox');
-  console.log(JSON.stringify({ status: 'passed', checks: 6 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 9 }));
 } finally {
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch {} }
   fs.rmSync(project, { recursive: true, force: true });
