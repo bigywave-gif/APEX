@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { commitRunState } from './run-ledger.mjs';
@@ -23,7 +24,7 @@ try {
   fs.writeFileSync(path.join(runDir, 'fixture-product-strategy.json'), JSON.stringify({ functionalPlan: demoContract.journeys.filter(item => item.kind === 'task').map(item => ({ task: item.task })) }));
   fs.writeFileSync(path.join(runDir, 'visual-execution-plan.json'), JSON.stringify({ selectionAnalysis: seedDesignContract(runDir), sourceSelections: ['layout', 'component', 'style', 'font', 'content'].map(kind => ({ id: kind, kind, visualNodes: ['demo-root'], ...(kind === 'content' ? { parameters: { origin: 'fixture', fields: ['title'], implementation: 'render title' } } : {}) })) }));
   fs.mkdirSync(path.join(runDir, 'visual-sandbox')); fs.writeFileSync(path.join(runDir, 'visual-sandbox/index.html'), '<main data-apex-source-selection="layout">Runtime Demo</main>');
-  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', status: 'materialized', entrypoint: 'visual-sandbox/index.html', interactionContract: demoContract }));
+  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', status: 'materialized', entrypoint: 'visual-sandbox/index.html', interactionContract: demoContract, files: [{ path: 'visual-sandbox/index.html', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(runDir, 'visual-sandbox/index.html'))).digest('hex')}` }] }));
   fs.writeFileSync(path.join(runDir, 'demo-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'index.html', files: [{ path: 'index.html', encoding: 'utf8', content: '<main data-apex-source-selection="layout">Runtime Demo</main>' }], sourceBindings: [{ sourceSelectionId: 'layout', files: ['index.html'] }] }));
   commitRunState(runDir, state, { reason: 'state-authority-test-fixture' });
   const authorization = call(['authorize', project, runId, session, 'generate_visual']);

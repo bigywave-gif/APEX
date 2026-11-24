@@ -34,7 +34,7 @@ try {
   fs.mkdirSync(path.join(project, 'data'), { recursive: true }); fs.mkdirSync(path.join(project, 'logs'), { recursive: true }); fs.writeFileSync(path.join(project, 'data', 'runtime.json'), '{"revision":0}\n'); fs.writeFileSync(path.join(project, 'logs', 'output.log'), 'runtime started\n');
   fs.mkdirSync(path.join(runDir, 'visual-sandbox'), { recursive: true }); fs.writeFileSync(path.join(runDir, 'visual-sandbox', 'index.html'), '<main data-apex-source-selection="native-layout">Runtime Demo</main>');
   fs.writeFileSync(path.join(runDir, 'demo-source-manifest.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'index.html', files: [{ path: 'index.html', encoding: 'utf8', content: '<main data-apex-source-selection="native-layout">Runtime Demo</main>' }], sourceBindings: [{ sourceSelectionId: 'native-layout', files: ['index.html'] }] }));
-  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, status: 'materialized', entrypoint: 'visual-sandbox/index.html' })); commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
+  fs.writeFileSync(path.join(runDir, 'visual-sandbox-files.json'), JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, status: 'materialized', entrypoint: 'visual-sandbox/index.html', files: [{ path: 'visual-sandbox/index.html', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(runDir, 'visual-sandbox/index.html'))).digest('hex')}` }] })); commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
   const beforeStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'materialized Demo status');
   if (beforeStart.executionDirective?.currentStep?.id !== 'start-run-local-demo' || beforeStart.terminalResponseContract?.allowed !== false) throw new Error('a materialized but unstarted Demo must expose the exact automatic start step, never a null step or user prompt');
   const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-demo-foreign-'));
@@ -86,8 +86,16 @@ try {
   fs.symlinkSync(path.join(project, 'server', 'api.js'), path.join(sandbox, 'outside.js'));
   fs.symlinkSync('index.html', path.join(sandbox, 'local.html'));
   if (await fetchStatus(new URL('outside.js', output.url)) !== 404) throw new Error('Demo server must not serve a file linked outside the sandbox');
-  if (await fetchStatus(new URL('local.html', output.url)) !== 200) throw new Error('Demo server should serve an in-sandbox symlink');
+  if (await fetchStatus(new URL('local.html', output.url)) !== 404) throw new Error('Demo server must reject a file absent from its source manifest');
   fs.unlinkSync(path.join(sandbox, 'outside.js')); fs.unlinkSync(path.join(sandbox, 'local.html'));
+  fs.writeFileSync(path.join(sandbox, 'extra.js'), 'unlisted');
+  if (await fetchStatus(new URL('extra.js', output.url)) !== 404) throw new Error('Demo server must not serve unlisted files');
+  fs.unlinkSync(path.join(sandbox, 'extra.js'));
+  const originalIndex = fs.readFileSync(path.join(sandbox, 'index.html'));
+  fs.appendFileSync(path.join(sandbox, 'index.html'), 'changed');
+  if (await fetchStatus(output.url) !== 409) throw new Error('Demo server must not serve changed manifest files');
+  fs.writeFileSync(path.join(sandbox, 'index.html'), originalIndex);
+  if (await fetchStatus(output.url) !== 200) throw new Error('Demo server must serve the restored manifest source');
   const afterStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'started Demo status');
   if (afterStart.executionDirective?.currentStep?.id !== 'capture-runtime-browser-evidence' || afterStart.terminalResponseContract?.allowed !== false) throw new Error('a started Demo must advance to browser capture automatically instead of ending the chain');
   fs.unlinkSync(path.join(runDir, 'visual-sandbox-runtime.json')); delete JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime;
@@ -117,7 +125,7 @@ try {
   if (formalReceipt.productionBoundary?.snapshotMode !== 'formal-source-discovery' || formalReceipt.productionBoundary?.changedFiles?.[0]?.path !== 'server/api.js' || !String(formalReceipt.stderr).includes('server/api.js')) throw new Error('a formal source boundary failure must identify its protected snapshot mode and exact changed file');
   pids.push(JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-runtime.json'), 'utf8')).pid);
   if (fs.existsSync(path.join(project, 'index.html'))) throw new Error('runtime start must not materialize files outside the run-local sandbox');
-  console.log(JSON.stringify({ status: 'passed', checks: 15 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 18 }));
 } finally {
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch {} }
   fs.rmSync(project, { recursive: true, force: true });

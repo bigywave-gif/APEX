@@ -70,8 +70,16 @@ if (command === 'serve') {
       if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) { response.writeHead(404); response.end('Not found'); return; }
       const realFile = fs.realpathSync(file);
       if (!realFile.startsWith(`${realRoot}${path.sep}`)) { response.writeHead(404); response.end('Not found'); return; }
+      const manifestFile = path.join(path.dirname(realRoot), 'visual-sandbox-files.json');
+      if (!fs.existsSync(manifestFile) || fs.realpathSync(manifestFile) !== manifestFile) { response.writeHead(404); response.end('Not found'); return; }
+      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      const reference = path.relative(path.dirname(realRoot), file);
+      const matches = Array.isArray(manifest.files) ? manifest.files.filter(item => item?.path === reference) : [];
+      if (matches.length !== 1) { response.writeHead(404); response.end('Not found'); return; }
+      const content = fs.readFileSync(realFile);
+      if (matches[0].sha256 !== `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`) { response.writeHead(409); response.end('Source changed'); return; }
       response.writeHead(200, { 'content-type': contentType(file), 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-      fs.createReadStream(realFile).pipe(response);
+      response.end(content);
     } catch { response.writeHead(400); response.end('Bad request'); }
   });
   server.listen(port, host);
@@ -90,7 +98,7 @@ if (command === 'serve') {
   const filesRef = state.artifacts?.visualSandboxFiles;
   const filesManifest = filesRef && inside(runDir, filesRef);
   const realRun = fs.realpathSync(runDir);
-  if (!filesManifest || !fs.existsSync(filesManifest) || !fs.realpathSync(filesManifest).startsWith(`${realRun}${path.sep}`)) die('a run-local materialized visual-sandbox-files.json is required');
+  if (!filesManifest || filesManifest !== path.join(runDir, 'visual-sandbox-files.json') || !fs.existsSync(filesManifest) || fs.realpathSync(filesManifest) !== path.join(realRun, 'visual-sandbox-files.json')) die('a run-local materialized visual-sandbox-files.json is required');
   const manifest = read(filesManifest); const entrypoint = inside(runDir, manifest.entrypoint);
   if (manifest.status !== 'materialized' || !entrypoint || !fs.existsSync(entrypoint)) die('visual sandbox materialization is incomplete');
   const sandboxRoot = fs.realpathSync(path.dirname(entrypoint));
