@@ -625,7 +625,8 @@ function executeRouterController(command, args) {
     if (combined) { if (!checkpointReady(state, dir, 'gate1')) die('the product plan is not current'); validate('pre-gate1', dir); }
     const receipt = approval(dir, evidence, 'visual-plan', state);
     if (usesCombinedPlan(state)) {
-      const rendered = combinedPlanPresentation(state, dir);
+      const legacy = receipt.presentation?.renderPolicy === 'concise-issues-changes-and-style-sources';
+      const rendered = combinedPlanPresentation(state, dir, { legacy });
       if (!rendered || receipt.presentation?.sha256 !== sha256Text(rendered.content) || receipt.presentation?.renderPolicy !== rendered.renderPolicy) die('visual approval no longer matches the exact combined presentation');
     }
     if (combined) {
@@ -2385,7 +2386,7 @@ function nextRequiredDecision(state, runDir = null) {
   }
   return null;
 }
-function combinedPlanPresentation(state, runDir) {
+function combinedPlanPresentation(state, runDir, { legacy = false } = {}) {
   const visualFile = artifactFile(runDir, state.artifacts?.visualPlanPresentation);
   const productFile = artifactFile(runDir, state.artifacts?.gate1Presentation);
   if (!visualFile || !productFile) return null;
@@ -2400,10 +2401,18 @@ function combinedPlanPresentation(state, runDir) {
   const sources = new Map((plan.sourceSelections || []).map(item => [item.id, item]));
   if (!changes.length || changes.some(item => !item.scope || !item.currentIssue || !item.change || !item.why || !item.sourceSelectionIds?.length || item.sourceSelectionIds.some(id => !sources.has(id)))) return null;
   const lines = changes.map(item => {
-    const choices = item.sourceSelectionIds.map(id => { const source = sources.get(id); return [source.sourceId, source.resourceId, source.version].filter(Boolean).join(' / '); });
+    if (legacy) {
+      const choices = item.sourceSelectionIds.map(id => { const source = sources.get(id); return [source.sourceId, source.resourceId, source.version].filter(Boolean).join(' / '); });
+      return `### ${item.scope}\n\n- **问题**：${item.currentIssue}\n- **改法**：${item.change}；${item.why}\n- **样式来源**：${[...new Set(choices)].join('；')}`;
+    }
+    const nodes = new Set(item.sourceSelectionIds.flatMap(id => sources.get(id).visualNodes || []));
+    const styles = [...sources.values()].filter(source => source.kind === 'style' && source.visualNodes?.some(node => nodes.has(node)));
+    if (!nodes.size || [...nodes].some(node => !styles.some(style => style.visualNodes.includes(node)))) return null;
+    const choices = styles.map(source => [source.sourceId, source.resourceId, source.version].filter(Boolean).join(' / '));
     return `### ${item.scope}\n\n- **问题**：${item.currentIssue}\n- **改法**：${item.change}；${item.why}\n- **样式来源**：${[...new Set(choices)].join('；')}`;
   });
-  return { content: `# 本次视觉改造方案\n\n${lines.join('\n\n')}\n`, renderPolicy: 'concise-issues-changes-and-style-sources', requiredSections: ['问题', '改法', '样式来源'], localized };
+  if (lines.some(line => line === null)) return null;
+  return { content: `# 本次视觉改造方案\n\n${lines.join('\n\n')}\n`, renderPolicy: legacy ? 'concise-issues-changes-and-style-sources' : 'concise-issues-changes-and-style-sources-v2', requiredSections: ['问题', '改法', '样式来源'], localized };
 }
 function userInteractionDirective(state, runDir = null) {
   const approvalBlock = approvalRecoveryBlock(state);

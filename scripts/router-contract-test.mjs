@@ -755,7 +755,7 @@ if (!routerSource.includes("const roles = roleStageState(state, runDir, 'visual'
   const priorCombinedPlan = fs.readFileSync(path.join(existingRunDir, 'visual-execution-plan.json'));
   const combinedSelections = ['layout', 'component', 'style', 'font', 'content'].map(kind => ({ id: `${kind}-source`, kind, visualNodes: ['app-shell'], sourceId: 'existing-design', resourceId: kind, version: '1', ...(kind === 'content' ? { parameters: { origin: 'project', fields: ['content'], implementation: 'render' } } : { parameters: {} }) }));
   fs.writeFileSync(path.join(existingRunDir, 'DESIGN.md'), testDesign);
-  fs.writeFileSync(path.join(existingRunDir, 'visual-execution-plan.json'), JSON.stringify({ selectionAnalysis: { designContract: { path: 'DESIGN.md', sha256: testDesignHash } }, sourceSelections: combinedSelections, deliveryNarrative: { changes: [{ scope: 'app-shell', currentIssue: '信息层级不清', change: '调整布局层级', why: '让任务更易识别', sourceSelectionIds: ['style-source'] }] } }));
+  fs.writeFileSync(path.join(existingRunDir, 'visual-execution-plan.json'), JSON.stringify({ selectionAnalysis: { designContract: { path: 'DESIGN.md', sha256: testDesignHash } }, sourceSelections: combinedSelections, deliveryNarrative: { changes: [{ scope: 'app-shell', currentIssue: '信息层级不清', change: '调整布局层级', why: '让任务更易识别', sourceSelectionIds: ['layout-source'] }] } }));
   const sections = ['目标与范围', '信息架构与布局', '视觉 Token', '组件与交互', '图标、图表与素材', '动效与可访问性', '响应式与状态', '真实来源与物化', '候选比较与取舍', '实施影响与验收'];
   const visualBody = sections.map((title, index) => `## ${index + 1}. ${title}\n\n本节关于${title}，针对 app-shell 说明受影响范围、实施约束、设计依据、使用场景与具体验收方式，并提供足够完整的可审阅内容及必要决策事实。`).join('\n\n') + '\n';
   const visualFile = path.join(existingRunDir, 'visual-plan-presentation.md'); fs.writeFileSync(visualFile, visualBody);
@@ -765,13 +765,13 @@ if (!routerSource.includes("const roles = roleStageState(state, runDir, 'visual'
   fs.writeFileSync(visualReadyStateFile, `${JSON.stringify(combinedState, null, 2)}\n`);
   const displayedCombined = expect(run(router, ['status', existing, 'run-existing', 'session-existing']), 'localized combined plan must expose the real concise presentation');
   const shown = displayedCombined.userInteraction?.confirmation;
-  if (shown?.label !== '确认视觉改造方案' || !shown.presentation?.content?.includes('信息层级不清') || !shown.presentation.content.includes('调整布局层级') || !shown.presentation.content.includes('existing-design / style / 1') || shown.presentation.content.includes('## 1. 需求方向与成功标准')) throw new Error('localized combined confirmation mismatch: ' + JSON.stringify({ action: displayedCombined.nextRequiredAction, interaction: displayedCombined.userInteraction, integrity: displayedCombined.integrity }));
+  if (shown?.label !== '确认视觉改造方案' || !shown.presentation?.content?.includes('信息层级不清') || !shown.presentation.content.includes('调整布局层级') || !shown.presentation.content.includes('existing-design / style / 1') || shown.presentation.content.includes('existing-design / layout / 1') || shown.presentation.content.includes('## 1. 需求方向与成功标准')) throw new Error('localized combined confirmation mismatch: ' + JSON.stringify({ action: displayedCombined.nextRequiredAction, interaction: displayedCombined.userInteraction, integrity: displayedCombined.integrity }));
   const failedCombinedApproval = run(router, ['approve', existing, 'run-existing', 'session-existing', 'visual-plan', 'combined-render-test', 'visual-execution-plan.json', 'visual-plan-presentation.md']);
   reject(failedCombinedApproval, 'APEX validation failed:', 'schema-incomplete fixture must not pass the real product validation');
   const combinedReceiptFile = path.join(existingRunDir, 'approvals', 'visual-plan-combined-render-test.json');
   const combinedReceipt = JSON.parse(fs.readFileSync(combinedReceiptFile, 'utf8'));
   const expectedShownHash = `sha256:${crypto.createHash('sha256').update(shown.presentation.content).digest('hex')}`;
-  if (combinedReceipt.presentation?.sha256 !== expectedShownHash || combinedReceipt.presentation?.renderPolicy !== 'concise-issues-changes-and-style-sources' || combinedReceipt.scope !== 'requirements-and-visual-plan') throw new Error('combined approval receipt must freeze the exact presentation shown to the user');
+  if (combinedReceipt.presentation?.sha256 !== expectedShownHash || combinedReceipt.presentation?.renderPolicy !== 'concise-issues-changes-and-style-sources-v2' || combinedReceipt.scope !== 'requirements-and-visual-plan') throw new Error('combined approval receipt must freeze the exact presentation shown to the user');
   const unapprovedCombinedState = JSON.parse(fs.readFileSync(visualReadyStateFile));
   if (unapprovedCombinedState.gates.gate1.status === 'passed' || unapprovedCombinedState.locks.visualPlanApproved) throw new Error('failed product validation must not approve the combined plan');
   fs.rmSync(combinedReceiptFile); fs.writeFileSync(planFile, priorCombinedPlan);
