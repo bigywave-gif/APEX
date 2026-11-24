@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { newlyAvailableConfigs, newlyPreferredImports } from './existing-resource-freshness.mjs';
-import { codePositions, embeddedScriptPositions, unresolvedFailure } from './existing-import-inspection.mjs';
+import { codePositions, embeddedScriptPositions, unresolvedFailure, unresolvedSnapshot, currentImportInspection, requirementRevisionState } from './existing-import-inspection.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
@@ -115,6 +115,7 @@ function imports(projectRoot, file, content, sourceBytes) {
       const source = rel(projectRoot, file), reference = match[1];
       sourceState ||= `file:${sha(sourceBytes).slice('sha256:'.length)}`;
       unresolvedImports.set(JSON.stringify([source, reference]), { source, reference, sourceState, candidates: [...candidates].map(([path, state]) => ({ path, state })) });
+      if (command === 'inspect-imports' && unresolvedImports.size > 10000) die('unresolved import inspection exceeds the 10000-reference limit');
     }
   }
   // HTML entrypoints often load their real styles/scripts outside JS imports.
@@ -151,9 +152,21 @@ function imports(projectRoot, file, content, sourceBytes) {
 }
 function markers(content) { const text = content.toString('utf8'); const result = []; const tags = [...text.matchAll(/<([A-Za-z][\w.-]*)\b[^>]*>/g)].map(match => match[1]); const tests = [...text.matchAll(/data-testid=["']([^"']+)["']/g)].map(match => `testid:${match[1]}`); [...tags, ...tests].forEach((marker, index) => result.push({ marker: `${marker}#${index + 1}`, kind: marker.startsWith('testid:') ? 'test-anchor' : 'dom-element' })); return result; }
 const [command, runArg, projectArg, scopeArg] = process.argv.slice(2);
-if (command !== 'capture' || !runArg || !projectArg || !scopeArg) die('usage: capture <run-dir> <project-root> <baseline-input.json>');
-const runDir = path.resolve(runArg); const projectRoot = path.resolve(projectArg); const scope = JSON.parse(fs.readFileSync(path.resolve(scopeArg), 'utf8'));
+if (!['capture', 'inspect-imports', 'verify-inspection'].includes(command) || !runArg || !projectArg || !scopeArg) die('usage: capture|inspect-imports <run-dir> <project-root> <baseline-input.json> or verify-inspection <run-dir> <project-root> <run-relative-inspection>');
+const runDir = path.resolve(runArg); const projectRoot = path.resolve(projectArg);
 try { requireRouterAction(runDir, 'collect_existing_baseline'); } catch (error) { die(error.message); }
+if (command === 'verify-inspection') {
+  if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot) || fs.realpathSync(projectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('inspection verification requires the canonical Core and Router-authorized project');
+  console.log(JSON.stringify(currentImportInspection(runDir, projectRoot, scopeArg)));
+  process.exit(0);
+}
+let scopePath = path.resolve(scopeArg);
+if (command === 'inspect-imports') {
+  try { const input = fs.realpathSync(scopePath), root = fs.realpathSync(runDir); if (!input.startsWith(`${root}${path.sep}`) || !fs.statSync(input).isFile()) throw new Error('outside Run'); scopePath = input; }
+  catch { die('import inspection scope input must be a Run-local file'); }
+}
+const scopeBytes = fs.readFileSync(scopePath); const scope = JSON.parse(scopeBytes.toString('utf8'));
+const requirementRevision = command === 'inspect-imports' ? { observed: requirementRevisionState(runDir), authorized: process.env.APEX_ROUTER_INSPECTION_REVISION_STATE || 'unavailable:missing-authorization' } : null;
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir); if (state.track !== 'existing') die('code reference is only valid for Existing runs');
 const entries = [...new Set(scope.codeEntrypoints || [])].map(item => path.resolve(projectRoot, item));
@@ -162,7 +175,8 @@ const realProjectRoot = fs.realpathSync(projectRoot);
 if (realProjectRoot !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('code reference must use the Router-authorized project');
 tsconfigFile = path.join(projectRoot, 'tsconfig.json');
 const absentConfigCandidates = new Set();
-function projectConfig(file) { const real = fs.realpathSync(file); if (!inside(realProjectRoot, real)) throw new Error(`project configuration is outside the project: ${rel(projectRoot, file)}`); return fs.readFileSync(file, 'utf8'); }
+const inspectionConfigVersions = new Map();
+function projectConfig(file) { const real = fs.realpathSync(file); if (!inside(realProjectRoot, real)) throw new Error(`project configuration is outside the project: ${rel(projectRoot, file)}`); const bytes = fs.readFileSync(real); if (command === 'inspect-imports') { const relative = rel(projectRoot, file), versions = inspectionConfigVersions.get(relative) || new Set(); versions.add(sha(bytes)); inspectionConfigVersions.set(relative, versions); } return bytes.toString('utf8'); }
 const checkedConfigDirectories = new Set();
 function collectAncestorConfigs(source) {
   const found = []; let current = path.dirname(source);
@@ -229,7 +243,7 @@ publicRoots = [...new Set([path.join(projectRoot, 'public'), ...entries.map(entr
 // source hash and switches the state to the new manifest atomically later.
 const snapshotRoot = path.join(runDir, 'code-reference'); const copies = path.join(snapshotRoot, 'objects');
 const priorReferenceFile = path.join(runDir, 'code-reference.json'); const integrityIndexFile = path.join(runDir, 'source-integrity-index.json');
-if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
+if (command === 'capture' && fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
   try {
     const prior = JSON.parse(fs.readFileSync(priorReferenceFile, 'utf8')); const index = JSON.parse(fs.readFileSync(integrityIndexFile, 'utf8'));
     const requestedEntries = entries.map(entry => rel(projectRoot, entry)).sort(); const indexedEntries = (index.entrypoints || []).slice().sort();
@@ -242,8 +256,38 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
     }
   } catch { /* A malformed cache is never trusted; rebuild it below. */ }
 }
-const pending = [...entries, ...configFiles]; const selected = new Set();
-while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } if (/\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file)) { const bytes = fs.readFileSync(file); const content = bytes.toString('utf8'); for (const dependency of imports(projectRoot, file, content, bytes)) if (!selected.has(dependency)) pending.push(dependency); } }
+const pending = [...entries, ...configFiles]; const selected = new Set(), sourceObservations = [];
+while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); if (command === 'inspect-imports' && selected.size > 10000) die('unresolved import inspection exceeds the 10000-source limit'); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } const parseable = /\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file); if (parseable || command === 'inspect-imports') { const bytes = fs.readFileSync(file); if (command === 'inspect-imports') sourceObservations.push({ path: rel(projectRoot, file), sha256: sha(bytes) }); if (parseable) { const content = bytes.toString('utf8'); for (const dependency of imports(projectRoot, file, content, bytes)) if (!selected.has(dependency)) pending.push(dependency); } } }
+if (command === 'inspect-imports') {
+  if (!Array.isArray(scope.routes) || !scope.routes.length) die('baseline input must declare target routes');
+  const configurationObservations = [...inspectionConfigVersions].map(([path, versions]) => ({ path, sha256Versions: [...versions].sort() })).sort((a, b) => a.path.localeCompare(b.path));
+  const missing = [...unresolvedImports.values()];
+  let observationDrift = 'no-drift-detected';
+  try {
+    const sourceHashes = new Map(sourceObservations.map(item => [item.path, item.sha256]));
+    const inputsCurrent = !requirementRevision.observed.startsWith('unavailable:') && requirementRevision.observed === requirementRevision.authorized && requirementRevision.observed === requirementRevisionState(runDir) && process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 === sha(scopeBytes) && sha(fs.readFileSync(scopePath)) === sha(scopeBytes) && sourceObservations.every(item => { const file = path.resolve(projectRoot, item.path), real = fs.realpathSync(file); return inside(realProjectRoot, real) && real !== realProjectRoot && sha(fs.readFileSync(real)) === item.sha256; });
+    const configsCurrent = configurationObservations.every(item => item.sha256Versions.length === 1 && sourceHashes.get(item.path) === item.sha256Versions[0]);
+    const newConfigs = newlyAvailableConfigs({ absentConfigCandidates: [...absentConfigCandidates] }, projectRoot), newImports = newlyPreferredImports({ absentImportCandidates: [...absentImportCandidates] }, projectRoot);
+    const references = missing.map(item => ({ source: item.source, reference: item.reference, candidates: item.candidates.map(candidate => candidate.path) }));
+    const unresolvedCurrent = !references.length || JSON.stringify(unresolvedSnapshot(projectRoot, references)) === JSON.stringify(missing);
+    if (!inputsCurrent || !configsCurrent || newConfigs.length || newImports.length || !unresolvedCurrent) observationDrift = 'detected';
+  } catch { observationDrift = 'detected'; }
+  const inspection = { schemaVersion: '1.0', status: 'unverified', observationDrift, projectRoot, requirementRevision, scope: { routes: scope.routes, entrypoints: entries.map(entry => rel(projectRoot, entry)).sort(), inputReference: rel(fs.realpathSync(runDir), scopePath), inputSha256: sha(scopeBytes), authorizedInputSha256: process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 || 'unavailable' }, scanner: 'literal-relative-script-v3', sourceObservations: sourceObservations.sort((a, b) => a.path.localeCompare(b.path)), configurationObservations, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedImports: missing, limitations: ['partial-static-analysis', 'computed-paths-and-build-plugins-not-verified', 'no-drift-detected-is-not-an-atomic-snapshot', 'not-a-review-or-permission-to-proceed'] };
+  const serialized = `${JSON.stringify(inspection, null, 2)}\n`;
+  if (Buffer.byteLength(serialized) > 4 * 1024 * 1024) die('unresolved import inspection exceeds the 4 MiB evidence limit');
+  const inspectionHash = sha(serialized), reference = `inspections/imports-${inspectionHash.slice('sha256:'.length)}.json`, output = path.join(runDir, reference);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  const realRun = fs.realpathSync(runDir), realDirectory = fs.realpathSync(path.dirname(output));
+  if (fs.lstatSync(path.dirname(output)).isSymbolicLink() || !realDirectory.startsWith(`${realRun}${path.sep}`)) die('unresolved import inspection directory must remain inside the Run');
+  if (fs.existsSync(output)) { const realOutput = fs.realpathSync(output); if (fs.lstatSync(output).isSymbolicLink() || !realOutput.startsWith(`${realRun}${path.sep}`) || !fs.statSync(realOutput).isFile()) die('unresolved import inspection object must remain inside the Run'); if (sha(fs.readFileSync(realOutput)) !== inspectionHash) die('immutable unresolved import inspection object does not match its hash'); }
+  else fs.writeFileSync(output, serialized, { flag: 'wx' });
+  const validation = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'validate', 'unresolved-import-inspection.schema.json', output], { encoding: 'utf8' });
+  if (validation.status !== 0) die((validation.stderr || validation.stdout).trim());
+  const reused = state.artifacts.unresolvedImportInspection === reference;
+  if (!reused) { state.artifacts.unresolvedImportInspection = reference; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'unresolved-import-inspection', expectedStateHash }); }
+  console.log(JSON.stringify({ inspection: output, sha256: inspectionHash, status: inspection.status, unresolvedCount: inspection.unresolvedImports.length, sourceCount: inspection.sourceObservations.length, reused }));
+  process.exit(0);
+}
 if (unresolvedImports.size) {
   console.error(unresolvedFailure([...unresolvedImports.values()]));
   die('literal local imports could not be resolved; inspect the recorded sources and project build configuration before retrying');

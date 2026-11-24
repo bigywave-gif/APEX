@@ -262,6 +262,9 @@
             "null"
           ]
         },
+        "unresolvedImportInspection": {
+          "type": ["string", "null"]
+        },
         "deliveryContract": {
           "type": [
             "string",

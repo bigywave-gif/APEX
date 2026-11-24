@@ -137,7 +137,7 @@ function updateOperationIndex(receiptPath, receipt) {
   fs.writeFileSync(temporary, `${JSON.stringify(previous, null, 2)}\n`);
   fs.renameSync(temporary, operationIndexFile);
 }
-function inputFileHashes() { const hashes = {}; for (const argument of scriptArgs) { const candidate = path.resolve(argument); if (candidate.startsWith(`${runDirectory}${path.sep}`) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) hashes[path.relative(runDirectory, candidate)] = fileHash(candidate); } return hashes; }
+function inputFileHashes() { const hashes = {}; for (const argument of scriptArgs) { const candidate = path.resolve(argument); if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports' && argument === scriptArgs[3]) { try { if (!fs.realpathSync(candidate).startsWith(`${fs.realpathSync(runDirectory)}${path.sep}`)) continue; } catch { continue; } } if (candidate.startsWith(`${runDirectory}${path.sep}`) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) hashes[path.relative(runDirectory, candidate)] = fileHash(candidate); } return hashes; }
 function runInputHashes() {
   // Many guarded scripts intentionally read current run evidence by convention
   // (for example evidence/runtime-browser-capture.json) rather than receiving
@@ -237,6 +237,9 @@ function outputFileHashes(stdout) {
   return Object.fromEntries([...paths].sort().map(file => [path.relative(runRoot, file), fileHash(file)]));
 }
 const currentInputHashes = inputFileHashes();
+if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports' && scriptArgs[3]) {
+  try { const root = fs.realpathSync(runDirectory), input = fs.realpathSync(path.resolve(scriptArgs[3])); if (input.startsWith(`${root}${path.sep}`) && fs.statSync(input).isFile()) currentInputHashes[path.relative(root, input)] = fileHash(input); } catch {}
+}
 const currentRunInputHashes = runInputHashes();
 const productionBefore = action === 'generate_visual' ? productionSnapshot() : null;
 const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ action, script, scriptArgs })).digest('hex');
@@ -245,7 +248,7 @@ fs.mkdirSync(operationDirectory, { recursive: true });
 if (fs.existsSync(receiptFile)) {
   const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
   if (receipt.fingerprint !== fingerprint) fail('authorization receipt was already used for a different operation');
-  if (receipt.status === 'succeeded') { if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim') fail('agent claim replay requires a fresh Router authorization and the same claim key so the current lease is revalidated'); if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'status') fail('agent status replay requires a fresh Router authorization to observe current jobs'); if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'run-budget') fail('run budget replay requires a fresh Router authorization to observe the current configuration'); if (JSON.stringify(receipt.inputFileHashes || {}) !== JSON.stringify(currentInputHashes)) fail('authorized operation input files changed; obtain a new Router authorization before retrying'); process.stdout.write(receipt.stdout || ''); process.stderr.write(receipt.stderr || ''); process.exit(0); }
+  if (receipt.status === 'succeeded') { if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim') fail('agent claim replay requires a fresh Router authorization and the same claim key so the current lease is revalidated'); if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'status') fail('agent status replay requires a fresh Router authorization to observe current jobs'); if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'run-budget') fail('run budget replay requires a fresh Router authorization to observe the current configuration'); if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'verify-inspection') fail('inspection verification requires a fresh Router authorization to recheck current inputs'); if (JSON.stringify(receipt.inputFileHashes || {}) !== JSON.stringify(currentInputHashes)) fail('authorized operation input files changed; obtain a new Router authorization before retrying'); process.stdout.write(receipt.stdout || ''); process.stderr.write(receipt.stderr || ''); process.exit(0); }
   fail(`operation receipt is ${receipt.status}; obtain a new Router authorization before retrying`);
 }
 const verification = spawnSync(process.execPath, [router, 'verify-authorization', projectRoot, runId, sessionId, authorizationRef, action], { encoding: 'utf8', timeout: 30_000, killSignal: 'SIGTERM' });
@@ -275,7 +278,17 @@ if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'skill') {
     optionalSkillInput = skill ? { status: 'available', name: skill.name, path: skill.path, sha256: skill.sha256 } : { status: 'unavailable' };
   } catch { optionalSkillInput = { status: 'unavailable' }; }
 }
-const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }), ...(requiredVisualSkill === undefined ? {} : { requiredVisualSkill }), ...(optionalSkillInput === undefined ? {} : { optionalSkillInput }) });
+let inspectionBoundary;
+if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports') {
+  const directory = path.join(runDirectory, 'inspections');
+  try {
+    const stat = fs.lstatSync(directory);
+    if (stat.isSymbolicLink()) inspectionBoundary = { kind: 'symlink', target: fs.readlinkSync(directory) };
+    else if (!stat.isDirectory()) inspectionBoundary = { kind: 'non-directory' };
+    else inspectionBoundary = { kind: 'directory', links: fs.readdirSync(directory, { withFileTypes: true }).filter(item => item.isSymbolicLink()).map(item => [item.name, fs.readlinkSync(path.join(directory, item.name))]).sort((a, b) => a[0].localeCompare(b[0])) };
+  } catch (error) { inspectionBoundary = { kind: error.code === 'ENOENT' ? 'absent' : `unavailable:${error.code || 'unknown'}` }; }
+}
+const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }), ...(requiredVisualSkill === undefined ? {} : { requiredVisualSkill }), ...(optionalSkillInput === undefined ? {} : { optionalSkillInput }), ...(inspectionBoundary === undefined ? {} : { inspectionBoundary }) });
 // An authorization is deliberately single-use, but a fresh authorization is
 // not evidence that the failed action now has different inputs.  Without this
 // operation key, hosts can create an infinite retry loop by asking Router for
@@ -292,6 +305,10 @@ if (priorFailure) {
 const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
 let localProcessIdentity = null;
+let inspectionScopeHash;
+if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports') {
+  try { inspectionScopeHash = currentInputHashes[path.relative(fs.realpathSync(runDirectory), fs.realpathSync(path.resolve(scriptArgs[3])))] || ''; } catch { inspectionScopeHash = ''; }
+}
 const execution = await runControlledSubprocess(process.execPath, [target, ...scriptArgs], {
   timeoutMs: executionTimeoutMs, runDir: runDirectory,
   onSpawn: localProcess => {
@@ -302,7 +319,7 @@ const execution = await runControlledSubprocess(process.execPath, [target, ...sc
     fs.writeFileSync(temporary, `${JSON.stringify({ ...receipt, localProcess }, null, 2)}\n`);
     fs.renameSync(temporary, receiptFile);
   },
-  env: { ...process.env, APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: authorizationRef, APEX_ROUTER_ACTION: action, APEX_ROUTER_OPERATION_RECEIPT: path.relative(runDirectory, receiptFile) }
+  env: { ...process.env, APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: authorizationRef, APEX_ROUTER_ACTION: action, APEX_ROUTER_OPERATION_RECEIPT: path.relative(runDirectory, receiptFile), ...(inspectionScopeHash === undefined ? {} : { APEX_ROUTER_INSPECTION_SCOPE_SHA256: inspectionScopeHash, APEX_ROUTER_INSPECTION_REVISION_STATE: currentRunInputHashes['prompt-revisions.ndjson'] || 'absent' }) }
 });
 const finishedAt = new Date().toISOString();
 if (execution.error?.code === 'APEX_MONITOR_UNAVAILABLE') {

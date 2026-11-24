@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex.local/schemas/unresolved-import-inspection.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "status", "observationDrift", "projectRoot", "requirementRevision", "scope", "scanner", "sourceObservations", "configurationObservations", "absentConfigCandidates", "absentImportCandidates", "unresolvedImports", "limitations"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "status": { "const": "unverified" },
+    "observationDrift": { "enum": ["no-drift-detected", "detected"] },
+    "projectRoot": { "type": "string", "minLength": 1 },
+    "requirementRevision": { "type": "object", "required": ["observed", "authorized"], "additionalProperties": false, "properties": { "observed": { "type": "string", "minLength": 1 }, "authorized": { "type": "string", "minLength": 1 } } },
+    "scope": {
+      "type": "object", "required": ["routes", "entrypoints", "inputReference", "inputSha256", "authorizedInputSha256"], "additionalProperties": false,
+      "properties": {
+        "routes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "entrypoints": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "inputReference": { "type": "string", "minLength": 1 },
+        "inputSha256": { "type": "string", "minLength": 1 },
+        "authorizedInputSha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scanner": { "const": "literal-relative-script-v3" },
+    "sourceObservations": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "minLength": 1 } } } },
+    "configurationObservations": { "type": "array", "items": { "type": "object", "required": ["path", "sha256Versions"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1 }, "sha256Versions": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } } } },
+    "absentConfigCandidates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "absentImportCandidates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "unresolvedImports": { "type": "array", "items": { "type": "object", "required": ["source", "reference", "sourceState", "candidates"], "additionalProperties": false, "properties": { "source": { "type": "string", "minLength": 1 }, "reference": { "type": "string", "minLength": 1 }, "sourceState": { "type": "string", "minLength": 1 }, "candidates": { "type": "array", "items": { "type": "object", "required": ["path", "state"], "additionalProperties": false, "properties": { "path": { "type": "string", "minLength": 1 }, "state": { "type": "string", "minLength": 1 } } } } } } },
+    "limitations": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  }
+}

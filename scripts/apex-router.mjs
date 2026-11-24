@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
-import { controlledOutput } from './verification-policy.mjs';
+import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
 import { qualityVerificationPending } from './quality-workflow.mjs';
 import { industryReviewFailures } from './industry-review-progress.mjs';
 import { gate1RoleSummaryCurrent, visualRoleSummaryCurrent, approvedRoleSummariesCurrent } from './role-summary-binding.mjs';
@@ -158,13 +158,29 @@ function latestBlockingOperation(runDir, action) {
     .sort((left, right) => String(right.receipt.finishedAt || right.receipt.startedAt || '').localeCompare(String(left.receipt.finishedAt || left.receipt.startedAt || '')));
   // A different successful sub-operation in the same phase cannot establish
   // the outcome of an interrupted one. Only a later success with the same
-  // command fingerprint can supersede it; external side-effect registries
-  // still independently enforce their own unresolved-submission barriers.
+  // command fingerprint can supersede it. A failed import capture is cleared
+  // only by a later ledger-bound current reference, not by an inspection.
+  // External side-effect registries enforce their own submission barriers.
   const completedFingerprints = new Set();
+  const laterCodeReferences = [];
   let unresolved = null;
   for (const item of receipts) {
     if (item.receipt.status === 'succeeded' && item.receipt.fingerprint) completedFingerprints.add(item.receipt.fingerprint);
+    if (item.receipt.status === 'succeeded' && item.receipt.script === 'existing-code-reference.mjs') laterCodeReferences.push(item.receipt);
     if (item.receipt.status === 'interrupted' && (!item.receipt.fingerprint || !completedFingerprints.has(item.receipt.fingerprint))) { unresolved = item; break; }
+    if (item.receipt.status === 'failed' && failureCategory(item.receipt) === 'unresolved-local-import') {
+      let completedCurrentCodeReference = false;
+      if (laterCodeReferences.length) try {
+        const projection = read(path.join(runDir, 'state.json'));
+        const reference = projection.artifacts?.codeReference, skeleton = projection.artifacts?.pageSkeleton;
+        const referenceFile = artifactFile(runDir, reference), skeletonFile = artifactFile(runDir, skeleton);
+        if (referenceFile && skeletonFile) {
+          const referenceHash = sha256File(referenceFile), skeletonHash = sha256File(skeletonFile);
+          completedCurrentCodeReference = laterCodeReferences.some(receipt => receipt.outputFileHashes?.[reference] === referenceHash && receipt.outputFileHashes?.[skeleton] === skeletonHash && ledgerBoundOutput(runDir, receipt, reference, referenceHash) && ledgerBoundOutput(runDir, receipt, skeleton, skeletonHash));
+        }
+      } catch {}
+      if (!completedCurrentCodeReference) { unresolved = item; break; }
+    }
   }
   const latest = unresolved || receipts[0];
   if (!latest || latest.receipt.status === 'succeeded') return null;

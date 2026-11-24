@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { controlledOutput } from './verification-policy.mjs';
+import { newlyAvailableConfigs, newlyPreferredImports } from './existing-resource-freshness.mjs';
 
 // Mark positions outside comments and quoted text. This is a conservative
 // scanner, not a JavaScript parser; computed imports and aliases need their
@@ -49,6 +51,14 @@ export function embeddedScriptPositions(text) {
 }
 
 const marker = 'APEX_UNRESOLVED_LOCAL_IMPORTS:';
+export function requirementRevisionState(runDir) {
+  try {
+    const root = fs.realpathSync(runDir), file = path.join(root, 'prompt-revisions.ndjson');
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile() || !fs.realpathSync(file).startsWith(`${root}${path.sep}`)) return 'unavailable:invalid-revision-log';
+    return `sha256:${digest(fs.readFileSync(file))}`;
+  } catch (error) { return error.code === 'ENOENT' ? 'absent' : `unavailable:${error.code || 'unknown'}`; }
+}
 function failureSnapshot(stderr) {
   const line = String(stderr || '').split(/\r?\n/).find(item => item.startsWith(marker));
   if (!line) return null;
@@ -115,4 +125,45 @@ export function unresolvedFailureSummary(stderr) {
     });
     return { status: 'unverified', recordedCount: entries.length, entries: visible, entriesTruncated: entries.length > visible.length, recordedEvidenceMayBePartial: true, fullEvidence: 'controlled-operation-receipt' };
   } catch { return { status: 'unreadable', fullEvidence: 'controlled-operation-receipt' }; }
+}
+
+// This establishes only that the unverified inspection still matches its
+// bound inputs. It never accepts an exception or proves runtime coverage.
+export function currentImportInspection(runDir, projectRoot, reference) {
+  try {
+    const root = fs.realpathSync(runDir), project = fs.realpathSync(projectRoot);
+    if (typeof reference !== 'string' || !reference || path.isAbsolute(reference)) throw new Error('inspection reference is invalid');
+    const file = fs.realpathSync(path.resolve(root, reference));
+    if (!file.startsWith(`${root}${path.sep}`) || !fs.statSync(file).isFile() || fs.statSync(file).size > 4 * 1024 * 1024) throw new Error('inspection is outside the Run or exceeds its size limit');
+    const inspection = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const state = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
+    if (state.artifacts?.unresolvedImportInspection !== reference) throw new Error('inspection is not the current Run artifact');
+    if (inspection.schemaVersion !== '1.0' || inspection.status !== 'unverified' || inspection.scanner !== 'literal-relative-script-v3' || inspection.observationDrift !== 'no-drift-detected') throw new Error('inspection is invalid or recorded drift');
+    if (fs.realpathSync(inspection.projectRoot) !== project) throw new Error('inspection belongs to another project');
+    const revision = requirementRevisionState(root);
+    if (revision.startsWith('unavailable:') || inspection.requirementRevision?.observed !== revision || inspection.requirementRevision?.authorized !== revision) throw new Error('requirement revision record changed or is unavailable');
+    const scope = inspection.scope, scopeReference = scope?.inputReference;
+    if (typeof scopeReference !== 'string' || !scopeReference || path.isAbsolute(scopeReference)) throw new Error('scope reference is invalid');
+    const scopeFile = fs.realpathSync(path.resolve(root, scopeReference));
+    if (!scopeFile.startsWith(`${root}${path.sep}`) || !fs.statSync(scopeFile).isFile()) throw new Error('scope input is outside the Run');
+    const scopeHash = `sha256:${digest(fs.readFileSync(scopeFile))}`;
+    if (scope.inputSha256 !== scopeHash || scope.authorizedInputSha256 !== scopeHash || !controlledOutput(root, reference, ['existing-code-reference.mjs'], [scopeReference], ['collect_existing_baseline'])) throw new Error('inspection lacks current controlled scope and receipt binding');
+    if (!Array.isArray(inspection.sourceObservations) || !inspection.sourceObservations.length || inspection.sourceObservations.length > 10000 || !Array.isArray(inspection.configurationObservations) || !Array.isArray(inspection.unresolvedImports) || inspection.unresolvedImports.length > 10000) throw new Error('inspection observations are invalid');
+    const sources = new Map();
+    for (const item of inspection.sourceObservations) {
+      const file = safePath(path.resolve(projectRoot), item?.path), real = fs.realpathSync(file);
+      if (sources.has(item.path) || !real.startsWith(`${project}${path.sep}`) || !fs.statSync(real).isFile() || !/^sha256:[a-f0-9]{64}$/.test(item.sha256 || '') || `sha256:${digest(fs.readFileSync(real))}` !== item.sha256) throw new Error('inspected source changed or is invalid');
+      sources.set(item.path, item.sha256);
+    }
+    for (const item of inspection.configurationObservations) if (!Array.isArray(item?.sha256Versions) || item.sha256Versions.length !== 1 || sources.get(item.path) !== item.sha256Versions[0]) throw new Error('inspected configuration is inconsistent');
+    if (newlyAvailableConfigs(inspection, projectRoot).length || newlyPreferredImports(inspection, projectRoot).length) throw new Error('previously absent configuration or import candidate appeared');
+    const keys = new Set();
+    const expected = inspection.unresolvedImports.map(item => {
+      const key = JSON.stringify([item.source, item.reference]);
+      if (keys.has(key) || sources.get(item.source) !== `sha256:${String(item.sourceState || '').replace(/^file:/, '')}` || !Array.isArray(item.candidates)) throw new Error('unresolved import identity is invalid');
+      keys.add(key); return { source: item.source, reference: item.reference, candidates: item.candidates.map(candidate => candidate.path) };
+    });
+    if (expected.length && JSON.stringify(unresolvedSnapshot(projectRoot, expected)) !== JSON.stringify(inspection.unresolvedImports)) throw new Error('unresolved import source or candidate changed');
+    return { status: 'current-unverified', inspection: reference, unresolvedCount: expected.length, limitations: inspection.limitations };
+  } catch (error) { return { status: 'stale-or-unverified', inspection: reference || null, reason: error.message }; }
 }
