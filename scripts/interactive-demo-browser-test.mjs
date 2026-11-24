@@ -394,7 +394,10 @@ try {
   if (!seal.sealed || receipt.screens?.length !== 2) throw new Error('machine seal must bind both screen parity records');
   const sealedState = JSON.parse(fs.readFileSync(stateFile));
   if (!stitchMachineSealCurrent(runDir, sealedState)) throw new Error('committed Stitch machine seal must bind the current evidence');
-  const sealBytes = fs.readFileSync(seal.machineSeal); fs.appendFileSync(seal.machineSeal, ' ');
+  const sealBytes = fs.readFileSync(seal.machineSeal), outsideSeal = path.join(project, 'outside-stitch-seal.json');
+  fs.writeFileSync(outsideSeal, sealBytes); fs.unlinkSync(seal.machineSeal); fs.symlinkSync(outsideSeal, seal.machineSeal);
+  if (stitchMachineSealCurrent(runDir, sealedState)) throw new Error('Stitch seal outside the Run must not be trusted');
+  fs.unlinkSync(seal.machineSeal); fs.writeFileSync(seal.machineSeal, sealBytes); fs.appendFileSync(seal.machineSeal, ' ');
   const staleSeal = run('apex-router.mjs', ['status', project, runId, session]);
   if (staleSeal.nextRequiredAction !== 'recover' || staleSeal.allowedActions.includes('compile_visual_bundle')) throw new Error('tampered registered Stitch seal must require integrity recovery');
   fs.writeFileSync(seal.machineSeal, sealBytes);
@@ -422,6 +425,23 @@ try {
   const refusedRecovery = spawnSync(process.execPath, [path.join(apexRoot, 'scripts/apex-action.mjs'), 'run', project, runId, session, recoverAuth.authorizationRef, 'recover', 'apex-recover.mjs', runDir], { encoding: 'utf8', timeout: 30000 });
   if (refusedRecovery.status === 0 || !refusedRecovery.stderr.includes('Stitch machine seal or its bound evidence is missing or changed')) throw new Error('recovery must not declare a missing Stitch seal repaired');
   const restoredStitchState = JSON.parse(fs.readFileSync(stateFile)); restoredStitchState.artifacts.stitchMachineSeal = committedStitchSeal; restoredStitchState.revision += 1; commitRunState(runDir, restoredStitchState, { reason: 'post-gate-stitch-seal-restored-fixture' });
+  fs.unlinkSync(seal.machineSeal); fs.appendFileSync(firstEvidence, ' ');
+  const unsafeRecoveryAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'recover']);
+  const unsafeRecovery = spawnSync(process.execPath, [path.join(apexRoot, 'scripts/apex-action.mjs'), 'run', project, runId, session, unsafeRecoveryAuth.authorizationRef, 'recover', 'apex-recover.mjs', runDir], { encoding: 'utf8', timeout: 30000 });
+  if (unsafeRecovery.status === 0 || fs.existsSync(seal.machineSeal) || !unsafeRecovery.stderr.includes('original seal or bound evidence is missing or changed')) throw new Error('missing seal must not be recreated from changed evidence');
+  fs.writeFileSync(firstEvidence, originalEvidence);
+  if (process.env.APEX_TEST_STITCH_COMMIT_RACE === '1') {
+    const flag = path.join(runDir, 'stitch-recovery-race.flag'); fs.writeFileSync(flag, 'inject concurrent recovery state');
+    const before = JSON.parse(fs.readFileSync(stateFile)).revision, auth = run('apex-router.mjs', ['authorize', project, runId, session, 'recover']);
+    const race = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-action.mjs'), 'run', project, runId, session, auth.authorizationRef, 'recover', 'apex-recover.mjs', runDir], { encoding: 'utf8', timeout: 30000, env: { ...process.env, NODE_OPTIONS: `--import=${path.join(apexRoot, 'scripts', 'stitch-freeze-commit-race-fixture.mjs')}`, APEX_STITCH_COMMIT_RACE_FLAG: flag, APEX_STITCH_COMMIT_RACE_RUN: runDir, APEX_STITCH_COMMIT_RACE_TARGET: '/machine-seals/stitch-' } });
+    const current = JSON.parse(fs.readFileSync(stateFile));
+    if (race.status === 0 || !race.stderr.includes('run state changed before atomic commit') || current.revision !== before + 1 || current.artifacts.concurrentFreezeFixture !== 'concurrent-freeze-marker.json') throw new Error(`Stitch recovery must preserve a concurrent state commit: ${race.stderr}`);
+    if (!fs.readFileSync(seal.machineSeal).equals(sealBytes)) throw new Error('concurrent recovery may restore only the original seal');
+    fs.unlinkSync(seal.machineSeal);
+  }
+  const safeRecoveryAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'recover']);
+  const safeRecovery = run('apex-action.mjs', ['run', project, runId, session, safeRecoveryAuth.authorizationRef, 'recover', 'apex-recover.mjs', runDir]);
+  if (safeRecovery.stitchSealRecovery?.status !== 'recovered' || !fs.readFileSync(seal.machineSeal).equals(sealBytes)) throw new Error('unchanged evidence must recover the exact ledger-committed Stitch seal');
   fs.appendFileSync(firstEvidence, ' ');
   const changedStitchAfterGate = run('apex-router.mjs', ['status', project, runId, session]);
   if (changedStitchAfterGate.nextRequiredAction !== 'recover' || changedStitchAfterGate.allowedActions.includes('implement') || changedStitchAfterGate.allowedActions.includes('verify')) throw new Error('changed Stitch evidence must block post-Gate-2 implementation and verification');

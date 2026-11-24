@@ -7,9 +7,9 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { appendLedgerEvent, archiveArtifacts, claimRevisionReplay, commitRunState, finalizeCommittedRevision, invalidationEvents, pendingRevisionTransactions, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
+import { appendLedgerEvent, archiveArtifacts, claimRevisionReplay, commitRunState, finalizeCommittedRevision, invalidationEvents, pendingRevisionTransactions, readRunStateForUpdate, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
 import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
-import { stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
+import { recoverStitchMachineSeal, stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
 import { inspectRunningOperations, markInterruptedOperations } from './operation-recovery.mjs';
 import { archivedMissingReferences } from './recovery-archive.mjs';
 
@@ -21,7 +21,7 @@ function hashFile(file) { return crypto.createHash('sha256').update(fs.readFileS
 const runDir = path.resolve(process.argv[2] || '.');
 try { requireRouterAction(runDir, 'recover'); } catch (error) { die(error.message); }
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
-const state = readRunState(runDir);
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const operationInspection = inspectRunningOperations(runDir, process.env.APEX_ROUTER_OPERATION_RECEIPT || '');
 if (operationInspection.deferred.length) {
   console.log(JSON.stringify({ status: 'waiting', deferredOperations: operationInspection.deferred, note: 'Existing operations may still be running or cannot be verified; no interrupted status or remote outcome was inferred.' }));
@@ -51,6 +51,11 @@ if (pendingRevisions.length) {
     if (replay.status !== 0) die(`revision replay failed: ${(replay.stderr || replay.stdout || replay.error?.message || 'unknown failure').trim()}`);
     process.stdout.write(replay.stdout); process.exit(0);
   }
+}
+let stitchSealRecovery = null;
+if (state.locks?.stitchCurrent && stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state)) {
+  stitchSealRecovery = recoverStitchMachineSeal(runDir, state);
+  if (stitchSealRecovery.status !== 'recovered') die(`Stitch machine seal or its bound evidence is missing or changed; recovery refused: ${stitchSealRecovery.reason}`);
 }
 let implementationSealRecovery = null;
 if (state.roleChain?.confirmationModel === 'two-confirmations' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed) {
@@ -114,8 +119,8 @@ if (changed.some(item => ['siteContract', 'functionalFreeze', 'stitchFreeze', 'v
 if (changed.length || invalidates.has('gate3')) state.gates.gate3 = { status: 'revoked', at: new Date().toISOString(), evidence: ['recovery-input-changed'] };
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
-commitRunState(runDir, state, { reason: 'controlled-recovery', event: { type: 'run-recovered', changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs } });
-appendLedgerEvent(runDir, { type: 'recovery-complete', interruptedOperations, recoveredAgentJobs, archivedArtifacts, staleInputReferences, mismatchedRuntimeEvidenceReferences, implementationSealRecovery });
+commitRunState(runDir, state, { reason: 'controlled-recovery', expectedStateHash, event: { type: 'run-recovered', changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs } });
+appendLedgerEvent(runDir, { type: 'recovery-complete', interruptedOperations, recoveredAgentJobs, archivedArtifacts, staleInputReferences, mismatchedRuntimeEvidenceReferences, implementationSealRecovery, stitchSealRecovery });
 const reconciliation = reconcileRun(runDir);
-console.log(JSON.stringify({ checkpoint: latestRef?.path || null, changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs, archivedArtifacts, revisionRecovery, reconciliation, gate2: state.gates.gate2.status, gate3: state.gates.gate3.status }));
+console.log(JSON.stringify({ checkpoint: latestRef?.path || null, changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs, archivedArtifacts, revisionRecovery, stitchSealRecovery, reconciliation, gate2: state.gates.gate2.status, gate3: state.gates.gate3.status }));
 if (reconciliation.status !== 'consistent') process.exitCode = 2;

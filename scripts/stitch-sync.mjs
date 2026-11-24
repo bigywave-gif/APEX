@@ -223,7 +223,8 @@ function updateState(runDir, reference, current, automatic = false, snapshot, ma
   if (current && state.locks.visualApproved) state.phase = state.track === 'greenfield' ? 'G-07 COMPILE' : 'E-09 COMPILE';
   state.revision = Number(state.revision || 0) + 1;
   state.updatedAt = new Date().toISOString();
-  commitRunState(runDir, state, { reason: 'stitch-freeze-state-update', expectedStateHash });
+  const event = machineSeal ? { type: 'stitch-machine-seal-committed', reference: machineSeal, content: fs.readFileSync(path.join(runDir, machineSeal), 'utf8') } : null;
+  commitRunState(runDir, state, { reason: 'stitch-freeze-state-update', expectedStateHash, event });
 }
 
 const [command, ...args] = process.argv.slice(2);

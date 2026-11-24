@@ -393,6 +393,14 @@ export function invalidationEvents(runDir) {
   } finally { database.close(); }
 }
 
+export function stitchSealRecoveryRecord(runDir, reference) {
+  const database = open(runDir);
+  try {
+    return database.prepare("SELECT payload_json FROM events WHERE event_type = 'stitch-machine-seal-committed' ORDER BY id DESC").all()
+      .map(row => parseJson(row.payload_json)).find(event => event?.reference === reference) || null;
+  } finally { database.close(); }
+}
+
 export function revisionInvalidationEvents(runDir, transactionId) {
   const database = open(runDir);
   try {
