@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T22:47:09.722Z",
+  "generatedAt": "2026-11-24T23:00:56.405Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -119,9 +119,9 @@
     "scripts/design-contract-evidence.mjs": "f0be72ea1a1597f05464d6cd41cccc3fab597c67a839a9a1f1a7f0ad19b680bf",
     "scripts/evidence-provenance.mjs": "ec1725afc9db49574ff08b04739deed7fdf09b04c79ef3e02d9abef2787bc650",
     "scripts/existing-baseline-browser-test.mjs": "7ae5b6b8fb1685e9755456a553eba9e1d5f75459340ff2d1ff3c63c20f83f461",
-    "scripts/existing-code-reference.mjs": "090bb52c1f0e584f5c8ae92402379263ad1dca38e3b7be059159b0c2a691fbea",
-    "scripts/existing-import-inspection.mjs": "cb277a66b22d0288452e3d3d360fa8f78323fba582a0fd9deff5f69609287666",
-    "scripts/existing-reference-resolution-test.mjs": "f163f458f185dda43dab8793c839534d436d2999b98349d71de78cb2178a1b84",
+    "scripts/existing-code-reference.mjs": "865965bfda10fa1ab25befd5867c3c2ab0a16c4efb4ce5b58d7fd40be6335230",
+    "scripts/existing-import-inspection.mjs": "3c35ceb4b3e5890a3569f71b98bdabc89ecc829350dc55aade3abbc5cd5a8eb2",
+    "scripts/existing-reference-resolution-test.mjs": "e4f083aaa85444890bc8098e2384be4b35ab07c3ed7226f46f426244190d684c",
     "scripts/existing-resource-freshness.mjs": "63bcefda9f3169a5310d3cf111d6d365483d786010a4136ccf8a01523aee4004",
     "scripts/existing-resource-runtime.mjs": "f103ed456c99dc108075575bde80e9f05c7933351b0791f5d2e1c08c9f6b1438",
     "scripts/experience-evaluator.mjs": "97034f0159a68bcd3d6cbba36edd8d8d62074879659b24dd38decb77d7e78ea6",

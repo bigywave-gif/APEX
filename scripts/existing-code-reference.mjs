@@ -73,17 +73,26 @@ function resolveImport(projectRoot, from, specifier, inspectedCandidates = null)
     const candidates = [base, ...(stem ? ['.ts', '.tsx', '.mts', '.cts'].map(ext => `${stem}${ext}`) : []), ...extensions.map(ext => `${base}${ext}`), ...extensions.map(ext => path.join(base, `index${ext}`))];
     for (const candidate of candidates) {
       if (!inside(projectRoot, candidate)) continue;
-      if (inspectedCandidates && candidate !== projectRoot) inspectedCandidates.add(rel(projectRoot, candidate));
-      if (fs.existsSync(candidate)) {
-        if (fs.statSync(candidate).isFile()) { for (const previous of earlierCandidates) absentImportCandidates.add(rel(projectRoot, previous)); return candidate; }
+      const relative = rel(projectRoot, candidate);
+      try {
+        const stat = fs.statSync(candidate, { throwIfNoEntry: false });
+        if (stat?.isFile()) { for (const previous of earlierCandidates) absentImportCandidates.add(rel(projectRoot, previous)); return candidate; }
+        if (!stat && inspectedCandidates && candidate !== projectRoot) inspectedCandidates.set(relative, 'absent');
+        else if (stat && inspectedCandidates && candidate !== projectRoot) {
+          const real = fs.realpathSync(candidate);
+          inspectedCandidates.set(relative, real !== realProjectRoot && inside(realProjectRoot, real) ? 'not-file' : 'outside-project');
+        }
+      } catch (error) {
+        if (inspectedCandidates && candidate !== projectRoot) inspectedCandidates.set(relative, ['ENOENT', 'ENOTDIR'].includes(error.code) ? 'absent' : `unavailable:${error.code || 'unknown'}`);
       }
       if (candidate !== projectRoot) earlierCandidates.push(candidate);
     }
   }
   return null;
 }
-function imports(projectRoot, file, content) {
+function imports(projectRoot, file, content, sourceBytes) {
   const found = new Set();
+  let sourceState;
   const inspectCode = /\.(?:[cm]?[jt]sx?)$/i.test(file);
   const positions = inspectCode ? codePositions(content) : /\.(?:vue|svelte|html?)$/i.test(file) ? embeddedScriptPositions(content) : null;
   // Keep the static forms separate from require()/dynamic import().  The old
@@ -99,12 +108,13 @@ function imports(projectRoot, file, content) {
   for (const [index, pattern] of patterns.entries()) for (const match of content.matchAll(pattern)) {
     let preceding = match.index - 1;
     if (index === 1 && (!positions || positions[match.index])) { while (preceding >= 0 && (/\s/.test(content[preceding]) || (positions && !positions[preceding]))) preceding--; if (content[preceding] === '.') continue; }
-    const candidates = new Set();
+    const candidates = new Map();
     const target = resolveImport(projectRoot, file, match[1], candidates);
     if (target) found.add(target);
     else if (positions?.[match.index] && /^(?:\.\/|\.\.\/)/.test(match[1])) {
       const source = rel(projectRoot, file), reference = match[1];
-      unresolvedImports.set(JSON.stringify([source, reference]), { source, reference, candidates: [...candidates] });
+      sourceState ||= `file:${sha(sourceBytes).slice('sha256:'.length)}`;
+      unresolvedImports.set(JSON.stringify([source, reference]), { source, reference, sourceState, candidates: [...candidates].map(([path, state]) => ({ path, state })) });
     }
   }
   // HTML entrypoints often load their real styles/scripts outside JS imports.
@@ -233,9 +243,9 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
   } catch { /* A malformed cache is never trusted; rebuild it below. */ }
 }
 const pending = [...entries, ...configFiles]; const selected = new Set();
-while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } if (/\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file)) { const content = fs.readFileSync(file, 'utf8'); for (const dependency of imports(projectRoot, file, content)) if (!selected.has(dependency)) pending.push(dependency); } }
+while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } if (/\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file)) { const bytes = fs.readFileSync(file); const content = bytes.toString('utf8'); for (const dependency of imports(projectRoot, file, content, bytes)) if (!selected.has(dependency)) pending.push(dependency); } }
 if (unresolvedImports.size) {
-  console.error(unresolvedFailure([...unresolvedImports.values()], projectRoot));
+  console.error(unresolvedFailure([...unresolvedImports.values()]));
   die('literal local imports could not be resolved; inspect the recorded sources and project build configuration before retrying');
 }
 fs.mkdirSync(copies, { recursive: true });

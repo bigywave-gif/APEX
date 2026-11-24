@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
 import { assessResourceVerification, observeResourceImages, observeResourceExemptions, observeBackgroundImages, resourceVerificationBinding, resourceImageProbeCode } from './existing-resource-runtime.mjs';
+import { unresolvedSnapshot, unresolvedFailure, unresolvedCauseChanged } from './existing-import-inspection.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-reference-resolution-'));
@@ -15,6 +16,16 @@ function put(name, text) { const file = path.join(project, name); fs.mkdirSync(p
 function call(script, args) { const result = spawnSync(process.execPath, [path.join(core, 'scripts', script), ...args], { encoding: 'utf8', timeout: 30000 }); assert.equal(result.status, 0, `${script}: ${result.stderr || result.stdout}`); return JSON.parse(result.stdout); }
 function action(script, args) { const auth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']); return call('apex-action.mjs', ['run', project, run, session, auth.authorizationRef, 'collect_existing_baseline', script, ...args]); }
 try {
+  put('src/race-source.ts', "import './race-candidate';");
+  const racedImport = [{ source: 'src/race-source.ts', reference: './race-candidate', candidates: ['src/race-candidate.ts'] }];
+  const scannedMissing = unresolvedSnapshot(project, racedImport);
+  put('src/race-candidate.ts', 'export const appeared = true;');
+  const recordedMissing = unresolvedFailure(scannedMissing);
+  assert.equal(unresolvedCauseChanged(recordedMissing, project), true, 'a candidate appearing after inspection must allow recovery');
+  const scannedPresent = unresolvedSnapshot(project, racedImport);
+  assert.equal(unresolvedCauseChanged(unresolvedFailure(scannedPresent), project), false);
+  put('src/race-source.ts', "import './other-candidate';");
+  assert.equal(unresolvedCauseChanged(unresolvedFailure(scannedPresent), project), true, 'source changes after inspection must allow recovery');
   put('package.json', JSON.stringify({ workspaces: ['packages/*'] }));
   put('tsconfig.json', '{ /* alias config */ "compilerOptions": { "baseUrl": ".", "paths": { "~*": ["./src/*",], }, }, }');
   put('index.html', '<!-- <script>import "./commented-html";</script> --><main>Fixture<img src="/hero.png"></main><link rel="stylesheet" href="/style.css"><script src="/main.js"></script><script type="application/json">import "./json-example";</script><script type="module">import "./inline-html"; import "./"; import("./inline-html-dynamic");</script>');
@@ -66,6 +77,17 @@ try {
   assert.equal(restoredStatus.terminalResponseContract?.blockingOperation ?? null, null);
   capture();
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).importInspection, 'literal-relative-script-v3');
+  const beforeRace = fs.readFileSync(main, 'utf8');
+  fs.appendFileSync(main, "\nimport './race-on-stat';\n");
+  const raceTarget = path.join(project, 'src/race-on-stat.ts'), raceHook = path.join(project, 'race-hook.cjs');
+  fs.writeFileSync(raceHook, `const fs = require('node:fs');\nif (process.argv[1]?.endsWith('existing-code-reference.mjs')) {\n  const original = fs.statSync;\n  fs.statSync = function(file, ...args) {\n    const result = original.call(this, file, ...args);\n    if (String(file) === process.env.APEX_TEST_RACE_PATH && result === undefined) fs.writeFileSync(file, 'export const appeared = true;');\n    return result;\n  };\n}\n`);
+  const raceAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
+  const racedCapture = spawnSync(process.execPath, [path.join(core, 'scripts/apex-action.mjs'), ...captureArgs.map(arg => arg === firstAuth.authorizationRef ? raceAuth.authorizationRef : arg)], { encoding: 'utf8', timeout: 30000, env: { ...process.env, NODE_OPTIONS: `--require=${raceHook}`, APEX_TEST_RACE_PATH: raceTarget } });
+  assert.notEqual(racedCapture.status, 0); assert.match(racedCapture.stderr, /race-on-stat/); assert.ok(fs.existsSync(raceTarget));
+  const racedStatus = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(racedStatus.terminalResponseContract?.blockingOperation ?? null, null, 'a file appearing during capture must permit a new attempt');
+  capture();
+  fs.writeFileSync(main, beforeRace); capture();
   const mainBeforeFailure = fs.readFileSync(main, 'utf8');
   fs.appendFileSync(main, "\nimport './later-unresolved';\n");
   const changedAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);

@@ -76,10 +76,10 @@ export function unresolvedSnapshot(projectRoot, imports) {
     return { source: item.source, reference: item.reference, sourceState: pathState(root, item.source), candidates: item.candidates.map(candidate => ({ path: candidate, state: pathState(root, candidate) })) };
   });
 }
-export function unresolvedFailure(imports, projectRoot) {
+export function unresolvedFailure(imports) {
   const observed = [];
   for (const item of imports) {
-    const entry = unresolvedSnapshot(projectRoot, [item])[0];
+    const entry = item;
     if (observed.length && JSON.stringify([...observed, entry]).length > 262144) break;
     observed.push(entry);
   }
