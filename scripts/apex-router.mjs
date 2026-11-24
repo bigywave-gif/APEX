@@ -14,7 +14,8 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { demoPresentation, verifyChatPresentation } from './chat-demo.mjs';
 import { observedControlCoverageStatus, validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
-import { runtimeStartLockAvailable } from './runtime-start-lock.mjs';
+import { acquireRuntimeStartLock, runtimeStartLockAvailable } from './runtime-start-lock.mjs';
+import { readRuntimeLaunchIntent, findRuntimeLaunchProcess } from './runtime-launch-intent.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -440,13 +441,25 @@ function runtimeRecordCandidates(runDir, runId) {
 }
 function stopRunLocalServices(runDir, runId) {
   const stopped = [], alreadyStopped = [], refused = [];
+  let lock;
+  try { lock = acquireRuntimeStartLock(runDir); } catch { return { stopped, alreadyStopped, refused: [{ record: 'runtime-launch-intent.json', reason: 'runtime-start-active-or-lock-unavailable' }] }; }
+  try {
   const records = runtimeRecordCandidates(runDir, runId);
   if (records.error) return { stopped, alreadyStopped, refused: [{ record: 'runtime-services.json', reason: records.error }] };
-  for (const recordFile of records.candidates) {
-    if (!fs.existsSync(recordFile)) continue;
+  let intent, launchedPid;
+  try { intent = readRuntimeLaunchIntent(runDir, runId); launchedPid = intent ? findRuntimeLaunchProcess(intent) : null; }
+  catch (error) { return { stopped, alreadyStopped, refused: [{ record: 'runtime-launch-intent.json', reason: error.message }] }; }
+  const candidates = records.candidates.map(file => ({ file }));
+  if (intent && launchedPid) candidates.push({ file: path.join(runDir, 'runtime-launch-intent.json'), record: { pid: launchedPid, runtimeRoot: 'visual-sandbox', url: `http://${intent.bindHost === '::1' ? '[::1]' : intent.bindHost}:${intent.port}/` } });
+  const handled = new Set();
+  for (const candidate of candidates) {
+    const recordFile = candidate.file;
+    if (!candidate.record && !fs.existsSync(recordFile)) continue;
     let record;
-    try { if (!fs.realpathSync(recordFile).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)) throw new Error('outside run'); record = read(recordFile); } catch { refused.push({ record: path.basename(recordFile), reason: 'invalid-runtime-record' }); continue; }
+    try { if (!fs.realpathSync(recordFile).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)) throw new Error('outside run'); record = candidate.record || read(recordFile); } catch { refused.push({ record: path.basename(recordFile), reason: 'invalid-runtime-record' }); continue; }
     const pid = Number(record?.pid);
+    if (handled.has(pid)) continue;
+    handled.add(pid);
     const runtimeRoot = typeof record?.runtimeRoot === 'string' ? path.resolve(runDir, record.runtimeRoot) : null;
     const expectedRoot = path.resolve(runDir, 'visual-sandbox');
     if (!Number.isInteger(pid) || pid <= 1 || runtimeRoot !== expectedRoot || !isCurrentRunChild(runDir, runtimeRoot)) {
@@ -475,6 +488,7 @@ function stopRunLocalServices(runDir, runId) {
     } catch (error) { refused.push({ record: path.basename(recordFile), pid, reason: `runtime-stop-failed:${error.code || error.message}` }); }
   }
   return { stopped, alreadyStopped, refused };
+  } finally { try { lock.exec('ROLLBACK'); } finally { lock.close(); } }
 }
 function reclaimCancelledRun(root, run, sessionId, reason) {
   const state = stateOf(run.runDir);

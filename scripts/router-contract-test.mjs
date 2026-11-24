@@ -137,6 +137,11 @@ try {
   reject(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '修改当前方案并重新分析']), 'cancel requires an unambiguous user instruction', 'revision language must never be misclassified as a destructive run cancellation');
   if (!fs.existsSync(path.join(cancelRunDir, 'visual-sandbox')) || !fs.existsSync(path.join(cancelRunDir, 'evidence', 'browser', 'screen.png'))) throw new Error('a rejected cancellation intent must not reclaim any current-run artifact');
   const registryFile = path.join(cancelRunDir, 'runtime-services.json'), registryBytes = fs.readFileSync(registryFile);
+  const busyLock = new DatabaseSync(path.join(cancelRunDir, 'runtime-start-lock.sqlite')); busyLock.exec('BEGIN IMMEDIATE');
+  try {
+    reject(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行']), 'runtime-start-active-or-lock-unavailable', 'cancellation must not race a live runtime start');
+    if (!fs.existsSync(path.join(cancelRunDir, 'visual-sandbox'))) throw new Error('active runtime start must preserve its sandbox');
+  } finally { busyLock.exec('ROLLBACK'); busyLock.close(); }
   fs.writeFileSync(registryFile, '{');
   reject(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行']), 'runtime process cannot be proven run-local', 'corrupt registry must prevent service cleanup');
   if (!fs.existsSync(path.join(cancelRunDir, 'visual-sandbox')) || !fs.existsSync(registryFile)) throw new Error('failed cleanup must preserve the sandbox and registry');
@@ -207,6 +212,15 @@ try {
   const recoveredCancel = expect(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'retry interrupted cancellation cleanup');
   if (!recoveredCancel.recoveredCancellation || agentRuntimeStatus(recoveryDir).jobs.find(job => job.jobId === recoveryJob.jobId)?.status !== 'cancelled') throw new Error('cancellation cleanup retry must preserve the fenced job ledger');
   if (!recoveredCancel.cancellation?.services?.alreadyStopped?.some(item => item.pid === exited.pid)) throw new Error('retry must record an exited runtime even after its sandbox was reclaimed');
+  expect(run(router, ['intake', root, 'run-cancel-intent', 'greenfield', 'standard', 'interactive', 'session-cancel-intent']), 'create interrupted launch cancellation run');
+  const intentDir = path.join(root, '.apex', 'runs', 'run-cancel-intent'), intentSandbox = path.join(intentDir, 'visual-sandbox');
+  fs.mkdirSync(intentSandbox); fs.writeFileSync(path.join(intentSandbox, 'index.html'), '<main>fixture</main>');
+  const intentPort = freePort(), intentId = crypto.randomUUID(), realIntentSandbox = fs.realpathSync(intentSandbox);
+  fs.writeFileSync(path.join(intentDir, 'runtime-launch-intent.json'), JSON.stringify({ schemaVersion: '1.0', id: intentId, runId: 'run-cancel-intent', host: os.hostname(), bindHost: '127.0.0.1', port: intentPort, runtimeRoot: realIntentSandbox, startedAt: new Date().toISOString() }));
+  const intentChild = spawn(process.execPath, [sandboxRuntime, 'serve', realIntentSandbox, String(intentPort), '--apex-run-id', 'run-cancel-intent', '--bind-host', '127.0.0.1', '--apex-start-id', intentId], { detached: true, stdio: 'ignore' }); intentChild.unref(); cancellationRuntimePid = intentChild.pid;
+  const intentCancelled = expect(run(router, ['cancel', root, 'run-cancel-intent', 'session-cancel-intent', '取消当前执行']), 'cancel interrupted runtime launch');
+  if (!intentCancelled.cancellation?.services?.stopped?.some(item => item.pid === intentChild.pid)) throw new Error('cancellation must find and stop the launched but unregistered service');
+  cancellationRuntimePid = null;
   reject(run(runController, ['init', root, 'direct-run', 'greenfield']), 'cannot be executed', 'direct run-controller state mutation must be denied');
   reject(run(runController, ['init', root, 'spoofed-run', 'greenfield'], { APEX_ROUTER_COMMAND: 'init' }), 'cannot be executed', 'spoofed Router environment must not mutate state');
   reject(spawnSync(process.execPath, ['--input-type=module', '-e', `import { executeRunController } from ${JSON.stringify(runController)}; executeRunController('init', [${JSON.stringify(root)}, 'import-bypass', 'greenfield', 'standard', 'interactive']);`], { encoding: 'utf8' }), 'does not provide an export named', 'internal controller must not be importable');

@@ -7,8 +7,10 @@ import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireRuntimeStartLock } from './runtime-start-lock.mjs';
+import { readRuntimeLaunchIntent, findRuntimeLaunchProcess } from './runtime-launch-intent.mjs';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
@@ -46,11 +48,11 @@ function assertCurrentRun(runDir) {
   if (fs.realpathSync(runDir) !== expected) die('runtime may only start the current project-local run');
   return { projectRoot: fs.realpathSync(projectRoot), runId };
 }
-const [command, arg, portArg, serviceFlag, serviceRunId, bindFlag, requestedHost] = process.argv.slice(2);
+const [command, arg, portArg, serviceFlag, serviceRunId, bindFlag, requestedHost, startFlag, startId] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command === 'serve') {
   const root = path.resolve(arg || ''); const port = Number(portArg); const host = bindHost(bindFlag ? (bindFlag === '--bind-host' ? requestedHost : null) : null);
-  if (!root || !fs.existsSync(root) || !Number.isInteger(port) || port < 1024 || port > 65535 || serviceFlag !== '--apex-run-id' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(serviceRunId || '') || (bindFlag && bindFlag !== '--bind-host')) die('serve requires an existing sandbox root, a valid port, a run identity, and an optional loopback --bind-host');
+  if (!root || !fs.existsSync(root) || !Number.isInteger(port) || port < 1024 || port > 65535 || serviceFlag !== '--apex-run-id' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(serviceRunId || '') || (bindFlag && bindFlag !== '--bind-host') || (startFlag && (startFlag !== '--apex-start-id' || !/^[a-f0-9-]{36}$/.test(startId || '')))) die('serve requires an existing sandbox root, a valid port, a run identity, and an optional loopback --bind-host');
   const realRoot = fs.realpathSync(root);
   const server = http.createServer((request, response) => {
     try {
@@ -88,6 +90,9 @@ if (command === 'serve') {
   if (sandboxRoot !== expectedRoot || !fs.realpathSync(entrypoint).startsWith(`${sandboxRoot}${path.sep}`) || !fs.statSync(entrypoint).isFile()) die('visual sandbox entrypoint must resolve inside the current Run sandbox');
   const runtimeFile = path.join(runDir, 'visual-sandbox-runtime.json');
   const registryFile = path.join(runDir, 'runtime-services.json');
+  const intentFile = path.join(runDir, 'runtime-launch-intent.json');
+  let intent, launchedPid;
+  try { intent = readRuntimeLaunchIntent(runDir, runId); launchedPid = intent ? findRuntimeLaunchProcess(intent) : null; } catch (error) { die(`runtime launch recovery failed: ${error.message}`); }
   let prior = null;
   if (fs.existsSync(runtimeFile)) prior = read(runtimeFile);
   else if (fs.existsSync(registryFile)) {
@@ -95,6 +100,10 @@ if (command === 'serve') {
     if (registry.runId !== runId || !Array.isArray(services) || services.length !== 1 || services[0]?.record !== 'visual-sandbox-runtime.json') die('runtime service registry cannot safely restore the missing runtime record');
     prior = { ...services[0], runId };
   }
+  if (intent && launchedPid) {
+    if (prior && prior.pid !== launchedPid) die('runtime launch intent conflicts with the existing runtime record');
+    if (!prior) prior = { runId, runtimeRoot: 'visual-sandbox', pid: launchedPid, url: loopbackUrl(intent.bindHost, intent.port), startedAt: intent.startedAt };
+  } else if (intent) fs.unlinkSync(intentFile);
   if (prior) {
     if (fs.existsSync(registryFile)) {
       const registry = read(registryFile), service = registry.services?.[0];
@@ -107,20 +116,26 @@ if (command === 'serve') {
       write(runtimeFile, restored);
       write(registryFile, { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: prior.pid, url: prior.url, runtimeRoot: 'visual-sandbox', startedAt: prior.startedAt }] });
       state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-sandbox-runtime-state-update', expectedStateHash });
+      if (intent && fs.existsSync(intentFile)) fs.unlinkSync(intentFile);
       console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url: prior.url, pid: prior.pid, reused: true })); process.exit(0);
     }
   }
   const port = await availablePort(host);
-  const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port), '--apex-run-id', runId, '--bind-host', host], { detached: true, stdio: 'ignore' }); child.unref();
+  const launch = { schemaVersion: '1.0', id: crypto.randomUUID(), runId, host: os.hostname(), bindHost: host, port, runtimeRoot: sandboxRoot, startedAt: new Date().toISOString() };
+  const intentFd = fs.openSync(intentFile, 'wx'); try { fs.writeFileSync(intentFd, `${JSON.stringify(launch)}\n`); fs.fsyncSync(intentFd); } finally { fs.closeSync(intentFd); }
+  const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port), '--apex-run-id', runId, '--bind-host', host, '--apex-start-id', launch.id], { detached: true, stdio: 'ignore' }); child.unref();
   const url = loopbackUrl(host, port);
   let ready = false; for (let attempt = 0; attempt < 20 && !ready; attempt += 1) { await new Promise(resolve => setTimeout(resolve, 100)); ready = await reachable(url); }
   if (!ready) { child.kill('SIGTERM'); die('run-local Demo server did not become reachable'); }
+  try { if (runtimeProcess({ pid: child.pid, runId, runtimeRoot: 'visual-sandbox', url }, runId, sandboxRoot) !== 'running') throw new Error('spawned Demo process has exited'); }
+  catch (error) { child.kill('SIGTERM'); die(`run-local Demo process could not be verified: ${error.message}`); }
   const output = { schemaVersion: '3.0', runId, runtimeRoot: path.relative(fs.realpathSync(runDir), sandboxRoot), entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), url, pid: child.pid, startedAt: new Date().toISOString(), status: 'running' };
   write(runtimeFile, output);
   write(path.join(runDir, 'runtime-services.json'), { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: child.pid, url, runtimeRoot: output.runtimeRoot, startedAt: output.startedAt }] });
   state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString();
   try { commitRunState(runDir, state, { reason: 'visual-sandbox-runtime-state-update', expectedStateHash }); }
   catch (error) { child.kill('SIGTERM'); throw error; }
+  fs.unlinkSync(intentFile);
   console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url, pid: child.pid, reused: false }));
   } finally { try { startLock.exec('ROLLBACK'); } finally { startLock.close(); } }
 }

@@ -6,6 +6,8 @@ import { demoContract, seedDesignContract } from './interactive-demo-test-fixtur
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
+import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -45,6 +47,12 @@ try {
     if (rejected.status === 0 || !rejected.stderr.includes('visual sandbox entrypoint must resolve inside the current Run sandbox') || fs.existsSync(path.join(runDir, 'visual-sandbox-runtime.json'))) throw new Error('Demo start must reject an entrypoint outside the Run sandbox');
     fs.unlinkSync(alias); fs.writeFileSync(manifestFile, original);
   } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
+  const reservedPort = await new Promise((resolve, reject) => { const server = net.createServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const port = server.address().port; server.close(error => error ? reject(error) : resolve(port)); }); });
+  const launchId = crypto.randomUUID(), sandboxRoot = fs.realpathSync(path.join(runDir, 'visual-sandbox'));
+  fs.writeFileSync(path.join(runDir, 'runtime-launch-intent.json'), JSON.stringify({ schemaVersion: '1.0', id: launchId, runId: 'run-runtime', host: os.hostname(), bindHost: '127.0.0.1', port: reservedPort, runtimeRoot: sandboxRoot, startedAt: new Date().toISOString() }));
+  const orphan = spawn(process.execPath, [path.join(apexRoot, 'scripts', 'visual-sandbox-runtime.mjs'), 'serve', sandboxRoot, String(reservedPort), '--apex-run-id', 'run-runtime', '--bind-host', '127.0.0.1', '--apex-start-id', launchId], { detached: true, stdio: 'ignore' }); orphan.unref(); pids.push(orphan.pid);
+  let orphanReady = false; for (let i = 0; i < 30 && !orphanReady; i++) { try { orphanReady = await fetchStatus(`http://127.0.0.1:${reservedPort}/`) === 200; } catch {} if (!orphanReady) await new Promise(resolve => setTimeout(resolve, 100)); }
+  if (!orphanReady) throw new Error('simulated interrupted runtime did not start');
   const authorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'runtime start authorization');
   const concurrentAuthorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'concurrent runtime start authorization');
   // PM2-style runtime writes are deliberately outside the frozen formal source
@@ -56,6 +64,7 @@ try {
   const successes = concurrentStarts.filter(item => item.status === 0).map(item => JSON.parse(item.stdout));
   if (!successes.length || new Set(successes.map(item => item.pid)).size !== 1 || concurrentStarts.some(item => item.status !== 0 && !/another runtime start is active|state.*changed|already failed|projection/i.test(item.stderr))) throw new Error(`concurrent runtime starts were not safely serialized: ${JSON.stringify(concurrentStarts)}`);
   const output = successes[0];
+  if (!output.reused || output.pid !== orphan.pid || fs.existsSync(path.join(runDir, 'runtime-launch-intent.json'))) throw new Error('interrupted launch must recover its exact service and clear its intent');
   const receipt = JSON.parse(fs.readFileSync(output.visualSandboxRuntime, 'utf8')); pids.push(receipt.pid);
   const lockPath = path.join(runDir, 'runtime-start-lock.sqlite');
   const holder = spawn(process.execPath, ['--input-type=module', '-e', `import { DatabaseSync } from 'node:sqlite'; const db = new DatabaseSync(process.argv[1]); db.exec('BEGIN IMMEDIATE'); process.send('locked'); setInterval(() => {}, 1000);`, lockPath], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
@@ -108,7 +117,7 @@ try {
   if (formalReceipt.productionBoundary?.snapshotMode !== 'formal-source-discovery' || formalReceipt.productionBoundary?.changedFiles?.[0]?.path !== 'server/api.js' || !String(formalReceipt.stderr).includes('server/api.js')) throw new Error('a formal source boundary failure must identify its protected snapshot mode and exact changed file');
   pids.push(JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-runtime.json'), 'utf8')).pid);
   if (fs.existsSync(path.join(project, 'index.html'))) throw new Error('runtime start must not materialize files outside the run-local sandbox');
-  console.log(JSON.stringify({ status: 'passed', checks: 14 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 15 }));
 } finally {
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch {} }
   fs.rmSync(project, { recursive: true, force: true });
