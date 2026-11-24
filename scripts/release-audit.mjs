@@ -127,7 +127,7 @@ for (const [name, script] of [
   ['controlled-subprocess', 'controlled-subprocess-test.mjs'],
   ['operation-recovery', 'operation-recovery-test.mjs'],
   ['ledger-marker', 'ledger-marker-test.mjs'],
-  ...(process.platform === 'win32' ? [] : [['cancelled-action-race', 'cancelled-action-race-test.mjs']]),
+  ...(process.platform === 'win32' ? [] : [['cancelled-action-race', 'cancelled-action-race-test.mjs'], ['runtime-launch-crash', 'runtime-launch-crash-test.mjs']]),
   ['agent-attempt-usage-contract', 'agent-attempt-usage-test.mjs'],
   ['release-version-cache-contract', 'release-version-cache-test.mjs'],
   ['budget-recovery-router-contract', 'budget-recovery-router-test.mjs'],

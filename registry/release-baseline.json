@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T17:54:49.629Z",
+  "generatedAt": "2026-11-24T18:03:42.197Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -207,6 +207,7 @@
     "scripts/run-token-budget-test.mjs": "e2f685fdfb4668cbbf53b05327b3af644ead93c1682ea4d48d18684dadc4dc1c",
     "scripts/runtime-baseline-contract-test.mjs": "ab9623c04dbcd84d4e9555c93fa801dbad55269533c3223bbeab1f0d2b3837f3",
     "scripts/runtime-baseline-contract.mjs": "61d162ef77d1ca46e82931b8f934fe5c6a2dff7a296bc1cdc623a8bdd0349917",
+    "scripts/runtime-launch-crash-test.mjs": "fab2f442f3b9cbfb27f482c009c4c4b9b8a77175f5c60cde50e8e36bb6899196",
     "scripts/runtime-launch-intent.mjs": "8b05fc5fe1a3b0cacc5a6622ecce38353492e0a96f0ad2a1dbb2891d7ea1a7af",
     "scripts/runtime-materializer-contract-test.mjs": "0320d5178721cf1cbf00816ae1b5b5c3c0d987fbf9417e59ee62cc06671c7897",
     "scripts/runtime-materializer.mjs": "4df93c97c3be1cb64ac7a9163f4ee1b1be46e5b8adc72347e817e453597740ea",
