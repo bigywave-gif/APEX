@@ -18,9 +18,10 @@ export function ledgerBoundOutput(runDir, receipt, reference, digest, required =
     if (!ledger.startsWith(`${root}${path.sep}`) || !fs.statSync(ledger).isFile()) return false;
     const db = new DatabaseSync(ledger, { readOnly: true });
     try {
-      const snapshot = db.prepare('SELECT state_json FROM state_snapshots ORDER BY id DESC LIMIT 1').get();
+      const snapshot = db.prepare('SELECT state_json, state_hash FROM state_snapshots ORDER BY id DESC LIMIT 1').get();
       if (!snapshot) return false;
       const durable = JSON.parse(snapshot.state_json);
+      if (`sha256:${crypto.createHash('sha256').update(JSON.stringify(durable)).digest('hex')}` !== snapshot.state_hash) return false;
       const needsLedger = required || projectionRequiresLedger || durable?.roleChain?.confirmationModel === 'two-confirmations';
       if (!needsLedger) return true;
       if (!receipt?.authorizationRef || !receipt.action || !receipt.script || !receipt.operationKey) return false;

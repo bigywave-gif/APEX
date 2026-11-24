@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { initializeLedger, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
 
@@ -32,9 +33,14 @@ try {
   fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify(state));
   writeReceipt(receipt);
   assert.equal(ledgerBoundOutput(run, receipt, ref, digest, true), true);
+  const db = new DatabaseSync(path.join(run, 'run-ledger.sqlite'));
+  const snapshot = db.prepare('SELECT id, state_json FROM state_snapshots ORDER BY id DESC LIMIT 1').get();
+  db.prepare('UPDATE state_snapshots SET state_json = ? WHERE id = ?').run('{}', snapshot.id);
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'a corrupt durable state must not validate evidence');
+  db.prepare('UPDATE state_snapshots SET state_json = ? WHERE id = ?').run(snapshot.state_json, snapshot.id); db.close();
   archiveArtifacts(run, [ref], 'test stale artifact');
   assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'archived evidence cannot pass');
   fs.rmSync(path.join(run, 'run-ledger.sqlite'));
   assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'missing ledger cannot become legacy mode');
-  console.log(JSON.stringify({ status: 'passed', checks: 9 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 10 }));
 } finally { fs.rmSync(run, { recursive: true, force: true }); }
