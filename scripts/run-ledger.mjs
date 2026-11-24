@@ -10,6 +10,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { reserveProjectExternalIntent, releaseUnsubmittedProjectIntent, updateProjectExternalObservation } from './project-external-registry.mjs';
@@ -389,8 +390,15 @@ export function invalidationEvents(runDir) {
   } finally { database.close(); }
 }
 
+export function revisionInvalidationEvents(runDir, transactionId) {
+  const database = open(runDir);
+  try {
+    return database.prepare("SELECT event_type, payload_json FROM events WHERE event_type IN ('visual-intermediates-invalidation-started', 'visual-intermediates-invalidated', 'role-advisories-invalidation-started', 'role-advisories-invalidated') ORDER BY id").all().map(row => ({ ...parseJson(row.payload_json), type: row.event_type })).filter(event => event.transactionId === transactionId);
+  } finally { database.close(); }
+}
+
 function pendingRevisionsFromDatabase(database) {
-    const rows = database.prepare("SELECT event_type, payload_json FROM events WHERE event_type IN ('prompt-revision-transaction-started', 'prompt-revision-transaction-completed') ORDER BY id").all();
+    const rows = database.prepare("SELECT event_type, payload_json FROM events WHERE event_type IN ('prompt-revision-transaction-started', 'prompt-revision-replay-claimed', 'prompt-revision-transaction-completed') ORDER BY id").all();
     const pending = new Map(), seen = new Set();
     for (const row of rows) {
       const event = parseJson(row.payload_json);
@@ -398,12 +406,32 @@ function pendingRevisionsFromDatabase(database) {
       if (row.event_type === 'prompt-revision-transaction-started') {
         if (seen.has(event.transactionId)) throw new Error('duplicate revision transaction identity');
         seen.add(event.transactionId); pending.set(event.transactionId, event);
+      } else if (row.event_type === 'prompt-revision-replay-claimed') {
+        if (!pending.has(event.transactionId)) throw new Error('revision replay claim has no active transaction');
+        const previous = pending.get(event.transactionId);
+        pending.set(event.transactionId, { ...previous, ownerPid: event.ownerPid, ownerHost: event.ownerHost, replayClaimId: event.claimId, replayAttempts: Number(previous.replayAttempts || 0) + 1 });
       } else {
         if (!pending.has(event.transactionId)) throw new Error('revision completion has no active transaction');
         pending.delete(event.transactionId);
       }
     }
     return [...pending.values()];
+}
+export function claimRevisionReplay(runDir, transactionId, ownerPid = process.pid) {
+  const database = open(runDir);
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    const transaction = pendingRevisionsFromDatabase(database).find(item => item.transactionId === transactionId);
+    if (!transaction || transaction.protocol !== 2) throw new Error('revision transaction lacks replayable provenance');
+    if (Number(transaction.replayAttempts || 0) >= 3) throw new Error('revision replay attempt limit reached; investigate before further recovery');
+    if (transaction.ownerHost !== os.hostname() || !Number.isSafeInteger(transaction.ownerPid) || transaction.ownerPid <= 0) throw new Error('revision owner cannot be verified locally');
+    try { process.kill(transaction.ownerPid, 0); throw new Error('revision owner may still be running'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    const snapshot = latestSnapshot(database);
+    if (!snapshot || snapshot.state_hash !== transaction.baseStateHash || Number(snapshot.revision) !== transaction.stateRevision || JSON.parse(snapshot.state_json).lifecycle === 'cancelled') throw new Error('revision base state changed; replay requires investigation');
+    const claimId = crypto.randomUUID();
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('prompt-revision-replay-claimed', now(), JSON.stringify({ type: 'prompt-revision-replay-claimed', transactionId, claimId, ownerPid, ownerHost: os.hostname() }));
+    database.exec('COMMIT'); return { ...transaction, ownerPid, ownerHost: os.hostname(), replayClaimId: claimId };
+  } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 export function pendingRevisionTransactions(runDir) {
   const database = open(runDir);

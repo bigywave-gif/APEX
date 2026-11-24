@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { beginRevisionTransaction, commitRunState, pendingRevisionTransactions, readRunState, reconcileRun, recordArtifact, revisionInvalidationEvents } from './run-ledger.mjs';
+
+if (process.platform === 'win32') { console.error('revision crash recovery is unverified on Windows: process-group termination cannot be established'); process.exit(2); }
+const scripts = path.dirname(fileURLToPath(import.meta.url));
+const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-revision-crash-'));
+const run = (name, args, env = {}) => spawnSync(process.execPath, [path.join(scripts, name), ...args], { encoding: 'utf8', timeout: 30000, env: { ...process.env, ...env } });
+try {
+  const id = 'crash', session = 'crash-session', ref = 'visual-execution-plan.json', text = 'preserved generated plan';
+  let result = run('apex-router.mjs', ['intake', project, id, 'greenfield', 'standard', 'interactive', session, '确认调用 APEX']); assert.equal(result.status, 0, result.stderr || result.stdout);
+  const dir = path.join(project, '.apex', 'runs', id); fs.writeFileSync(path.join(dir, ref), text);
+  recordArtifact(dir, { artifactId: 'crash-plan', reference: ref, sha256: `sha256:${crypto.createHash('sha256').update(text).digest('hex')}` });
+  const demoRef = 'runtime-demo.json', demoText = 'preserved generated demo'; fs.writeFileSync(path.join(dir, demoRef), demoText);
+  recordArtifact(dir, { artifactId: 'crash-demo', reference: demoRef, sha256: `sha256:${crypto.createHash('sha256').update(demoText).digest('hex')}` });
+  const state = readRunState(dir); state.artifacts.visualExecutionPlan = ref; state.artifacts.runtimeDemo = demoRef; state.revision += 1; commitRunState(dir, state, { reason: 'revision-crash-fixture' });
+  const initialEpoch = Number(state.confirmationEpochs?.gate1 || 0);
+  const injection = path.join(project, 'crash-after-move.mjs');
+  fs.writeFileSync(injection, `import fs from 'node:fs'; const rename = fs.renameSync; fs.renameSync = (...args) => { const result = rename(...args); if (String(args[0]).endsWith('/${ref}') && String(args[1]).includes('/invalidated/')) process.exit(73); return result; };\n`);
+  result = run('apex-router.mjs', ['revise', project, id, session, 'gate1', 'visible', '调整真实中断后的需求'], { NODE_OPTIONS: `--import=${pathToFileURL(injection).href}` });
+  assert.equal(result.status, 73, result.stderr || result.stdout);
+  const transaction = pendingRevisionTransactions(dir)[0]; assert.equal(transaction.reason, '调整真实中断后的需求');
+  assert.equal(readRunState(dir).revision, state.revision); assert.equal(fs.existsSync(path.join(dir, ref)), false);
+  const started = revisionInvalidationEvents(dir, transaction.transactionId).find(event => event.type === 'visual-intermediates-invalidation-started'); assert.ok(started);
+  assert.equal(fs.readFileSync(path.join(dir, started.archive, ref), 'utf8'), text);
+  const recover = (env = {}) => {
+    const auth = run('apex-router.mjs', ['authorize', project, id, session, 'recover']); assert.equal(auth.status, 0, auth.stderr || auth.stdout);
+    return run('apex-action.mjs', ['run', project, id, session, JSON.parse(auth.stdout).authorizationRef, 'recover', 'apex-recover.mjs', dir], env);
+  };
+  const earlyKill = path.join(project, 'kill-before-claim.mjs');
+  fs.writeFileSync(earlyKill, `if (String(process.argv[1]).endsWith('/apex-recover.mjs')) process.kill(process.pid, 'SIGKILL');\n`);
+  result = recover({ NODE_OPTIONS: `--import=${pathToFileURL(earlyKill).href}` }); assert.notEqual(result.status, 0); assert.equal(pendingRevisionTransactions(dir)[0].replayAttempts || 0, 0);
+  const killInjection = path.join(project, 'kill-recovery-owner.mjs');
+  fs.writeFileSync(killInjection, `if (String(process.argv[1]).endsWith('/apex-router.mjs') && process.argv[2] === 'resume-revision') { process.kill(process.ppid, 'SIGKILL'); process.exit(76); }\n`);
+  result = recover({ NODE_OPTIONS: `--import=${pathToFileURL(killInjection).href}` }); assert.notEqual(result.status, 0); assert.equal(pendingRevisionTransactions(dir)[0].replayAttempts, 1);
+  const secondInjection = path.join(project, 'crash-during-replay.mjs');
+  fs.writeFileSync(secondInjection, `import fs from 'node:fs'; const rename = fs.renameSync; fs.renameSync = (...args) => { const result = rename(...args); if (String(args[0]).endsWith('/${demoRef}') && String(args[1]).includes('/invalidated/')) process.exit(75); return result; };\n`);
+  result = recover({ NODE_OPTIONS: `--import=${pathToFileURL(secondInjection).href}` }); assert.notEqual(result.status, 0); assert.equal(pendingRevisionTransactions(dir)[0].replayAttempts, 2);
+  result = recover(); assert.equal(result.status, 0, result.stderr || result.stdout); assert.equal(JSON.parse(result.stdout).status, 'revision-replayed');
+  assert.deepEqual(pendingRevisionTransactions(dir), []); assert.equal(readRunState(dir).confirmationEpochs.gate1, initialEpoch + 1);
+  const revisions = fs.readFileSync(path.join(dir, 'prompt-revisions.ndjson'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(revisions.length, 1); assert.equal(revisions[0].transactionId, transaction.transactionId); assert.equal(revisions[0].reason, transaction.reason);
+  assert.ok(revisionInvalidationEvents(dir, transaction.transactionId).some(event => event.type === 'visual-intermediates-invalidated' && event.recovered));
+  result = recover(); assert.equal(result.status, 0, result.stderr || result.stdout); assert.equal(reconcileRun(dir).status, 'consistent');
+  assert.equal(readRunState(dir).confirmationEpochs.gate1, initialEpoch + 1);
+  const secondId = 'committed-crash', secondSession = 'committed-crash-session';
+  result = run('apex-router.mjs', ['intake', project, secondId, 'greenfield', 'standard', 'interactive', secondSession, '确认调用 APEX']); assert.equal(result.status, 0, result.stderr || result.stdout);
+  const secondDir = path.join(project, '.apex', 'runs', secondId), secondBefore = readRunState(secondDir);
+  const stateInjection = path.join(project, 'crash-after-state.mjs');
+  fs.writeFileSync(stateInjection, `import fs from 'node:fs'; import path from 'node:path'; import { DatabaseSync } from 'node:sqlite'; const rename = fs.renameSync; fs.renameSync = (...args) => { const result = rename(...args); if (String(args[1]).endsWith('/state.json') && String(args[0]).includes('.tmp')) { const db = new DatabaseSync(path.join(path.dirname(args[1]), 'run-ledger.sqlite'), { readOnly: true }); const row = db.prepare(\"SELECT COUNT(*) AS count FROM events WHERE event_type='prompt-revision-state-committed'\").get(); db.close(); if (row.count) process.exit(74); } return result; };\n`);
+  result = run('apex-router.mjs', ['revise', project, secondId, secondSession, 'gate1', 'visible', '状态提交后的真实中断'], { NODE_OPTIONS: `--import=${pathToFileURL(stateInjection).href}` });
+  assert.equal(result.status, 74, result.stderr || result.stdout);
+  const secondTransaction = pendingRevisionTransactions(secondDir)[0]; assert.ok(secondTransaction);
+  assert.equal(readRunState(secondDir).revision, secondBefore.revision + 1); assert.equal(fs.existsSync(path.join(secondDir, 'prompt-revisions.ndjson')), false);
+  const secondAuth = run('apex-router.mjs', ['authorize', project, secondId, secondSession, 'recover']); assert.equal(secondAuth.status, 0, secondAuth.stderr || secondAuth.stdout);
+  result = run('apex-action.mjs', ['run', project, secondId, secondSession, JSON.parse(secondAuth.stdout).authorizationRef, 'recover', 'apex-recover.mjs', secondDir]);
+  assert.equal(result.status, 0, result.stderr || result.stdout); assert.equal(JSON.parse(result.stdout).revisionRecovery.status, 'completed');
+  const secondRecords = fs.readFileSync(path.join(secondDir, 'prompt-revisions.ndjson'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(secondRecords.length, 1); assert.equal(secondRecords[0].reason, '状态提交后的真实中断'); assert.deepEqual(pendingRevisionTransactions(secondDir), []);
+  assert.equal(readRunState(secondDir).confirmationEpochs.gate1, Number(secondBefore.confirmationEpochs?.gate1 || 0) + 1);
+  const limitId = 'retry-limit', limitSession = 'retry-limit-session';
+  result = run('apex-router.mjs', ['intake', project, limitId, 'greenfield', 'standard', 'interactive', limitSession, '确认调用 APEX']); assert.equal(result.status, 0, result.stderr || result.stdout);
+  const limitDir = path.join(project, '.apex', 'runs', limitId), limitState = readRunState(limitDir);
+  beginRevisionTransaction(limitDir, { protocol: 2, transactionId: 'retry-limit-transaction', at: new Date().toISOString(), sessionId: limitSession, checkpoint: 'gate1', impact: 'visible', reason: '验证受控重试上限', stateRevision: limitState.revision, ownerPid: 2147483647, ownerHost: os.hostname() });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const auth = run('apex-router.mjs', ['authorize', project, limitId, limitSession, 'recover']); assert.equal(auth.status, 0, auth.stderr || auth.stdout);
+    const limited = run('apex-action.mjs', ['run', project, limitId, limitSession, JSON.parse(auth.stdout).authorizationRef, 'recover', 'apex-recover.mjs', limitDir], { NODE_OPTIONS: `--import=${pathToFileURL(earlyKill).href}` });
+    assert.notEqual(limited.status, 0);
+    if (attempt === 3) assert.match(limited.stderr, /identical controlled operation already failed/);
+  }
+  console.log(JSON.stringify({ status: 'passed', scope: 'real process interruption before and during replay, archive move and state commit; request and confirmation epoch preserved' }));
+} finally { fs.rmSync(project, { recursive: true, force: true }); }

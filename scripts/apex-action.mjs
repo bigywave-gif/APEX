@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readRunState, recordArtifact, agentRuntimeStatus, visualSkillLoads } from './run-ledger.mjs';
+import { readRunState, recordArtifact, agentRuntimeStatus, pendingRevisionTransactions, visualSkillLoads } from './run-ledger.mjs';
 import { requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
 import { recordLateCancelledOperation } from './cancelled-operation-finalizer.mjs';
 import { runControlledSubprocess } from './controlled-subprocess.mjs';
@@ -182,6 +182,20 @@ function agentClaimBudgetInputs() {
     return { job: job ? { jobId, stage: job.stage, status: job.status, attempt: job.attempt, tokenBudget: job.payload?.tokenBudget, stageTokenBudget: job.payload?.stageTokenBudget, budgetRecovery: job.payload?.budgetRecovery } : null, stageUsage: runtime.tokenUsage?.[stage] ?? 0, stageCoverage: runtime.tokenUsageCoverage?.[stage] || null, runBudget: runtime.runBudget, runningReservations: runtime.jobs.filter(item => item.status === 'running').map(item => ({ jobId: item.jobId, stage: item.stage, reservedTokens: item.reservedTokens })).sort((a, b) => a.jobId.localeCompare(b.jobId)) };
   } catch { return { status: 'budget-state-unavailable' }; }
 }
+function revisionRecoveryRetryInputs() {
+  if (action !== 'recover' || script !== 'apex-recover.mjs' || process.platform === 'win32') return undefined;
+  try {
+    const pending = pendingRevisionTransactions(runDirectory);
+    if (pending.length !== 1 || !fs.existsSync(operationDirectory)) return undefined;
+    const receipts = fs.readdirSync(operationDirectory).filter(name => name.endsWith('.json')).map(name => JSON.parse(fs.readFileSync(path.join(operationDirectory, name), 'utf8'))).filter(item => item.action === 'recover' && item.script === 'apex-recover.mjs' && item.status === 'failed').sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)));
+    const previous = receipts[0], local = previous?.localProcess;
+    if (receipts[1] && receipts[1].finishedAt === previous?.finishedAt) return undefined;
+    const interrupted = receipts.filter(item => item.signal && item.revisionTransactionId === pending[0].transactionId);
+    if (!previous?.signal || previous.owner?.host !== os.hostname() || pending[0].ownerHost !== os.hostname() || previous.revisionTransactionId !== pending[0].transactionId || (previous.revisionReplayClaimId || null) !== (pending[0].replayClaimId || null) || interrupted.length >= 3 || local?.platform !== process.platform || !Number.isSafeInteger(local.processGroup) || local.processGroup <= 0 || local.pid !== local.processGroup) return undefined;
+    try { process.kill(-local.processGroup, 0); return undefined; } catch (error) { if (error.code !== 'ESRCH') return undefined; }
+    return { transactionId: pending[0].transactionId, interruptedReceipt: previous.authorizationRef, interruptedAttempts: interrupted.length, replayClaimId: pending[0].replayClaimId || null, replayAttempts: pending[0].replayAttempts || 0 };
+  } catch { return undefined; }
+}
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
@@ -235,7 +249,8 @@ catch { fail('Router authorization verification returned invalid JSON'); }
 const stateHash = verificationResult?.authorizationToken?.stateHash;
 if (!stateHash) fail('Router authorization verification did not return its bound state hash');
 const claimBudgetInputs = agentClaimBudgetInputs();
-const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }) });
+const revisionRetryInputs = revisionRecoveryRetryInputs();
+const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }) });
 // An authorization is deliberately single-use, but a fresh authorization is
 // not evidence that the failed action now has different inputs.  Without this
 // operation key, hosts can create an infinite retry loop by asking Router for
@@ -245,9 +260,11 @@ const priorFailure = failedOperationWithSameKey(operationKey);
 if (priorFailure) fail(`an identical controlled operation already failed or was interrupted (${priorFailure}); inspect its outcome and change the observed cause, state, or input before requesting another retry`);
 const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
+let localProcessIdentity = null;
 const execution = await runControlledSubprocess(process.execPath, [target, ...scriptArgs], {
   timeoutMs: executionTimeoutMs, runDir: runDirectory,
   onSpawn: localProcess => {
+    localProcessIdentity = localProcess;
     const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
     if (receipt.status !== 'running' || receipt.authorizationRef !== authorizationRef) throw new Error('running operation receipt changed');
     const temporary = `${receiptFile}.${process.pid}.tmp`;
@@ -306,7 +323,8 @@ if (succeeded) {
   }
 }
 if (recordLateCancelledOperation(runDirectory, { authorizationRef, action, script, startedAt, finishedAt, exitCode: execution.status, stage: 'receipt-write' })) fail('the operation was cancelled before its receipt could be committed; external side effects require verification');
-const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, outputFileHashes: outputHashes, outputFileFingerprints: outputFingerprints, productionBoundary: action === 'generate_visual' ? { allowedRoot: path.join(runDirectory, 'visual-sandbox'), snapshotMode: productionBefore?.mode || null, protectedFiles: Object.keys(productionBefore?.files || {}), changedFiles: productionChangedFiles, formalProjectUnchanged: !productionBoundaryError } : null, status: succeeded ? 'succeeded' : 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut, exitCode: succeeded ? 0 : (execution.status || 1), stdout: execution.stdout || '', stderr: `${execution.stderr || ''}${executionError ? `${executionError}\n` : ''}${stateReconciliationError ? `${stateReconciliationError}\n` : ''}${timedOut ? `operation exceeded controlled timeout (${executionTimeoutMs}ms)\n` : ''}${productionBoundaryError ? `${productionBoundaryError}\n` : ''}` };
+const pendingRevision = action === 'recover' && script === 'apex-recover.mjs' ? pendingRevisionTransactions(runDirectory)[0] || null : null;
+const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, outputFileHashes: outputHashes, outputFileFingerprints: outputFingerprints, productionBoundary: action === 'generate_visual' ? { allowedRoot: path.join(runDirectory, 'visual-sandbox'), snapshotMode: productionBefore?.mode || null, protectedFiles: Object.keys(productionBefore?.files || {}), changedFiles: productionChangedFiles, formalProjectUnchanged: !productionBoundaryError } : null, status: succeeded ? 'succeeded' : 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut, signal: execution.signal || null, owner: { pid: process.pid, host: os.hostname() }, localProcess: localProcessIdentity, revisionTransactionId: pendingRevision?.transactionId || null, revisionReplayClaimId: pendingRevision?.replayClaimId || null, exitCode: succeeded ? 0 : (execution.status || 1), stdout: execution.stdout || '', stderr: `${execution.stderr || ''}${executionError ? `${executionError}\n` : ''}${stateReconciliationError ? `${stateReconciliationError}\n` : ''}${timedOut ? `operation exceeded controlled timeout (${executionTimeoutMs}ms)\n` : ''}${productionBoundaryError ? `${productionBoundaryError}\n` : ''}` };
 fs.writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
 updateOperationIndex(receiptFile, receipt);
 process.stdout.write(receipt.stdout); process.stderr.write(receipt.stderr);

@@ -134,6 +134,7 @@ for (const [name, script] of [
   ['recovery-archive-contract', 'recovery-archive-test.mjs'],
   ['recovery-archive-router-contract', 'recovery-archive-router-test.mjs'],
   ['revision-transaction-contract', 'revision-transaction-test.mjs'],
+  ['revision-crash-contract', 'revision-crash-test.mjs'],
   ['agent-budget-reservation-contract', 'agent-budget-reservation-test.mjs'],
   ['run-token-budget-contract', 'run-token-budget-test.mjs'],
   ['run-metrics-contract', 'run-metrics-test.mjs'],

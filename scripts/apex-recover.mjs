@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { appendLedgerEvent, archiveArtifacts, commitRunState, finalizeCommittedRevision, invalidationEvents, pendingRevisionTransactions, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
+import { appendLedgerEvent, archiveArtifacts, claimRevisionReplay, commitRunState, finalizeCommittedRevision, invalidationEvents, pendingRevisionTransactions, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
 import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
 import { inspectRunningOperations, markInterruptedOperations } from './operation-recovery.mjs';
 import { archivedMissingReferences } from './recovery-archive.mjs';
@@ -40,8 +41,14 @@ if (pendingRevisions.length) {
   try { revisionRecovery = finalizeCommittedRevision(runDir, pendingRevisions[0].transactionId); }
   catch (error) { die(`revision recovery refused: ${error.message}`); }
   if (revisionRecovery.status === 'state-not-committed') {
-    console.log(JSON.stringify({ status: 'revision-recovery-required', transactions: pendingRevisions.map(item => ({ transactionId: item.transactionId, checkpoint: item.checkpoint, startedAt: item.at })), note: 'The interrupted revision retains its original request; replay before state commit is not yet available.' }));
-    process.exit(2);
+    const interruptedBeforeReplay = markInterruptedOperations(runDir, operationInspection.interrupted);
+    if (interruptedBeforeReplay.length) appendLedgerEvent(runDir, { type: 'revision-replay-interrupted-operations-reconciled', transactionId: pendingRevisions[0].transactionId, operations: interruptedBeforeReplay });
+    let claim;
+    try { claim = claimRevisionReplay(runDir, pendingRevisions[0].transactionId); }
+    catch (error) { die(`revision replay refused: ${error.message}`); }
+    const replay = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-router.mjs'), 'resume-revision', process.env.APEX_ROUTER_PROJECT_ROOT, process.env.APEX_ROUTER_RUN_ID, process.env.APEX_ROUTER_SESSION_ID, claim.transactionId, claim.replayClaimId], { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+    if (replay.status !== 0) die(`revision replay failed: ${(replay.stderr || replay.stdout || replay.error?.message || 'unknown failure').trim()}`);
+    process.stdout.write(replay.stdout); process.exit(0);
   }
 }
 let implementationSealRecovery = null;

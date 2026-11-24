@@ -33,7 +33,7 @@ import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
-import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
+import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, pendingRevisionTransactions, readRunState, reconcileRun, recordArtifact, revisionInvalidationEvents, archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bridgeSource = path.join(apexRoot, 'runtime', 'host-bridges', 'codex-skill', 'SKILL.md');
@@ -519,7 +519,7 @@ function reconcileGateDependencyState(dir, state) {
   appendEvent(dir, { type: 'gate-dependency-state-reconciled', reason: 'upstream-gate2-is-not-open', revoked });
   return state;
 }
-function invalidateVisualIntermediates(dir, reason) {
+function invalidateVisualIntermediates(dir, reason, transactionId = null) {
   // These are generated, reviewable outputs.  Clearing their state references
   // alone is insufficient: an old runtime-demo.json or visual-sandbox can be
   // mistaken for the current Demo by a host that discovers files by name.
@@ -529,23 +529,23 @@ function invalidateVisualIntermediates(dir, reason) {
   const stamp = `${Date.now()}-${crypto.randomUUID()}-${String(reason).replace(/[^A-Za-z0-9._-]/g, '_')}`;
   const archive = path.join(dir, 'invalidated', stamp); const moved = [];
   const planned = candidates.filter(relative => fs.existsSync(path.join(dir, relative)));
-  if (planned.length) appendEvent(dir, { type: 'visual-intermediates-invalidation-started', reason, archive: path.relative(dir, archive), artifacts: planned });
+  if (planned.length) appendEvent(dir, { type: 'visual-intermediates-invalidation-started', reason, archive: path.relative(dir, archive), artifacts: planned, transactionId });
   for (const relative of planned) {
     const source = path.join(dir, relative);
     if (!fs.existsSync(source)) continue;
     const target = path.join(archive, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.renameSync(source, target); moved.push(relative);
   }
-  if (moved.length) appendEvent(dir, { type: 'visual-intermediates-invalidated', reason, archive: path.relative(dir, archive), artifacts: moved });
+  if (moved.length) appendEvent(dir, { type: 'visual-intermediates-invalidated', reason, archive: path.relative(dir, archive), artifacts: moved, transactionId });
   return moved;
 }
-function invalidateRoleStages(dir, state, stages, reason) {
+function invalidateRoleStages(dir, state, stages, reason, transactionId = null) {
   if (!state.roleChain?.enabled || !stages.length) return [];
   const manifestRef = state.artifacts?.roleAdvisoryManifest;
   const manifestFile = manifestRef && artifactFile(dir, manifestRef);
   const moved = [];
   const stamp = `${Date.now()}-role-${crypto.randomUUID()}-${String(reason).replace(/[^A-Za-z0-9._-]/g, '_')}`;
   const planned = stages.filter(stage => fs.existsSync(path.join(dir, 'advisories', stage))).map(stage => `advisories/${stage}`);
-  if (planned.length) appendEvent(dir, { type: 'role-advisories-invalidation-started', reason, stages, archive: path.join('invalidated', stamp), artifacts: planned });
+  if (planned.length) appendEvent(dir, { type: 'role-advisories-invalidation-started', reason, stages, archive: path.join('invalidated', stamp), artifacts: planned, transactionId });
   for (const stage of stages) {
     const source = path.join(dir, 'advisories', stage);
     if (fs.existsSync(source)) {
@@ -565,7 +565,7 @@ function invalidateRoleStages(dir, state, stages, reason) {
     }
     catch { state.artifacts.roleAdvisoryManifest = null; }
   }
-  if (moved.length) appendEvent(dir, { type: 'role-advisories-invalidated', reason, stages, archive: path.join('invalidated', stamp), artifacts: moved });
+  if (moved.length) appendEvent(dir, { type: 'role-advisories-invalidated', reason, stages, archive: path.join('invalidated', stamp), artifacts: moved, transactionId });
   return moved;
 }
 function runControllerCommand(command, args) {
@@ -2882,15 +2882,49 @@ function resumeHandoff(root, run, sessionId, reason) {
   return routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId);
 }
 
-function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) {
+function finishRevisionArchives(runDir, transactionId) {
+  const root = fs.realpathSync(runDir), events = revisionInvalidationEvents(runDir, transactionId);
+  for (const started of events.filter(event => event.type.endsWith('invalidation-started'))) {
+    const archive = typeof started.archive === 'string' && !path.isAbsolute(started.archive) ? path.resolve(root, started.archive) : null;
+    if (!archive || path.dirname(archive) !== path.join(root, 'invalidated') || !Array.isArray(started.artifacts)) fail('revision archive plan is invalid');
+    const doneType = started.type === 'visual-intermediates-invalidation-started' ? 'visual-intermediates-invalidated' : 'role-advisories-invalidated';
+    const already = new Set(events.filter(event => event.type === doneType && event.archive === started.archive).flatMap(event => event.artifacts || []));
+    const recovered = [];
+    for (const reference of started.artifacts) {
+      if (typeof reference !== 'string' || path.isAbsolute(reference)) fail('revision archive reference is invalid');
+      const source = path.resolve(root, reference), target = path.resolve(archive, reference);
+      if (!source.startsWith(`${root}${path.sep}`) || !target.startsWith(`${archive}${path.sep}`)) fail('revision archive reference escapes the Run');
+      if (already.has(reference)) continue;
+      const sourceExists = fs.existsSync(source), targetExists = fs.existsSync(target);
+      if (sourceExists && targetExists) fail(`revision archive has conflicting source and target: ${reference}`);
+      if (targetExists) {
+        if (!fs.realpathSync(target).startsWith(`${root}${path.sep}`)) fail(`revision archive is outside the Run: ${reference}`);
+        recovered.push(reference);
+      } else if (!sourceExists) {
+        // A later replay may already have moved this planned item into its
+        // own archive before another interruption.
+        const alternatives = events.filter(event => event.type.endsWith('invalidation-started') && event.archive !== started.archive && Array.isArray(event.artifacts) && event.artifacts.includes(reference)).filter(event => {
+          if (typeof event.archive !== 'string' || path.isAbsolute(event.archive)) return false;
+          const otherArchive = path.resolve(root, event.archive), other = path.resolve(otherArchive, reference);
+          return path.dirname(otherArchive) === path.join(root, 'invalidated') && other.startsWith(`${otherArchive}${path.sep}`) && fs.existsSync(other) && fs.realpathSync(other).startsWith(`${root}${path.sep}`);
+        });
+        if (alternatives.length !== 1) fail(`revision archive source and target are missing or ambiguous: ${reference}`);
+      }
+    }
+    if (recovered.length) appendEvent(runDir, { type: doneType, transactionId, reason: started.reason, archive: started.archive, artifacts: recovered, recovered: true });
+  }
+}
+
+function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason, replay = null) {
   const state = stateOf(run.runDir);
   const allowed = ['gate1', 'visual-plan', 'visual', 'stitch', 'implementation'];
   if (!allowed.includes(checkpoint) || !['visible', 'implementation-only', 'non-baseline'].includes(impact) || !reason) fail('revision requires gate1|visual-plan|visual|stitch|implementation, visible|implementation-only|non-baseline, and a reason');
-  if (['visual-plan', 'visual'].includes(checkpoint) && state.gates?.gate1?.status !== 'passed' && !(usesCombinedPlan(state) && checkpointReady(state, run.runDir, 'gate1'))) fail('visual prompt revision requires a current product plan');
-  if (checkpoint === 'stitch' && !state.locks?.effectApproved) fail('Stitch prompt revision requires confirmed effect image');
-  if (checkpoint === 'implementation' && !state.locks?.stitchCurrent && !state.locks?.stitchSkipped) fail('implementation prompt revision requires sealed or explicitly skipped Stitch');
-  const transactionId = crypto.randomUUID(), initialStateHash = sha256Text(JSON.stringify(state));
-  beginRevisionTransaction(run.runDir, { type: 'prompt-revision-transaction-started', transactionId, at: now(), sessionId, checkpoint, impact, reason, stateRevision: Number(state.revision || 0), baseStateHash: initialStateHash, ownerPid: process.pid, ownerHost: os.hostname() });
+  if (!replay && ['visual-plan', 'visual'].includes(checkpoint) && state.gates?.gate1?.status !== 'passed' && !(usesCombinedPlan(state) && checkpointReady(state, run.runDir, 'gate1'))) fail('visual prompt revision requires a current product plan');
+  if (!replay && checkpoint === 'stitch' && !state.locks?.effectApproved) fail('Stitch prompt revision requires confirmed effect image');
+  if (!replay && checkpoint === 'implementation' && !state.locks?.stitchCurrent && !state.locks?.stitchSkipped) fail('implementation prompt revision requires sealed or explicitly skipped Stitch');
+  const transactionId = replay?.transactionId || crypto.randomUUID(), initialStateHash = sha256Text(JSON.stringify(state));
+  if (replay && (replay.baseStateHash !== initialStateHash || replay.stateRevision !== Number(state.revision || 0))) fail('revision base state changed before replay');
+  if (!replay) beginRevisionTransaction(run.runDir, { protocol: 2, type: 'prompt-revision-transaction-started', transactionId, at: now(), sessionId, checkpoint, impact, reason, stateRevision: Number(state.revision || 0), baseStateHash: initialStateHash, ownerPid: process.pid, ownerHost: os.hostname() });
   const gate2Open = state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed === true;
   const approvalsBefore = { gate1: state.gates?.gate1?.status === 'passed', 'visual-plan': state.locks?.visualPlanApproved === true, stitch: state.locks?.stitchApproved === true, implementation: state.locks?.implementationApproved === true };
   let revisionOutcome = { kind: 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: [], message: '调整只影响当前未确认工件；将自动重建后回到同一确认点。' };
@@ -2900,8 +2934,8 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
   } else if (checkpoint === 'gate1') {
     invalidateConfirmationEpochs(state, ['gate1', 'visual-plan', 'demo', 'stitch', 'implementation']);
     const previouslyApproved = state.gates?.gate1?.status === 'passed';
-    const invalidated = invalidateVisualIntermediates(run.runDir, 'prompt-revision-gate1');
-    const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['baseline', 'gate1', 'visual', 'implementation', 'verify'], 'prompt-revision-gate1');
+    const invalidated = invalidateVisualIntermediates(run.runDir, 'prompt-revision-gate1', transactionId);
+    const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['baseline', 'gate1', 'visual', 'implementation', 'verify'], 'prompt-revision-gate1', transactionId);
     const cleared = clearArtifactReferences(state, [...gate1DerivedArtifacts, ...visualAndImplementationArtifacts]);
     state.gates.gate1 = { status: previouslyApproved ? 'revoked' : 'pending', at: now(), evidence: [`prompt-revision:gate1`, reason] };
     state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:gate1'] };
@@ -2921,15 +2955,15 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
     revisionOutcome = { kind: previouslyApproved ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: ['gate1', 'visual-plan', 'stitch', 'implementation'].filter(item => approvalsBefore[item]), requiredNextConfirmation: '确认需求与交付方案', message: previouslyApproved ? '此调整改变了已确认的需求与交付边界；已解锁 Gate 1，并撤销其派生方案。APEX 将自动重建完整需求与交付方案，随后请重新确认“确认需求与交付方案”。' : '调整只影响当前需求与交付方案；将自动重建后回到同一确认点。' };
   } else if (checkpoint === 'visual-plan' || checkpoint === 'visual' || (checkpoint === 'implementation' && impact === 'visible')) {
     invalidateConfirmationEpochs(state, ['visual-plan', 'demo', 'stitch', 'implementation']);
-    const invalidated = invalidateVisualIntermediates(run.runDir, `prompt-revision-${checkpoint}`); const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['visual', 'implementation', 'verify'], `prompt-revision-${checkpoint}`); state.locks.visualPlanApproved = false; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.gates.gate2 = { status: 'revoked', at: now(), evidence: [`prompt-revision:${checkpoint}`] }; const cleared = clearArtifactReferences(state, visualAndImplementationArtifacts); const revoked = revokeDownstreamDeliveryState(state, `prompt-revision:${checkpoint}`); state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; appendEvent(run.runDir, { type: 'visual-reset', reason: `prompt-revision:${checkpoint}`, invalidated, invalidatedRoles, cleared, revoked });
+    const invalidated = invalidateVisualIntermediates(run.runDir, `prompt-revision-${checkpoint}`, transactionId); const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['visual', 'implementation', 'verify'], `prompt-revision-${checkpoint}`, transactionId); state.locks.visualPlanApproved = false; state.locks.effectApproved = false; state.locks.visualApproved = false; state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.deliveryRoute = null; state.gates.gate2 = { status: 'revoked', at: now(), evidence: [`prompt-revision:${checkpoint}`] }; const cleared = clearArtifactReferences(state, visualAndImplementationArtifacts); const revoked = revokeDownstreamDeliveryState(state, `prompt-revision:${checkpoint}`); state.phase = state.track === 'greenfield' ? 'G-04 VISUAL_PLAN' : 'E-06 VISUAL_PLAN'; appendEvent(run.runDir, { type: 'visual-reset', reason: `prompt-revision:${checkpoint}`, invalidated, invalidatedRoles, cleared, revoked });
     revisionOutcome = { kind: approvalsBefore['visual-plan'] ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: ['visual-plan', 'stitch', 'implementation'].filter(item => approvalsBefore[item]), requiredNextConfirmation: '确认视觉方案', message: approvalsBefore['visual-plan'] ? '此调整改变了已确认的视觉方案；已解锁视觉方案及其派生 Demo、路线、Stitch 和实施冻结。APEX 将自动重建完整视觉方案，随后请重新确认“确认视觉方案”。' : '调整只影响当前未确认的视觉方案；将自动重建后回到“确认视觉方案”。' };
   } else if (checkpoint === 'stitch') {
     invalidateConfirmationEpochs(state, ['stitch', 'implementation']);
-    const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['implementation', 'verify'], 'prompt-revision-stitch'); state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:stitch'] }; const revoked = revokeDownstreamDeliveryState(state, 'prompt-revision:stitch'); state.phase = state.track === 'greenfield' ? 'G-06 SYNC_FREEZE' : 'E-08 SYNC_FREEZE'; appendEvent(run.runDir, { type: 'role-advisories-reset-after-stitch-revision', invalidatedRoles, revoked });
+    const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['implementation', 'verify'], 'prompt-revision-stitch', transactionId); state.locks.stitchApproved = false; state.locks.stitchSkipped = false; state.locks.stitchCurrent = false; state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:stitch'] }; const revoked = revokeDownstreamDeliveryState(state, 'prompt-revision:stitch'); state.phase = state.track === 'greenfield' ? 'G-06 SYNC_FREEZE' : 'E-08 SYNC_FREEZE'; appendEvent(run.runDir, { type: 'role-advisories-reset-after-stitch-revision', invalidatedRoles, revoked });
     revisionOutcome = { kind: approvalsBefore.stitch ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: ['stitch', 'implementation'].filter(item => approvalsBefore[item]), requiredNextConfirmation: '确认 Stitch 内容', message: approvalsBefore.stitch ? '此调整改变了已确认的 Stitch 内容；已解锁 Stitch 与实施冻结。APEX 将自动重建并回到“确认 Stitch 内容”。' : '调整只影响当前未确认的 Stitch 工件；将自动重建后回到“确认 Stitch 内容”。' };
   } else if (checkpoint === 'implementation' && !gate2Open) {
     invalidateConfirmationEpochs(state, ['implementation']);
-    const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['implementation', 'verify'], 'prompt-revision-implementation'); state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:implementation'] }; const revoked = revokeDownstreamDeliveryState(state, 'prompt-revision:implementation'); appendEvent(run.runDir, { type: 'role-advisories-reset-after-implementation-revision', invalidatedRoles, revoked });
+    const invalidatedRoles = invalidateRoleStages(run.runDir, state, ['implementation', 'verify'], 'prompt-revision-implementation', transactionId); state.locks.implementationApproved = false; state.locks.implementationAllowed = false; state.gates.gate2 = { status: 'revoked', at: now(), evidence: ['prompt-revision:implementation'] }; const revoked = revokeDownstreamDeliveryState(state, 'prompt-revision:implementation'); appendEvent(run.runDir, { type: 'role-advisories-reset-after-implementation-revision', invalidatedRoles, revoked });
     revisionOutcome = { kind: approvalsBefore.implementation ? 'reopened-upstream-checkpoint' : 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: approvalsBefore.implementation ? ['implementation'] : [], requiredNextConfirmation: '确认实施冻结', message: approvalsBefore.implementation ? '此调整改变了已确认的实施冻结；已解锁实施冻结。APEX 将自动重建并回到“确认实施冻结”。' : '调整只影响当前未确认的实施冻结；将自动重建后回到“确认实施冻结”。' };
   } else if (checkpoint === 'implementation') {
     appendEvent(run.runDir, { type: 'post-gate2-implementation-revision-retained', sessionId, reason, preserved: ['gate2', 'implementation-authority'], gate3: 'must-revalidate' });
@@ -3022,6 +3056,15 @@ try {
       appendEvent(dir, { type: 'session-reinvoked', sessionId, disposition: 'new-task', replacedRunId: retired.runId, reason, retiredCleanup, track: trackClassification.track, requestedTrack: track, trackClassification, scope, authorization, userConsent: explicitConsent });
       json({ status: 'created', disposition: 'new-task', replacedRunId: retired.runId, trackClassification, ...routerState(root, { runId, runDir: dir }, sessionId) });
     }
+  } else if (command === 'resume-revision') {
+    const [projectArg, requestedRunId, sessionId, transactionId, claimId] = args;
+    const root = projectRoot(projectArg); const run = selectRun(root, assertSessionBinding(root, sessionId, requestedRunId));
+    if (process.env.APEX_ROUTER_ACTION !== 'recover' || !process.env.APEX_ROUTER_PROJECT_ROOT || fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT) !== root || process.env.APEX_ROUTER_RUN_ID !== requestedRunId || process.env.APEX_ROUTER_SESSION_ID !== sessionId || !process.env.APEX_ROUTER_AUTHORIZATION_REF) fail('revision replay requires the current controlled recovery authorization');
+    verifyAuthorization(root, run, sessionId, process.env.APEX_ROUTER_AUTHORIZATION_REF, 'recover');
+    const transaction = pendingRevisionTransactions(run.runDir).find(item => item.transactionId === transactionId);
+    if (!transaction || transaction.protocol !== 2 || transaction.replayClaimId !== claimId || transaction.ownerPid !== process.ppid || transaction.ownerHost !== os.hostname()) fail('revision replay claim is missing or belongs to another recovery process');
+    finishRevisionArchives(run.runDir, transactionId);
+    json({ status: 'revision-replayed', ...recordPromptRevision(root, run, transaction.sessionId, transaction.checkpoint, transaction.impact, transaction.reason, transaction) });
   } else if (command === 'revise') {
     const [projectArg, requestedRunId, sessionId, checkpoint, impact, reason] = args;
     if (!projectArg || !requestedRunId || !sessionId || !checkpoint || !impact || !reason) fail('usage: revise <project-root> <run-id> <session-id> <gate1|visual-plan|visual|stitch|implementation> <visible|implementation-only|non-baseline> <reason>');
