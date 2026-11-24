@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { initializeLedger, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
+import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
+
+const run = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-controlled-ledger-'));
+try {
+  const state = { revision: 1, roleChain: { confirmationModel: 'two-confirmations' }, artifacts: {} };
+  fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify(state));
+  initializeLedger(run, state, 'fixture');
+  fs.mkdirSync(path.join(run, 'operations'));
+  const ref = 'result.json', file = path.join(run, ref), receiptFile = path.join(run, 'operations', 'result.json');
+  fs.writeFileSync(file, '{"passed":true}');
+  const digest = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+  const metadata = { authorizationRef: 'authorizations/one.json', action: 'verify', script: 'verification-planner.mjs', operationKey: 'operation-one' };
+  const receipt = { ...metadata, status: 'succeeded', outputFileHashes: { [ref]: digest } };
+  const writeReceipt = value => fs.writeFileSync(receiptFile, JSON.stringify(value));
+  writeReceipt(receipt);
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'receipt without a ledger artifact is not evidence');
+  recordArtifact(run, { artifactId: 'result-one', reference: ref, sha256: digest, metadata });
+  assert.equal(controlledOutput(run, ref, [metadata.script]), true);
+  assert.equal(controlledOutput(run, ref, [metadata.script], [], ['record_context']), false, 'the wrong action cannot satisfy a seal');
+  writeReceipt({ ...receipt, operationKey: 'another-operation' });
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'a receipt for a different operation cannot borrow an artifact');
+  fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify({ ...state, roleChain: { confirmationModel: 'gate-summary-only' } }));
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'changing the projection cannot downgrade the durable confirmation model');
+  fs.rmSync(path.join(run, 'state.json'));
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'removing the projection cannot downgrade the durable confirmation model');
+  fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify(state));
+  writeReceipt(receipt);
+  assert.equal(ledgerBoundOutput(run, receipt, ref, digest, true), true);
+  archiveArtifacts(run, [ref], 'test stale artifact');
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'archived evidence cannot pass');
+  fs.rmSync(path.join(run, 'run-ledger.sqlite'));
+  assert.equal(controlledOutput(run, ref, [metadata.script]), false, 'missing ledger cannot become legacy mode');
+  console.log(JSON.stringify({ status: 'passed', checks: 9 }));
+} finally { fs.rmSync(run, { recursive: true, force: true }); }

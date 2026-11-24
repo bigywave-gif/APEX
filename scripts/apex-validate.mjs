@@ -17,7 +17,7 @@ import { validateFormalInteractionEvidence } from './formal-interaction-evidence
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
 import { agentRuntimeStatus } from './run-ledger.mjs';
-import { controlledOutput } from './verification-policy.mjs';
+import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
 import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -601,11 +601,12 @@ function validateGate3(runDir) {
   if (state.roleChain?.confirmationModel === 'two-confirmations' && (!state.artifacts?.verificationPlan || !controlledOutput(runDir, state.artifacts?.verificationBundle, ['verification-orchestrator.mjs'], [state.artifacts.verificationPlan]))) throw new Error('Gate 3 verification bundle must be an unchanged controlled verification output');
   const verification = validateFile('verification-bundle.schema.json', resolveArtifact(runDir, state.artifacts.verificationBundle, 'verification-bundle.json'));
   const provenanceFile = requireArtifact(runDir, state, 'evidenceProvenance', 'evidence-provenance.json');
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && !controlledOutput(runDir, state.artifacts.evidenceProvenance, ['evidence-provenance.mjs'], [], ['record_context'])) throw new Error('Gate 3 provenance envelope must be an unchanged ledger-bound controlled seal');
   const provenance = validateFile('evidence-provenance.schema.json', provenanceFile);
   if (provenance.status !== 'passed' || provenance.entries.some(entry => entry.result !== 'passed')) throw new Error('Gate 3 requires a passed raw-evidence provenance envelope');
   for (const entry of provenance.entries) {
     const evidence = resolveArtifact(runDir, entry.path, ''); const receipt = resolveArtifact(runDir, entry.operationReceipt, '');
-    const receiptExists = receipt.startsWith(`${path.resolve(runDir)}${path.sep}operations${path.sep}`) && fs.existsSync(receipt); const operation = receiptExists ? readJson(receipt) : null; if (!evidence.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(evidence) || hashFile(evidence) !== entry.sha256 || !receiptExists || operation.status !== 'succeeded' || operation.outputFileHashes?.[entry.path] !== entry.sha256) throw new Error(`Gate 3 provenance entry is missing, changed, or not produced by a successful controlled operation: ${entry.id}`);
+    const receiptExists = receipt.startsWith(`${path.resolve(runDir)}${path.sep}operations${path.sep}`) && fs.existsSync(receipt) && fs.realpathSync(receipt).startsWith(`${fs.realpathSync(runDir)}${path.sep}operations${path.sep}`); const operation = receiptExists ? readJson(receipt) : null; if (!evidence.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(evidence) || !fs.realpathSync(evidence).startsWith(`${fs.realpathSync(runDir)}${path.sep}`) || hashFile(evidence) !== entry.sha256 || !receiptExists || operation.status !== 'succeeded' || operation.outputFileHashes?.[entry.path] !== entry.sha256 || !ledgerBoundOutput(runDir, operation, entry.path, entry.sha256, state.roleChain?.confirmationModel === 'two-confirmations')) throw new Error(`Gate 3 provenance entry is missing, changed, or not produced by a successful ledger-bound controlled operation: ${entry.id}`);
   }
   const industryFile = requireArtifact(runDir, state, 'industryBenchmarkEvidence', 'industry-benchmark-evidence.json');
   const industry = validateFile('industry-benchmark-evidence.schema.json', industryFile);

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { ledgerBoundOutput } from './verification-policy.mjs';
 
 /** Unknown assets remain explicit; an empty static list is not a visual audit. */
 export function resourceCoverage(reference) {
@@ -54,7 +55,7 @@ export function currentResourceReview(runDir, state) {
   const manifest = read(state.artifacts?.roleAdvisoryManifest), entry = manifest.stages?.baseline?.advisories?.find(item => item.roleId === 'existing-baseline-analyst');
   if (!entry || hash(entry.path) !== entry.sha256) throw new Error('current baseline analyst resource review is missing or stale');
   const receipt = read(entry.operationReceipt);
-  if (receipt.status !== 'succeeded' || receipt.action !== 'collect_existing_baseline' || receipt.script !== 'role-advisory.mjs' || receipt.outputFileHashes?.[entry.path] !== entry.sha256) throw new Error('baseline analyst resource review lacks a successful controlled receipt');
+  if (receipt.status !== 'succeeded' || receipt.action !== 'collect_existing_baseline' || receipt.script !== 'role-advisory.mjs' || receipt.outputFileHashes?.[entry.path] !== entry.sha256 || !ledgerBoundOutput(runDir, receipt, entry.path, entry.sha256)) throw new Error('baseline analyst resource review lacks a successful controlled receipt or ledger binding');
   const advisory = read(entry.path);
   for (const artifact of ['codeReference', 'existingBaseline', 'changeScope']) {
     const binding = advisory.inputBindings?.find(item => item.artifact === artifact);

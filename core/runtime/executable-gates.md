@@ -102,6 +102,8 @@ Demo 源码必须先形成 run 内 source manifest，再由 `visual-sandbox-writ
 
 Gate 3 前必须调用 `evidence-provenance.mjs seal`，将浏览器、测试、构建、依赖或运行时原始证据与产生它们的成功 Router 操作回执一起封存。每项封存证据必须记录文件哈希，并与回执中的 `outputFileHashes` 精确匹配；无原始文件、无成功回执、非该操作输出、哈希变化或仅由 AI/模板/手填 JSON 声明的结论均为 `unverified`，不得作为 Gate 3 的 `passed` 依据。
 
+两次确认模型还须在 Run 持久账本中找到同路径、同哈希且状态为 `verified` 的产物，其授权、动作、脚本和操作标识必须与成功回执一致；孤立回执、缺失账本、已归档产物和身份不一致均不可通过。封存时及 Gate 3 校验时均重新检查；Gate 3 还须确认封存文件本身是由 `record_context` 阶段的受控封存操作生成。证据和回执的真实路径必须留在当前 Run，不能通过符号链接引用外部文件。旧 Run 保留原有协议。
+
 行业基准复核不得把视觉方案中的计划分数复制为验证分数。Gate 3 的 `industry-benchmark.mjs verify` 必须接收逐准则 `industry-benchmark-review.json`：每项都绑定已封存的浏览器采集证据 ID、已在 DOM 中渲染的来源选择、观察结论和独立分数。受控操作回执必须记录该复核输入的哈希；复核、回执或任一渲染来源变化都使行业结论失效。此为 Gate 3 内部机器/审阅复核，不新增用户确认。
 
 `generate_visual -> browser-capture.mjs capture <run-dir> <sandbox-url> <browser-spec.json>` 只能采集隔离视觉沙盒的真实 DOM、截图与动效帧；spec 必须声明本次视觉方案的 `requiredSourceSelectionIds` 和 `requiredSourceFiles`，页面 DOM 必须以 `data-apex-source-selection` 暴露每个已选来源，并以 `data-apex-source-file="<selectionId>:<sha256>"` 暴露每个完整 pattern 的组件/样式/动效文件哈希，否则截图失败。若确认方案选用了项目未安装的精确在线候选，复用同一 `generate_visual` 阶段先执行 `visual-sandbox-dependency.mjs prepare`：仅在 `<run-dir>/visual-sandbox` 解析该版本，强制校验项目 `package.json` 与 lockfile 哈希未变化。随后 `runtime-visual-baseline.mjs compile` 冻结项目已安装库或该隔离沙盒中已运行 package 的精确版本、完整 pattern 源码/样式/动效文件的逐文件哈希、props/theme 与浏览器证据，并记录来源类别。Gate 2 前严禁把候选写入项目依赖；Gate 2 后才安装同一锁定版本。`visual-reference-compiler.mjs emit` 仅可使用这个基线的截图；ImageGen 不能生成 UI 结构、组件样式或动态效果。没有完整 pattern、真实 DOM、选中来源与精确文件 DOM 标记、截图、动效关键帧或 reduced-motion 方案时，效果图不得进入确认。
