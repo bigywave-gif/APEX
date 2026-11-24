@@ -122,6 +122,7 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     for (const key of journey.exercisedControls) { assert(nonempty(key), 'invalid exercised control identity'); exercised.add(key); }
   }
   const screens = Array.isArray(capture.evidence) ? capture.evidence : [];
+  if (source.requireResourceObservation) for (const screen of screens) assert(screen.resourceObservation?.status === 'passed' && screen.resourceObservation.url === screen.url && Array.isArray(screen.resourceObservation.failedResources) && screen.resourceObservation.failedResources.length === 0 && Array.isArray(screen.resourceObservation.blockedRequests) && screen.resourceObservation.blockedRequests.length === 0, `screen has missing or failed browser resource observations: ${screen.id || '<unknown>'}`);
   const screenInventoryAvailable = screens.length > 0 && screens.every(screen => screen.controlInventory?.version === '1.2' && screen.controlInventory.status === 'captured' && Array.isArray(screen.controlInventory.observedControls) && Array.isArray(screen.controlInventory.identityConflicts) && typeof screen.controlInventory.truncated === 'boolean' && screen.controlInventory.url === screen.url && screen.controlInventory.viewport === screen.viewport);
   if (inventoryAvailable && screenInventoryAvailable) for (const screen of screens) { for (const control of screen.controlInventory.observedControls) addObserved(control); for (const key of screen.controlInventory.identityConflicts) { assert(nonempty(key), 'invalid control identity conflict'); identityConflicts.add(key); } }
   return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: screenInventoryAvailable ? 'observed-screens-and-journeys' : 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), identityConflicts: [...identityConflicts], sharedControlReviews: source.contract.sharedControlReviews || [], truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated) || (screenInventoryAvailable && screens.some(screen => screen.controlInventory.truncated)), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
@@ -227,3 +228,19 @@ export async function runDemoJourney(page, input) {
 export function journeyCode(input) {
   return `async (page) => await (${runDemoJourney.toString()})(page, ${JSON.stringify(input)})`;
 }
+
+export async function observeDemoScreenResources(page, input) {
+  const origin = new URL(input.url).origin, failedResources = [], blockedRequests = [];
+  const types = new Set(['document', 'stylesheet', 'script', 'image', 'font']);
+  const resource = request => { try { const target = new URL(request.url()); return target.origin === origin && types.has(request.resourceType()) ? target.pathname : null; } catch { return null; } };
+  const responseFailure = response => { const target = resource(response.request()); if (target && response.status() >= 400) failedResources.push({ path: target, status: response.status() }); };
+  const requestFailure = request => { const target = resource(request); if (target && !String(request.failure()?.errorText || '').includes('ERR_ABORTED')) failedResources.push({ path: target, status: 'network-error' }); };
+  const guard = async route => { const target = new URL(route.request().url()); if (target.origin === origin || ['data:', 'blob:'].includes(target.protocol)) await route.continue(); else { blockedRequests.push(target.origin); await route.abort(); } };
+  let error = null;
+  page.on('response', responseFailure); page.on('requestfailed', requestFailure);
+  try { await page.route('**/*', guard); await page.goto(input.url); if (page.url() !== input.url) throw new Error('Demo screen did not reach the requested route'); }
+  catch (cause) { error = cause.message; }
+  finally { await page.unroute('**/*', guard); page.off('response', responseFailure); page.off('requestfailed', requestFailure); }
+  return { status: error || failedResources.length || blockedRequests.length ? 'failed' : 'passed', url: page.url(), failedResources, blockedRequests, error };
+}
+export const demoScreenResourceCode = input => `async (page) => await (${observeDemoScreenResources.toString()})(page, ${JSON.stringify(input)})`;

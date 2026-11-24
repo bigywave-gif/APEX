@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chatDemoContract as demoContract, demoFragment } from './interactive-demo-test-fixture.mjs';
-import { verifyDemoInteractions, journeyCode } from './interactive-demo.mjs';
+import { verifyDemoInteractions, journeyCode, demoScreenResourceCode } from './interactive-demo.mjs';
 import { bindStitchScreen } from './stitch-screen-binding.mjs';
 import { formalStitchProgress } from './formal-stitch-progress.mjs';
 import { formalDirectProgress } from './formal-direct-progress.mjs';
@@ -120,6 +120,9 @@ try {
       const missingResult = cliCall(['run-code', journeyCode({ journey: demoContract.journeys[0], url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/missing-css.png') })]);
       const missingMatch = missingResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /); let missingTrace = missingMatch && JSON.parse(missingMatch[1]); if (typeof missingTrace === 'string') missingTrace = JSON.parse(missingTrace);
       if (missingResult.status !== 0 || missingTrace?.status !== 'failed' || !missingTrace.failedResources?.some(item => item.path === '/pages/missing.css' && item.status === 404)) throw new Error('missing Demo stylesheet must fail the real-browser journey');
+      const screenResult = cliCall(['run-code', demoScreenResourceCode({ url: runtime.url })]);
+      const screenMatch = screenResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /); let screenTrace = screenMatch && JSON.parse(screenMatch[1]); if (typeof screenTrace === 'string') screenTrace = JSON.parse(screenTrace);
+      if (screenResult.status !== 0 || screenTrace?.status !== 'failed' || !screenTrace.failedResources?.some(item => item.path === '/pages/missing.css' && item.status === 404)) throw new Error('missing Demo stylesheet must fail the real-browser screen observation');
     } finally { fs.writeFileSync(nestedManifestFile, savedNestedManifest); for (const file of [nestedPage, nestedCss, nestedJs]) fs.rmSync(file, { force: true }); }
     const wrongButton = structuredClone(demoContract.journeys[0]); wrongButton.steps[0].selector = '#reset';
     const clicked = cliCall(['run-code', journeyCode({ journey: wrongButton, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/no-op-button.png') })]);
@@ -505,7 +508,7 @@ try {
 
 
   }
-  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 36 : 32, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
+  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 37 : 33, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
 } finally {
   if (mockServer) mockServer.kill('SIGTERM');
   if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }

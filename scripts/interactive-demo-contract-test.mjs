@@ -45,7 +45,11 @@ try {
   assert.equal(observedControlCoverageStatus(verified.controlCoverage).ready, false); checks++;
   assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }, { requireScreens: true }).ready, false); checks++;
   const screenCapture = structuredClone(inventoried);
-  screenCapture.evidence = [{ url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', controlInventory: { version: '1.2', status: 'captured', url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', observedControls: [{ key: 'route:%2Fsettings|id:save', tag: 'button' }], identityConflicts: [], truncated: false } }];
+  screenCapture.evidence = [{ url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', resourceObservation: { status: 'passed', url: 'http://127.0.0.1:4173/settings', failedResources: [], blockedRequests: [] }, controlInventory: { version: '1.2', status: 'captured', url: 'http://127.0.0.1:4173/settings', viewport: '1440x900', observedControls: [{ key: 'route:%2Fsettings|id:save', tag: 'button' }], identityConflicts: [], truncated: false } }];
+  const missingScreenObservation = structuredClone(screenCapture); delete missingScreenObservation.evidence[0].resourceObservation;
+  reject(() => verifyDemoInteractions(runDir, missingScreenObservation, url));
+  const failedScreenObservation = structuredClone(screenCapture); failedScreenObservation.evidence[0].resourceObservation.failedResources.push({ path: '/missing.css', status: 404 });
+  reject(() => verifyDemoInteractions(runDir, failedScreenObservation, url));
   const screenCoverage = verifyDemoInteractions(runDir, screenCapture, url).controlCoverage;
   assert.equal(screenCoverage.scope, 'observed-screens-and-journeys'); checks++;
   assert.ok(screenCoverage.untestedControls.some(item => item.key === 'route:%2Fsettings|id:save')); checks++;
