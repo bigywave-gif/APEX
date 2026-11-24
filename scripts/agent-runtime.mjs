@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
-import { availableAgentSkills, loadTasteSkill, loadAgentSkill } from './required-visual-skill.mjs';
+import { availableAgentSkills, loadTasteSkill, loadAgentSkill, requiredTasteLoadCurrent } from './required-visual-skill.mjs';
 
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
 const [command, runArg, ...args] = process.argv.slice(2);
@@ -34,7 +34,9 @@ try {
     const claimed = claimAgentJob(runDir, jobId, { claimKey, replayOnly: replaying });
     if (claimed.status === 'budget-exhausted') fail(`${claimed.reason?.startsWith('run-budget-') ? 'run' : 'stage'}-token-budget-exhausted: ${JSON.stringify(claimed)}`);
     if (claimed.status === 'running' && !claimed.idempotent && skillInstructions) appendLedgerEvent(runDir, { type: 'agent-required-skill-loaded', jobId, agentId: pending.agentId, stage, attempt: claimed.attempt, name: skillInstructions.name, sha256: skillInstructions.sha256, path: skillInstructions.path, operationReceipt: process.env.APEX_ROUTER_OPERATION_RECEIPT || null });
-    console.log(JSON.stringify({ ...claimed, ...(claimed.status === 'running' && !claimed.idempotent && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(claimed.idempotent && pending.payload?.tasteSkill ? { requiredSkillBinding: pending.payload.tasteSkill } : {}), ...(claimed.status === 'running' && !claimed.idempotent && optionalSkills.length ? { optionalSkills } : {}) }));
+    const replaySkill = claimed.idempotent && claimed.payload?.tasteSkill;
+    const requiredSkillLoad = replaySkill ? { status: requiredTasteLoadCurrent(runDir, jobId, claimed.attempt, claimed.leaseToken, replaySkill) ? 'verified' : 'unverified', note: 'A replay does not load or dispatch the Skill; reconcile the original executor and receipt before proceeding.' } : undefined;
+    console.log(JSON.stringify({ ...claimed, ...(claimed.status === 'running' && !claimed.idempotent && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(replaySkill ? { requiredSkillBinding: replaySkill, requiredSkillLoad } : {}), ...(claimed.status === 'running' && !claimed.idempotent && optionalSkills.length ? { optionalSkills } : {}) }));
   } else if (command === 'skill') {
     const [jobId, stage, leaseToken, name, expectedSha256] = args;
     if (!stageAction[stage] || !jobId || !leaseToken || !name || !expectedSha256) fail('skill requires a valid agent job, stage, lease token, skill name and expected hash');

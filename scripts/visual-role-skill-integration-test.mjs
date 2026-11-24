@@ -171,6 +171,13 @@ try {
   assert.equal(replayedClaim.leaseToken, claimed.leaseToken); assert.equal(replayedClaim.attempt, claimed.attempt); assert.equal(replayedClaim.idempotent, true);
   assert.equal(replayedClaim.dispatchDirective, 'reconcile-existing-execution-before-start');
   assert.equal(replayedClaim.requiredSkill, undefined); assert.deepEqual(replayedClaim.requiredSkillBinding, queued.payload.tasteSkill); assert.equal(replayedClaim.optionalSkills, undefined);
+  assert.equal(replayedClaim.requiredSkillLoad.status, 'verified');
+  const originalReceipt = path.join(runDir, 'operations', `${path.basename(claimAuth, '.json')}.json`), originalReceiptBytes = fs.readFileSync(originalReceipt), incompleteReceipt = JSON.parse(originalReceiptBytes);
+  try {
+    incompleteReceipt.status = 'running'; fs.writeFileSync(originalReceipt, JSON.stringify(incompleteReceipt));
+    const uncertainReplay = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'reconcile a claim with unfinished load receipt');
+    assert.equal(uncertainReplay.requiredSkillLoad.status, 'unverified'); assert.equal(uncertainReplay.requiredSkill, undefined); assert.equal(uncertainReplay.leaseToken, claimed.leaseToken);
+  } finally { fs.writeFileSync(originalReceipt, originalReceiptBytes); }
   const loadsAfterReplay = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
   assert.equal(loadsAfterReplay.prepare("SELECT COUNT(*) AS n FROM events WHERE event_type = 'agent-required-skill-loaded'").get().n, loadCount); loadsAfterReplay.close();
   assert.equal(claimed.requiredSkill.sha256, queued.payload.tasteSkill.sha256);
