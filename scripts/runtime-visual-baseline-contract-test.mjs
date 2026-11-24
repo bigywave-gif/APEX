@@ -33,10 +33,25 @@ try {
   fs.writeFileSync(path.join(runDir, 'evidence', 'runtime-browser-capture.json'), JSON.stringify(multipleScreens));
   const input = { schemaVersion: '3.0', referenceScreenId: 'desktop', patterns: [{ id: 'fixture-card', sourceSelectionId: 'fixture-card-source', visualNodes: ['hero-card'], package: 'fixture-motion', version: '1.2.3', componentPath: 'node_modules/fixture-motion/dist/Card.js', stylePaths: ['node_modules/fixture-motion/dist/Card.css'], animationPath: 'node_modules/fixture-motion/dist/Card.motion.js', props: { active: true }, completeStyle: true, noCssPatch: true }] };
   const inputFile = path.join(root, 'runtime-input.json'); fs.writeFileSync(inputFile, JSON.stringify(input));
+  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-visual-baseline-foreign-'));
+  try {
+    const wrong = expect(run(router, ['authorize', root, 'run-runtime', 'runtime-session', 'generate_visual']), 'foreign baseline authorization');
+    reject(run(action, ['run', root, 'run-runtime', 'runtime-session', wrong.authorizationRef, 'generate_visual', 'runtime-visual-baseline.mjs', 'compile', runDir, foreign, inputFile]), /project root does not match Router authorization/, 'baseline must reject another project');
+    if (fs.existsSync(path.join(runDir, 'runtime-source-lock.json'))) throw new Error('foreign project created a runtime source lock');
+  } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
   const authorization = expect(run(router, ['authorize', root, 'run-runtime', 'runtime-session', 'generate_visual']), 'runtime baseline authorization');
   const output = expect(run(action, ['run', root, 'run-runtime', 'runtime-session', authorization.authorizationRef, 'generate_visual', 'runtime-visual-baseline.mjs', 'compile', runDir, root, inputFile]), 'runtime baseline compile');
   const projectLock = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-source-lock.json'), 'utf8'));
   if (output.patterns !== 1 || output.nativeSelections !== 4 || output.demoUrl !== 'http://127.0.0.1:4173/' || projectLock.nativeSelections.length !== 4 || !fs.existsSync(path.join(runDir, 'runtime-demo.json')) || !fs.existsSync(path.join(runDir, 'runtime-source-lock.json')) || !fs.existsSync(path.join(runDir, 'runtime-visual-baseline.json'))) throw new Error('runtime Demo baseline artifacts were not created or did not lock native sources');
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-visual-pattern-foreign-'));
+  try {
+    const component = path.join(packageDir, 'dist', 'Card.js'), bytes = fs.readFileSync(component), externalFile = path.join(external, 'Card.js'), lockHash = hash(path.join(runDir, 'runtime-source-lock.json'));
+    fs.writeFileSync(externalFile, bytes); fs.unlinkSync(component); fs.symlinkSync(externalFile, component);
+    const linkAuth = expect(run(router, ['authorize', root, 'run-runtime', 'runtime-session', 'generate_visual']), 'external pattern authorization');
+    reject(run(action, ['run', root, 'run-runtime', 'runtime-session', linkAuth.authorizationRef, 'generate_visual', 'runtime-visual-baseline.mjs', 'compile', runDir, root, inputFile]), /pattern file is missing or outside the runtime source/, 'baseline must reject an external pattern file');
+    if (hash(path.join(runDir, 'runtime-source-lock.json')) !== lockHash) throw new Error('external pattern changed the existing runtime lock');
+    fs.unlinkSync(component); fs.writeFileSync(component, bytes);
+  } finally { fs.rmSync(external, { recursive: true, force: true }); }
   const multiScreenBaseline = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-visual-baseline.json'), 'utf8'));
   const reportsScreen = multiScreenBaseline.screenCaptures?.find(item => item.id === 'reports');
   if (multiScreenBaseline.screenCaptures?.length !== 2 || reportsScreen?.screenshot?.sha256 !== hash(path.join(evidenceDir, 'reports.png')) || reportsScreen?.dom?.sha256 !== hash(path.join(evidenceDir, 'reports.dom.html')) || reportsScreen?.url !== 'http://127.0.0.1:4173/reports') throw new Error('runtime baseline must bind every captured screen and its actual screenshot and DOM bytes');
@@ -65,5 +80,5 @@ try {
   const nativeSandboxAuthorization = expect(run(router, ['authorize', root, 'run-runtime', 'runtime-session', 'generate_visual']), 'native sandbox runtime baseline authorization');
   const nativeSandboxOutput = expect(run(action, ['run', root, 'run-runtime', 'runtime-session', nativeSandboxAuthorization.authorizationRef, 'generate_visual', 'runtime-visual-baseline.mjs', 'compile', runDir, root, nativeSandboxInputFile]), 'native Web runtime demo must not require a package sandbox manifest');
   if (nativeSandboxOutput.patterns !== 0 || nativeSandboxOutput.nativeSelections !== 5 || JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-source-lock.json'), 'utf8')).sourceKind !== 'visual-sandbox') throw new Error('native runtime baseline must lock the visual sandbox without a package dependency manifest');
-  console.log(JSON.stringify({ status: 'passed', checks: 5 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 7 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

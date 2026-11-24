@@ -52,11 +52,18 @@ try {
   fs.mkdirSync(path.join(root, 'src')); const target = path.join(root, 'src', 'MetricCard.tsx'); fs.writeFileSync(target, `<section data-apex-source="${manifest.bindings[0].sourceMarker}" data-testid="metric-card" />`);
   const auditState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); auditState.gates.gate2 = { status: 'passed', at: '2026-07-28T00:00:00.000Z', evidence: ['test'] }; auditState.locks.implementationAllowed = true; auditState.artifacts.deliveryContract = 'delivery-contract.json'; auditState.artifacts.implementationMap = 'implementation-map.json'; auditState.artifacts.pageDelta = 'page-delta.json';
   fs.writeFileSync(path.join(runDir, 'delivery-contract.json'), JSON.stringify({ capabilities: [] })); fs.writeFileSync(path.join(runDir, 'implementation-map.json'), JSON.stringify({ schemaVersion: '3.0', motionBindings: [], entries: [{ visualNode: 'metric-card', runtimeTarget: ['src/MetricCard.tsx'], testSelectors: ['[data-testid=metric-card]'], apiContracts: [], sourceBindings: { layoutSourceId: 'layout', componentSourceId: 'component', styleSourceId: 'style', fontSourceId: 'font', contentSourceId: 'content', selector: '[data-testid=metric-card]', implementation: 'Card + token classes', sourceMarker: manifest.bindings[0].sourceMarker } }] })); fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); commitRunState(path.dirname(stateFile), auditState, { reason: 'state-authority-test-fixture' });
+  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-implementation-foreign-'));
+  try {
+    const foreignAuth = expect(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'foreign audit authorization');
+    const blocked = run(action, ['run', root, 'run-source', 'source-session', foreignAuth.authorizationRef, 'verify', 'implementation-audit.mjs', 'audit', runDir, foreign]);
+    reject(blocked, 'implementation audit must reject another project');
+    if (!/project root does not match Router authorization/.test(blocked.stderr) || fs.existsSync(path.join(runDir, 'evidence', 'implementation-audit.json'))) throw new Error('foreign project must be rejected before audit evidence is written');
+  } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
   const verify = expect(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'audit authorization');
   expect(run(action, ['run', root, 'run-source', 'source-session', verify.authorizationRef, 'verify', 'implementation-audit.mjs', 'audit', runDir, root]), 'source marker audit');
   fs.writeFileSync(target, '<section data-testid="metric-card" />');
   reject(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'not allowed in phase', 'a removed formal source marker must return to controlled implementation before verification can be authorized');
   const missingMarker = expect(run(router, ['status', root, 'run-source', 'source-session']), 'missing formal source marker status');
   if (missingMarker.nextRequiredAction !== 'implement' || missingMarker.executionDirective?.currentStep?.id !== 'emit-formal-runtime-source-markers') throw new Error('a removed formal source marker must be repaired by controlled implementation rather than failing late in verification');
-  console.log(JSON.stringify({ status: 'passed', checks: 5 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 6 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

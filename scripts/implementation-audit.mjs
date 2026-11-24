@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { requireRouterAction, requireRouterProject } from './apex-runtime-guard.mjs';
 import { protectedFileChecks } from './scope-boundary.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,7 +19,7 @@ function canonical() { if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonic
 const [command, runArg, projectArg] = process.argv.slice(2);
 canonical();
 if (command !== 'audit' || !runArg || !projectArg) die('usage: audit <run-dir> <project-root>');
-const runDir = path.resolve(runArg); try { requireRouterAction(runDir, 'verify'); } catch (error) { die(error.message); } const projectRoot = path.resolve(projectArg); const state = read(path.join(runDir, 'state.json'));
+const runDir = path.resolve(runArg), projectRoot = path.resolve(projectArg); try { requireRouterAction(runDir, 'verify'); requireRouterProject(projectRoot); } catch (error) { die(error.message); } const state = read(path.join(runDir, 'state.json'));
 const map = read(path.join(runDir, state.artifacts.implementationMap || 'implementation-map.json')); const contract = read(path.join(runDir, state.artifacts.deliveryContract || 'delivery-contract.json'));
 const sourceManifest = state.artifacts.visualSourceManifest ? read(path.join(runDir, state.artifacts.visualSourceManifest)) : null;
 const plan = state.artifacts.visualExecutionPlan ? read(path.join(runDir, state.artifacts.visualExecutionPlan)) : null;

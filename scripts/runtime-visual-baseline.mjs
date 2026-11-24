@@ -8,7 +8,7 @@ import { interactionSource, verifyDemoInteractions } from './interactive-demo.mj
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { requireRouterAction, requireRouterProject } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Runtime visual baseline failed: ${message}`); process.exit(1); }
@@ -22,12 +22,13 @@ const [command, runArg, projectArg, inputArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (command !== 'compile' || !runArg || !projectArg || !inputArg) die('usage: compile <run-dir> <project-root> <runtime-visual-baseline-input.json>');
 const runDir = path.resolve(runArg), projectRoot = path.resolve(projectArg);
-try { requireRouterAction(runDir, 'generate_visual'); } catch (error) { die(error.message); }
+try { requireRouterAction(runDir, 'generate_visual'); requireRouterProject(projectRoot); } catch (error) { die(error.message); }
 const input = read(path.resolve(inputArg));
 if (input.schemaVersion !== '3.0' || !Array.isArray(input.patterns) || !input.referenceScreenId) die('input needs schemaVersion 3.0, a patterns array, and referenceScreenId');
 const runtimeRoot = input.runtimeRoot ? inside(runDir, input.runtimeRoot) : projectRoot;
 if (!runtimeRoot || !fs.existsSync(runtimeRoot)) die('runtimeRoot must be the project root or an existing run-local visual sandbox');
 const sourceKind = runtimeRoot === projectRoot ? 'project-installed' : 'visual-sandbox';
+if (!fs.statSync(runtimeRoot).isDirectory() || (sourceKind === 'visual-sandbox' && !fs.realpathSync(runtimeRoot).startsWith(`${fs.realpathSync(runDir)}${path.sep}`))) die('visual sandbox runtimeRoot must resolve inside the current run');
 const runState = read(path.join(runDir, 'state.json')); const visualPlanFile = runState.artifacts?.visualExecutionPlan && path.join(runDir, runState.artifacts.visualExecutionPlan);
 if (!visualPlanFile || !fs.existsSync(visualPlanFile)) die('a confirmed visual execution plan with concrete source selections is required before a runtime baseline can be frozen');
 const planSelections = new Map((read(visualPlanFile).sourceSelections || []).map(item => [item.id, item])); if (!planSelections.size) die('visual execution plan has no concrete source selections');
@@ -49,7 +50,7 @@ if (motionSamples.some(item => !/^sha256:[a-f0-9]{64}$/.test(item.frameSha256 ||
 if ((requiresMotion || motionSamples.length) && new Set(motionSamples.map(item => item.frameSha256)).size < 2) die('runtime motion samples are visually identical; a static page cannot satisfy a motion baseline');
 const ids = new Set(); const nodes = new Set();
 const patterns = input.patterns.map(pattern => {
-  if (!pattern?.id || ids.has(pattern.id) || !pattern.sourceSelectionId || !Array.isArray(pattern.visualNodes) || !pattern.visualNodes.length || !pattern.package || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(pattern.version) || !pattern.componentPath || !Array.isArray(pattern.stylePaths) || (pattern.stylePaths.length === 0 && planSelections.get(pattern.sourceSelectionId)?.kind !== 'motion') || pattern.completeStyle !== true || pattern.noCssPatch !== true || !pattern.props || typeof pattern.props !== 'object') die(`invalid complete pattern: ${pattern?.id || '<unknown>'}`);
+  if (!pattern?.id || ids.has(pattern.id) || !pattern.sourceSelectionId || !Array.isArray(pattern.visualNodes) || !pattern.visualNodes.length || !/^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/i.test(pattern.package || '') || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(pattern.version) || !pattern.componentPath || !Array.isArray(pattern.stylePaths) || (pattern.stylePaths.length === 0 && planSelections.get(pattern.sourceSelectionId)?.kind !== 'motion') || pattern.completeStyle !== true || pattern.noCssPatch !== true || !pattern.props || typeof pattern.props !== 'object') die(`invalid complete pattern: ${pattern?.id || '<unknown>'}`);
   const selection = planSelections.get(pattern.sourceSelectionId); if (!selection || selection.sourceId !== pattern.package || selection.version !== pattern.version || !pattern.visualNodes.every(node => selection.visualNodes.includes(node))) die(`runtime pattern is not the exact source selected in the confirmed visual plan: ${pattern.id}`);
   // A composed scene legitimately has more than one runtime pattern on the
   // same visual node (for example, an ECharts relationship layer over a
@@ -57,9 +58,9 @@ const patterns = input.patterns.map(pattern => {
   // exact selected source IDs, package versions, and file hashes below; node
   // overlap alone is not a conflict.
   ids.add(pattern.id); for (const node of pattern.visualNodes) nodes.add(node);
-  const installed = packageFile(runtimeRoot, pattern.package); if (!fs.existsSync(installed)) die(`pattern package is not installed in the runtime source: ${pattern.package}`);
+  const installed = packageFile(runtimeRoot, pattern.package); if (!fs.existsSync(installed) || !fs.realpathSync(installed).startsWith(`${fs.realpathSync(runtimeRoot)}${path.sep}`)) die(`pattern package is not installed in the runtime source: ${pattern.package}`);
   if (read(installed).version !== pattern.version) die(`pattern package version is not exact: ${pattern.package}`);
-  const files = [{ path: path.relative(runtimeRoot, installed), role: 'package-manifest' }, { path: pattern.componentPath, role: 'component' }, ...pattern.stylePaths.map(path => ({ path, role: 'style' })), ...(pattern.animationPath ? [{ path: pattern.animationPath, role: 'animation' }] : [])].map(file => { const target = inside(runtimeRoot, file.path); if (!target || !fs.existsSync(target)) die(`pattern file is missing or outside the runtime source: ${file.path}`); return { ...file, sha256: hash(target) }; });
+  const files = [{ path: path.relative(runtimeRoot, installed), role: 'package-manifest' }, { path: pattern.componentPath, role: 'component' }, ...pattern.stylePaths.map(path => ({ path, role: 'style' })), ...(pattern.animationPath ? [{ path: pattern.animationPath, role: 'animation' }] : [])].map(file => { const target = inside(runtimeRoot, file.path); if (!target || !fs.existsSync(target) || !fs.realpathSync(target).startsWith(`${fs.realpathSync(runtimeRoot)}${path.sep}`) || !fs.statSync(target).isFile()) die(`pattern file is missing or outside the runtime source: ${file.path}`); return { ...file, sha256: hash(target) }; });
   return { ...pattern, files };
 });
 const nativeSelections = [...planSelections.values()]
