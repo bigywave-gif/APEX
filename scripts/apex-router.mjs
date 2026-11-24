@@ -1658,7 +1658,9 @@ function formalRuntimeSourceProvenanceStatus(state, runDir) {
     if (!manifestFile || !planFile || !mapFile || !lockFile) return { ready: false, enforce: false, needsImplementation: false, reason: 'frozen visual source, implementation-map, or runtime-source-lock artifact is missing' };
     const manifest = read(manifestFile), plan = read(planFile), map = read(mapFile), sourceLock = read(lockFile);
     const projectRoot = sourceLock.projectRoot;
-    if (!projectRoot || !fs.existsSync(projectRoot)) return { ready: false, enforce: true, needsImplementation: false, reason: 'formal project root for runtime provenance is unavailable' };
+    if (!projectRoot || !fs.existsSync(projectRoot)) return { ready: false, enforce: true, needsImplementation: false, needsRecovery: true, reason: 'formal project root for runtime provenance is unavailable' };
+    const realProjectRoot = fs.realpathSync(path.resolve(runDir, '..', '..', '..'));
+    if (fs.realpathSync(projectRoot) !== realProjectRoot) return { ready: false, enforce: true, needsImplementation: false, needsRecovery: true, reason: 'runtime source lock belongs to a different project' };
     const selections = new Set((plan.sourceSelections || []).map(selection => selection.id));
     const mapEntries = new Map((map.entries || []).map(entry => [entry.visualNode, entry]));
     const missingCodeMarkers = [];
@@ -1667,8 +1669,9 @@ function formalRuntimeSourceProvenanceStatus(state, runDir) {
       const selected = (plan.sourceSelections || []).filter(selection => (selection.visualNodes || []).includes(binding.visualNode));
       if (!entry || !binding.sourceMarker || !selected.length || selected.some(selection => !selections.has(selection.id))) return { ready: false, enforce: true, needsImplementation: false, reason: `frozen source binding is incomplete: ${binding.visualNode || '<unknown>'}` };
       const emitted = (entry.runtimeTarget || []).some(target => {
-        const file = path.join(projectRoot, target);
-        if (!fs.existsSync(file)) return false;
+        if (typeof target !== 'string' || !target || path.isAbsolute(target)) return false;
+        const file = path.resolve(projectRoot, target);
+        if (!file.startsWith(`${path.resolve(projectRoot)}${path.sep}`) || !fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${realProjectRoot}${path.sep}`) || !fs.statSync(file).isFile()) return false;
         const source = fs.readFileSync(file, 'utf8');
         return source.includes(`data-apex-source=\"${binding.sourceMarker}\"`) || source.includes(`data-apex-source='${binding.sourceMarker}'`);
       });
@@ -1765,7 +1768,11 @@ function automaticWorkStep(state, runDir, action) {
       }
     };
   };
-  if (action === 'recover') return step('reconcile-run-integrity', '修复并重新对账当前 Run 的完整性', ['run-ledger.sqlite', 'state.json'], '当前 Run 的产物、谱系或 Agent 作业存在不一致。通过 recover 调用 apex-recover.mjs；无法自动修复时必须保留失败回执，禁止继续 Gate。');
+  if (action === 'recover') {
+    const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
+    const cause = provenance.needsRecovery ? `当前原因：${provenance.reason}。须核对已确认来源锁及其账本记录，不得将其他项目的来源作为当前项目证据。` : '';
+    return step('reconcile-run-integrity', '修复并重新对账当前 Run 的完整性', ['run-ledger.sqlite', 'state.json'], `当前 Run 的产物、谱系或 Agent 作业存在不一致。${cause}通过 recover 调用 apex-recover.mjs；无法自动修复时必须保留失败回执，禁止继续 Gate。`);
+  }
   if (action === 'collect_existing_baseline') {
     if (!runFile('projectInventory')) return step('capture-project-inventory', '扫描正式项目入口、技术栈与脚本', ['project-inventory.json'], '通过 collect_existing_baseline 调用 project-intake.mjs scan；仅扫描正式项目，排除 .apex 与临时 Demo。');
     const inventory = read(artifactFile(runDir, state.artifacts.projectInventory));
@@ -2086,6 +2093,7 @@ function allowedActions(state, runDir = null) {
   if (gate2 && !gate3) {
     actions.add('revoke_visual');
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
+    if (provenance.needsRecovery) return ['inspect_run', 'recover'];
     if (!state.artifacts?.pageDelta || !implementationRegistrationCurrent(runDir, state, path.dirname(path.dirname(path.dirname(runDir)))) || provenance.needsImplementation) ['prepare_workspace', 'implement'].forEach(action => actions.add(action));
     else if ((provenance.enforce && !provenance.ready) || !gate3VerificationBundleReady(state, runDir) || !formalPageEvidenceReady(state, runDir) || !roleStageReady(state, runDir, 'verify') || (usesCombinedPlan(state) && (!gate3ProvenanceReady(state, runDir) || !gate3IndustryEvidenceReady(state, runDir)))) actions.add('verify');
     else if (!['passed', 'not-required'].includes(state.gates?.proof?.status)) actions.add('pass_proof');
@@ -2162,6 +2170,7 @@ function nextRequiredAction(state, runDir = null) {
   // no-input state with no delivery action.
   if (state.lifecycle === 'active' && state.gates?.gate2?.status === 'passed' && state.gates?.gate3?.status !== 'passed') {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
+    if (provenance.needsRecovery) return 'recover';
     if (!state.artifacts?.pageDelta || !implementationRegistrationCurrent(runDir, state, path.dirname(path.dirname(path.dirname(runDir)))) ) return 'implement';
     if (provenance.needsImplementation) return 'implement';
     if (provenance.enforce && !provenance.ready) return 'verify';

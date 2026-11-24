@@ -74,6 +74,12 @@ if (state.roleChain?.confirmationModel === 'two-confirmations' && state.gates?.g
     if (implementationSealRecovery.status !== 'recovered') die(`implementation seal recovery refused: ${implementationSealRecovery.reason}`);
   }
 }
+if (state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed && state.artifacts?.runtimeSourceLock) {
+  try {
+    const lock = read(path.join(runDir, state.artifacts.runtimeSourceLock));
+    if (!lock.projectRoot || fs.realpathSync(lock.projectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT)) throw new Error('source lock project does not match the authorized project');
+  } catch (error) { die(`runtime source lock recovery requires the original project evidence: ${error.message}`); }
+}
 const interruptedOperations = markInterruptedOperations(runDir, operationInspection.interrupted);
 const recoveredAgentJobs = recoverAgentJobs(runDir);
 // A guarded compiler may reject a newly corrected input before it can emit a

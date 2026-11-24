@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T16:13:23.949Z",
+  "generatedAt": "2026-11-24T16:24:07.355Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -67,8 +67,8 @@
     "scripts/apex-action.mjs": "eb005e2e18e77ab4414608455e25accc688f3fa0987599573b09155fc9890df5",
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-reconcile.mjs": "b827d327e518916fa6187df1e4a1f52c8d49bdffe1bd4402e944b13ed5c5877a",
-    "scripts/apex-recover.mjs": "ce499d2cbb44d47a0373237570e023b86f77b6b076ebd760011becb2e8469aaf",
-    "scripts/apex-router.mjs": "e4bfc27bfdfaee92c88ff6aeaab00944b845c9d75d899edfeb0c0376952d4363",
+    "scripts/apex-recover.mjs": "52424517bbe1cc1677999b89c9ce686cf84fc2195992357f04671f69cafa9279",
+    "scripts/apex-router.mjs": "30c8786eec5ed84cb4b2284d06b72aba79ab58040f48ab53cbf1989928dfce91",
     "scripts/apex-run.mjs": "46e1524c809022d0d2cb58ea2bc0db8bfe6a746f8d8b0b7f2c53b4b9e19225df",
     "scripts/apex-runtime-guard.mjs": "86f7341158c31e5566dbecaf0a3de446e7b624680d40d9586ce819441ac1e9fe",
     "scripts/apex-validate.mjs": "ad02cc7099b69e5769f7e00bea7c1032c403f7444f39813e792cd88a6262d8d1",
@@ -253,7 +253,7 @@
     "scripts/visual-sandbox-writer-contract-test.mjs": "f7f711c8b3cfcc332443eb3bebc10873bdca09fedcf2beab62c9c6fda07f3153",
     "scripts/visual-sandbox-writer.mjs": "0dbb49833d2e65b70af58581717abcd303556991b98cfd1f977b1b39635940ba",
     "scripts/visual-skill-decision-test.mjs": "b71cfb2e850629cb27f23d236f2894db82c8512817fba3cabb3cca358a6b7117",
-    "scripts/visual-source-contract-test.mjs": "a7a5e5c1df344852d82072f80cba4e9e00650e397a0f27a0204eba207e7d8eb4",
+    "scripts/visual-source-contract-test.mjs": "155ed8cf073a1cb5912ae3f702ec5407a0dff30c9441d5e40fc8ac53add7570f",
     "scripts/visual-source.mjs": "964e4b89160646e78624221b12e306f1b717a32e5d90091b416dddf844bea475",
     "scripts/workflow-node-registry-contract-test.mjs": "ff397b6c0d085252048af37a485be44c52e37718541e481c59c58d46b0756785",
     "scripts/workflow-node-registry.mjs": "215fddddc92916fc4dd107bf1f8cd0e92a1bcf2c36bf5611750ffc05d1bdd801",

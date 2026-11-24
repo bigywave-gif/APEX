@@ -62,22 +62,34 @@ try {
   } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
   const verify = expect(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'audit authorization');
   expect(run(action, ['run', root, 'run-source', 'source-session', verify.authorizationRef, 'verify', 'implementation-audit.mjs', 'audit', runDir, root]), 'source marker audit');
-  const auditEvidencePath = path.join(runDir, 'evidence', 'implementation-audit.json'), priorAudit = fs.readFileSync(auditEvidencePath);
   const external = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-audit-target-foreign-'));
   try {
     const bytes = fs.readFileSync(target), externalFile = path.join(external, 'MetricCard.tsx'); fs.writeFileSync(externalFile, bytes); fs.unlinkSync(target); fs.symlinkSync(externalFile, target);
     if (protectedFileChecks(root, [{ path: 'src/MetricCard.tsx', sha256: digest(bytes) }])[0].passed) throw new Error('protected baseline must reject a project-external symlink even when bytes match');
     if (protectedFileChecks(root, [{ path: 'missing', sha256: null }])[0].passed) throw new Error('missing protected file must not match an absent hash');
-    const linkAuth = expect(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'linked target audit authorization');
-    const blocked = run(action, ['run', root, 'run-source', 'source-session', linkAuth.authorizationRef, 'verify', 'implementation-audit.mjs', 'audit', runDir, root]);
-    reject(blocked, 'implementation audit must reject a project-external target');
-    const evidence = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence', 'implementation-audit.json')));
-    if (evidence.status !== 'failed' || evidence.evidence.find(item => item.visualNode === 'metric-card')?.status !== 'failed' || !evidence.errors.some(error => error.includes('runtime target missing'))) throw new Error('audit must report the unsafe target as a failed visual node');
-    fs.unlinkSync(target); fs.writeFileSync(target, bytes); fs.writeFileSync(auditEvidencePath, priorAudit);
+    reject(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'Router must reject verification for a project-external target');
+    const linkStatus = expect(run(router, ['status', root, 'run-source', 'source-session']), 'linked target status');
+    if (linkStatus.nextRequiredAction !== 'implement' || linkStatus.executionDirective?.currentStep?.id !== 'emit-formal-runtime-source-markers') throw new Error('unsafe source target must return to implementation');
+    fs.unlinkSync(target); fs.writeFileSync(target, bytes);
   } finally { fs.rmSync(external, { recursive: true, force: true }); }
+  const foreignProject = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-lock-foreign-'));
+  try {
+    const lockFile = path.join(runDir, 'runtime-source-lock.json'), originalLock = fs.readFileSync(lockFile), lock = JSON.parse(originalLock); lock.projectRoot = foreignProject; fs.writeFileSync(lockFile, JSON.stringify(lock));
+    reject(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'Router must reject a runtime source lock from another project');
+    const foreignStatus = expect(run(router, ['status', root, 'run-source', 'source-session']), 'foreign lock status');
+    if (!JSON.stringify(foreignStatus).includes('runtime source lock belongs to a different project')) throw new Error('Router must identify the foreign source lock');
+    const recoverAuth = expect(run(router, ['authorize', root, 'run-source', 'source-session', 'recover']), 'foreign lock recovery authorization');
+    const recovery = run(action, ['run', root, 'run-source', 'source-session', recoverAuth.authorizationRef, 'recover', 'apex-recover.mjs', runDir]);
+    reject(recovery, 'recovery must not claim success for a foreign source lock');
+    if (!recovery.stderr.includes('runtime source lock recovery requires the original project evidence')) throw new Error('recovery must report the source-lock mismatch');
+    lock.projectRoot = path.join(foreignProject, 'missing'); fs.writeFileSync(lockFile, JSON.stringify(lock));
+    const missingStatus = expect(run(router, ['status', root, 'run-source', 'source-session']), 'unavailable lock status');
+    if (missingStatus.nextRequiredAction !== 'recover' || !JSON.stringify(missingStatus).includes('formal project root for runtime provenance is unavailable')) throw new Error('unavailable source-lock project must require recovery');
+    fs.writeFileSync(lockFile, originalLock);
+  } finally { fs.rmSync(foreignProject, { recursive: true, force: true }); }
   fs.writeFileSync(target, '<section data-testid="metric-card" />');
   reject(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'not allowed in phase', 'a removed formal source marker must return to controlled implementation before verification can be authorized');
   const missingMarker = expect(run(router, ['status', root, 'run-source', 'source-session']), 'missing formal source marker status');
   if (missingMarker.nextRequiredAction !== 'implement' || missingMarker.executionDirective?.currentStep?.id !== 'emit-formal-runtime-source-markers') throw new Error('a removed formal source marker must be repaired by controlled implementation rather than failing late in verification');
-  console.log(JSON.stringify({ status: 'passed', checks: 8 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 9 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
