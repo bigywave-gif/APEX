@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { commitRunState } from './run-ledger.mjs';
+import { protectedFileChecks } from './scope-boundary.mjs';
 /** Focused contract test: a visual node cannot reach the bundle without concrete, typed sources. */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,9 +62,22 @@ try {
   } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
   const verify = expect(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'audit authorization');
   expect(run(action, ['run', root, 'run-source', 'source-session', verify.authorizationRef, 'verify', 'implementation-audit.mjs', 'audit', runDir, root]), 'source marker audit');
+  const auditEvidencePath = path.join(runDir, 'evidence', 'implementation-audit.json'), priorAudit = fs.readFileSync(auditEvidencePath);
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-audit-target-foreign-'));
+  try {
+    const bytes = fs.readFileSync(target), externalFile = path.join(external, 'MetricCard.tsx'); fs.writeFileSync(externalFile, bytes); fs.unlinkSync(target); fs.symlinkSync(externalFile, target);
+    if (protectedFileChecks(root, [{ path: 'src/MetricCard.tsx', sha256: digest(bytes) }])[0].passed) throw new Error('protected baseline must reject a project-external symlink even when bytes match');
+    if (protectedFileChecks(root, [{ path: 'missing', sha256: null }])[0].passed) throw new Error('missing protected file must not match an absent hash');
+    const linkAuth = expect(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'linked target audit authorization');
+    const blocked = run(action, ['run', root, 'run-source', 'source-session', linkAuth.authorizationRef, 'verify', 'implementation-audit.mjs', 'audit', runDir, root]);
+    reject(blocked, 'implementation audit must reject a project-external target');
+    const evidence = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence', 'implementation-audit.json')));
+    if (evidence.status !== 'failed' || evidence.evidence.find(item => item.visualNode === 'metric-card')?.status !== 'failed' || !evidence.errors.some(error => error.includes('runtime target missing'))) throw new Error('audit must report the unsafe target as a failed visual node');
+    fs.unlinkSync(target); fs.writeFileSync(target, bytes); fs.writeFileSync(auditEvidencePath, priorAudit);
+  } finally { fs.rmSync(external, { recursive: true, force: true }); }
   fs.writeFileSync(target, '<section data-testid="metric-card" />');
   reject(run(router, ['authorize', root, 'run-source', 'source-session', 'verify']), 'not allowed in phase', 'a removed formal source marker must return to controlled implementation before verification can be authorized');
   const missingMarker = expect(run(router, ['status', root, 'run-source', 'source-session']), 'missing formal source marker status');
   if (missingMarker.nextRequiredAction !== 'implement' || missingMarker.executionDirective?.currentStep?.id !== 'emit-formal-runtime-source-markers') throw new Error('a removed formal source marker must be repaired by controlled implementation rather than failing late in verification');
-  console.log(JSON.stringify({ status: 'passed', checks: 6 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 8 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

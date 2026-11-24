@@ -13,6 +13,11 @@ function read(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } 
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function hash(file) { return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`; }
 function inside(root, value) { const target = path.resolve(root, value || ''); return target.startsWith(`${path.resolve(root)}${path.sep}`) ? target : null; }
+function localFile(root, ref) {
+  if (typeof ref !== 'string' || !ref || path.isAbsolute(ref)) return null;
+  const target = inside(root, ref);
+  try { return target && fs.realpathSync(target).startsWith(`${fs.realpathSync(root)}${path.sep}`) && fs.statSync(target).isFile() ? target : null; } catch { return null; }
+}
 function importsPackage(files, packageName) { const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); const expression = new RegExp(`(?:from\\s*['"]${escaped}['"]|require\\(\\s*['"]${escaped}['"]|import\\(\\s*['"]${escaped}['"])`); return files.some(file => expression.test(fs.readFileSync(file, 'utf8'))); }
 function usesApi(files, api) { return Boolean(api) && files.some(file => fs.readFileSync(file, 'utf8').includes(api)); }
 function canonical() { if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`); }
@@ -37,13 +42,15 @@ if (state.track === 'existing') {
   }
 }
 for (const entry of map.entries || []) {
-  const missingTargets = (entry.runtimeTarget || []).filter(target => !fs.existsSync(path.resolve(projectRoot, target)));
+  const initialErrors = errors.length;
+  const missingTargets = (entry.runtimeTarget || []).filter(target => !localFile(projectRoot, target));
+  if (!entry.runtimeTarget?.length) errors.push(`${entry.visualNode}: runtime target missing`);
   const missingSelectors = (entry.testSelectors || []).filter(selector => !selector || !selector.startsWith('[data-testid='));
   if (missingTargets.length) errors.push(`${entry.visualNode}: runtime target missing (${missingTargets.join(', ')})`);
   if (missingSelectors.length) errors.push(`${entry.visualNode}: invalid test selector`);
   if (!entry.apiContracts?.length && contract.capabilities.includes('backend')) errors.push(`${entry.visualNode}: backend delivery requires API contract mapping`);
   const source = sourceManifest?.bindings?.find(item => item.visualNode === entry.visualNode);
-  const sourceTargets = (entry.runtimeTarget || []).map(target => path.resolve(projectRoot, target)).filter(fs.existsSync);
+  const sourceTargets = (entry.runtimeTarget || []).map(target => localFile(projectRoot, target)).filter(Boolean);
   // The source marker must be emitted as a DOM attribute, not merely mentioned
   // in a comment, configuration object, or generated-run artifact.  Gate 3
   // binds its browser evidence to this exact marker.
@@ -53,34 +60,34 @@ for (const entry of map.entries || []) {
   });
   if (!source || !entry.sourceBindings || entry.sourceBindings.selector !== source.selector || entry.sourceBindings.implementation !== source.implementation || entry.sourceBindings.sourceMarker !== source.sourceMarker || !markerPresent) errors.push(`${entry.visualNode}: frozen visual source binding is missing, diverged, or not emitted in code`);
   if (source) for (const sourceId of [source.layoutSourceId, source.componentSourceId, source.styleSourceId, source.fontSourceId, ...(source.iconSourceIds || []), ...(source.assetSourceIds || [])]) { const selected = sourceManifest.sources.find(item => item.id === sourceId); if (selected?.materialization === 'runtime-package' && !importsPackage(sourceTargets, selected.sourceId)) errors.push(`${entry.visualNode}: runtime package ${selected.sourceId} is not imported by its frozen implementation target`); }
-  checks.push({ visualNode: entry.visualNode, status: missingTargets.length || missingSelectors.length ? 'failed' : 'passed', runtimeTarget: entry.runtimeTarget, testSelectors: entry.testSelectors });
+  checks.push({ visualNode: entry.visualNode, status: errors.length > initialErrors ? 'failed' : 'passed', runtimeTarget: entry.runtimeTarget, testSelectors: entry.testSelectors });
 }
 for (const binding of map.motionBindings || []) {
-  const target = path.resolve(projectRoot, binding.runtimeTarget || '');
+  const target = localFile(projectRoot, binding.runtimeTarget);
   const selected = plan?.sourceSelections?.find(item => item.id === binding.sourceSelectionId);
-  const usesSelectedRuntime = selected?.materialization !== 'runtime-package' || (fs.existsSync(target) && importsPackage([target], selected.sourceId));
-  const passed = Boolean(binding.motionId && binding.sourceSelectionId && binding.selector && binding.api && fs.existsSync(target) && usesSelectedRuntime && usesApi([target], binding.api));
+  const usesSelectedRuntime = selected?.materialization !== 'runtime-package' || (target && importsPackage([target], selected.sourceId));
+  const passed = Boolean(binding.motionId && binding.sourceSelectionId && binding.selector && binding.api && target && usesSelectedRuntime && usesApi([target], binding.api));
   if (!passed) errors.push(`motion ${binding.motionId || '<unknown>'}: implementation target, selected runtime, or declared API use is missing`);
   checks.push({ motionId: binding.motionId, status: passed ? 'passed' : 'failed', runtimeTarget: binding.runtimeTarget, engine: binding.engine });
 }
 for (const [kind, bindings, idField] of [['icon', map.iconBindings || [], 'iconId'], ['chart', map.chartBindings || [], 'chartId']]) for (const binding of bindings) {
-  const target = path.resolve(projectRoot, binding.runtimeTarget || '');
+  const target = localFile(projectRoot, binding.runtimeTarget);
   const selected = plan?.sourceSelections?.find(item => item.id === binding.sourceSelectionId);
-  const usesSelectedRuntime = selected?.materialization !== 'runtime-package' || (fs.existsSync(target) && importsPackage([target], selected.sourceId));
-  const passed = Boolean(binding[idField] && binding.sourceSelectionId && binding.selector && binding.api && fs.existsSync(target) && usesSelectedRuntime && usesApi([target], binding.api));
+  const usesSelectedRuntime = selected?.materialization !== 'runtime-package' || (target && importsPackage([target], selected.sourceId));
+  const passed = Boolean(binding[idField] && binding.sourceSelectionId && binding.selector && binding.api && target && usesSelectedRuntime && usesApi([target], binding.api));
   if (!passed) errors.push(`${kind} ${binding[idField] || '<unknown>'}: implementation target, selected runtime, or declared API use is missing`);
   checks.push({ [idField]: binding[idField], status: passed ? 'passed' : 'failed', runtimeTarget: binding.runtimeTarget, kind });
 }
 if (state.track === 'existing') {
   const baseline = read(path.join(runDir, state.artifacts.existingBaseline || 'existing-baseline.json'));
-  for (const entrypoint of baseline.codeEntrypoints || []) if (!fs.existsSync(path.resolve(projectRoot, entrypoint))) errors.push(`baseline entrypoint missing: ${entrypoint}`);
+  for (const entrypoint of baseline.codeEntrypoints || []) if (!localFile(projectRoot, entrypoint)) errors.push(`baseline entrypoint missing or outside project: ${entrypoint}`);
 }
 if (state.artifacts.materializedAssets) {
   const materialized = read(path.join(runDir, state.artifacts.materializedAssets));
   for (const asset of materialized.assets || []) {
-    const frozen = inside(runDir, asset.storedPath);
-    const target = inside(projectRoot, asset.projectPath);
-    const passed = Boolean(frozen && target && fs.existsSync(frozen) && fs.existsSync(target) && hash(frozen) === asset.storedHash && hash(target) === asset.storedHash);
+    const frozen = localFile(runDir, asset.storedPath);
+    const target = localFile(projectRoot, asset.projectPath);
+    const passed = Boolean(frozen && target && hash(frozen) === asset.storedHash && hash(target) === asset.storedHash);
     if (!passed) errors.push(`materialized source ${asset.selectionId || '<unknown>'}: project file is missing or differs from the frozen selected source`);
     checks.push({ selectionId: asset.selectionId, status: passed ? 'passed' : 'failed', kind: 'materialized-source', projectPath: asset.projectPath });
   }

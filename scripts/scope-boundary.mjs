@@ -123,9 +123,11 @@ export function protectedFileChecks(projectRoot, protectedFiles) {
   const root = path.resolve(projectRoot);
   return (protectedFiles || []).map(item => {
     const target = path.resolve(root, item.path || '');
-    const inside = target.startsWith(`${root}${path.sep}`);
-    const current = inside && fs.existsSync(target) && fs.statSync(target).isFile() ? `sha256:${crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')}` : null;
-    return { path: item.path, passed: current === item.sha256, expected: item.sha256, actual: current };
+    let current = null;
+    try {
+      if (typeof item.path === 'string' && !path.isAbsolute(item.path) && target.startsWith(`${root}${path.sep}`) && fs.realpathSync(target).startsWith(`${fs.realpathSync(root)}${path.sep}`) && fs.statSync(target).isFile()) current = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')}`;
+    } catch { /* A missing or inaccessible file fails the protected baseline check. */ }
+    return { path: item.path, passed: /^sha256:[a-f0-9]{64}$/.test(item.sha256 || '') && current === item.sha256, expected: item.sha256, actual: current };
   });
 }
 
