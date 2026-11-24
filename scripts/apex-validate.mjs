@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { newlyAvailableResources } from './existing-resource-freshness.mjs';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
 import { validateRuntimeMotionSamples, validateVisualOutputSource } from './runtime-baseline-contract.mjs';
@@ -260,6 +261,8 @@ function assertExistingCodeReferenceUnchanged(runDir, state) {
     for (const entry of map.entries || []) if ((entry.runtimeTarget || []).some(target => !allowed.has(target))) throw new Error(`Implementation Map escapes the Existing change closure: ${entry.visualNode || '<unknown>'}`);
     return allowed;
   })();
+  const newResources = newlyAvailableResources(reference, projectRoot, changedTargets);
+  if (newResources.length) throw new Error(`Existing code changed outside the approved scoped implementation closure: previously unavailable resource ${newResources[0]}`);
   for (const item of reference.files) {
     const source = path.resolve(projectRoot, item.path); const copy = path.resolve(runDir, item.copyPath);
     if (!source.startsWith(`${projectRoot}${path.sep}`) || !copy.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(source) || !fs.existsSync(copy)) throw new Error(`Existing code reference is missing: ${item.path}`);

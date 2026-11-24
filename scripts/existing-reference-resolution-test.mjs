@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { newlyAvailableResources } from './existing-resource-freshness.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-reference-resolution-'));
@@ -27,6 +28,7 @@ try {
   put('packages/ui/src/index.ts', "export { ui } from './implementation.js';");
   put('packages/ui/src/implementation.ts', 'export const ui = true;');
   call('apex-router.mjs', ['intake', project, run, 'existing', 'standard', 'interactive', session, '确认调用 APEX']);
+  action('project-intake.mjs', ['scan', dir, project]);
   const scope = path.join(dir, 'scope.json'); fs.writeFileSync(scope, JSON.stringify({ routes: ['/'], codeEntrypoints: ['index.html'] }));
   const capture = () => action('existing-code-reference.mjs', ['capture', dir, project, scope]);
   capture();
@@ -36,6 +38,11 @@ try {
   assert.deepEqual(initial.unresolvedResources.map(item => item.reference), ['/late.png']);
   assert.equal(capture().reused, true);
   put('public/late.png', 'late fixture image');
+  const staleStatus = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(staleStatus.executionDirective?.currentStep?.id, 'freeze-code-reference');
+  assert.match(staleStatus.executionDirective.currentStep.details, /previously unavailable resource/);
+  assert.throws(() => newlyAvailableResources({ unresolvedResources: [{ candidates: ['../outside.png'] }] }, project), /escapes the project/);
+  assert.deepEqual(newlyAvailableResources(initial, project, new Set(['public/late.png'])), []);
   assert.notEqual(capture().reused, true);
   assert.ok(paths().has('public/late.png'));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).unresolvedResources, []);

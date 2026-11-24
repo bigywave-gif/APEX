@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { newlyAvailableResources } from './existing-resource-freshness.mjs';
 import { archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,6 +97,8 @@ const existingSourceSnapshot = (() => {
   if (!fs.existsSync(referencePath) || !fs.existsSync(skeletonPath)) die('Existing browser capture requires the current code reference and page skeleton');
   const reference = read(referencePath), skeleton = read(skeletonPath);
   if (reference.complete !== true || !reference.sourceTreeHash || skeleton.sourceTreeHash !== reference.sourceTreeHash || !skeleton.skeletonHash) die('Existing browser capture requires a mutually bound code reference and page skeleton');
+  const newResources = newlyAvailableResources(reference, process.env.APEX_ROUTER_PROJECT_ROOT);
+  if (newResources.length) die(`project code changed after complete reference capture: previously unavailable resource ${newResources[0]}`);
   return {
     codeReference: 'code-reference.json',
     codeReferenceSha256: sha(fs.readFileSync(referencePath)),

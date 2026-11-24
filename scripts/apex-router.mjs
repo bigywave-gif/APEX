@@ -27,6 +27,7 @@ import { formalDirectProgress } from './formal-direct-progress.mjs';
 import { implementationSealCurrent } from './implementation-seal.mjs';
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, validateProductTaskReview } from './formal-interaction-evidence.mjs';
+import { newlyAvailableResources } from './existing-resource-freshness.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, commitRunState, externalSubmissionIntents, fenceRunCancellation, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 
@@ -1132,6 +1133,8 @@ function existingCodeReferenceFreshness(runDir, state) {
     const reference = read(referenceFile), skeleton = read(skeletonFile);
     const projectRoot = path.resolve(reference.projectRoot || path.join(runDir, '..', '..', '..'));
     if (reference.complete !== true || !reference.sourceTreeHash || !Array.isArray(reference.files) || !reference.files.length) return { ready: false, reason: 'code reference is not a complete source snapshot' };
+    const newResources = newlyAvailableResources(reference, projectRoot);
+    if (newResources.length) return { ready: false, reason: `scoped source changed after code reference capture: previously unavailable resource ${newResources[0]}` };
     if (skeleton.sourceTreeHash !== reference.sourceTreeHash || !skeleton.skeletonHash || !Array.isArray(skeleton.nodes) || !skeleton.nodes.length) return { ready: false, reason: 'page skeleton does not bind the complete code reference' };
     for (const item of reference.files) {
       const source = path.resolve(projectRoot, item.path || ''); const copy = path.resolve(runDir, item.copyPath || '');

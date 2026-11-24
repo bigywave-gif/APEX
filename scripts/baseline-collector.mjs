@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { newlyAvailableResources } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
@@ -42,6 +43,8 @@ const codeReferencePath = path.resolve(runDir, state.artifacts.codeReference);
 if (!codeReferencePath.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(codeReferencePath)) die('code reference artifact is missing or outside the run');
 const codeReference = read(codeReferencePath);
 if (codeReference.schemaVersion !== '3.0' || codeReference.complete !== true || !Array.isArray(codeReference.files) || !codeReference.files.length) die('code reference is not a complete source snapshot');
+const newResources = newlyAvailableResources(codeReference, projectRoot);
+if (newResources.length) die(`project code changed after complete reference capture: previously unavailable resource ${newResources[0]}`);
 const integrityIndexFile = path.join(runDir, 'source-integrity-index.json');
 const integrity = fs.existsSync(integrityIndexFile) ? read(integrityIndexFile) : { files: [] };
 const indexedFiles = new Map((integrity.files || []).map(item => [item.path, item]));
