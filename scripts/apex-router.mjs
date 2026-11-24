@@ -1999,6 +1999,7 @@ function checkpointReady(state, runDir, checkpoint) {
 }
 function postGateImplementationCurrent(state, runDir) {
   if (!runDir) return false;
+  if (stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state)) return false;
   const approval = confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
   return Boolean(approval && implementationSealCurrent(runDir, state, approval));
 }

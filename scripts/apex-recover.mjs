@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { appendLedgerEvent, archiveArtifacts, claimRevisionReplay, commitRunState, finalizeCommittedRevision, invalidationEvents, pendingRevisionTransactions, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
 import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
+import { stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
 import { inspectRunningOperations, markInterruptedOperations } from './operation-recovery.mjs';
 import { archivedMissingReferences } from './recovery-archive.mjs';
 
@@ -53,6 +54,7 @@ if (pendingRevisions.length) {
 }
 let implementationSealRecovery = null;
 if (state.roleChain?.confirmationModel === 'two-confirmations' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed) {
+  if (stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state)) die('Stitch machine seal or its bound evidence is missing or changed; restore the exact committed evidence before resuming, or explicitly revise and revalidate the delivery baseline');
   const evidence = (state.gates.gate2.evidence || []).find(ref => typeof ref === 'string' && /^machine-seals\/implementation-[a-f0-9]{64}\.json$/.test(ref));
   let demoApproval = null;
   try { demoApproval = read(path.join(runDir, evidence)).demoApproval; } catch {}

@@ -506,6 +506,7 @@ function validateGate2(runDir, { machineSealPending = false, stateFile } = {}) {
 
 function validateGate3(runDir) {
   const { state, contract } = validateGate1(runDir);
+  if (stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state)) throw new Error('Stitch machine seal is missing or stale');
   const resourceReview = assessResourceVerification(runDir, state);
   if (resourceReview.status === 'unverified') throw new Error(`Existing in-scope resources remain unverified: ${resourceReview.pending.length}`);
   if (state.gates.gate2.status !== 'passed' || !state.locks.implementationAllowed) throw new Error('Gate 2 has not passed or implementation is not allowed');

@@ -412,6 +412,20 @@ try {
   formalState.gates.gate2 = { status: 'passed', evidence: ['test-fixture'] }; formalState.locks.implementationAllowed = true; formalState.locks.implementationApproved = true; formalState.artifacts.pageDelta = 'page-delta.json'; formalState.phase = 'G-09 PROOF_IMPLEMENT';
   seedImplementationSeal(formalState);
   write('page-delta.json', { status: 'fixture' }); seedImplementationRegistration(formalState); commitRunState(runDir, formalState, { reason: 'interactive-browser-test-fixture' });
+  const missingStitchSeal = JSON.parse(fs.readFileSync(stateFile)), committedStitchSeal = missingStitchSeal.artifacts.stitchMachineSeal;
+  missingStitchSeal.artifacts.stitchMachineSeal = null; missingStitchSeal.revision += 1; commitRunState(runDir, missingStitchSeal, { reason: 'post-gate-stitch-seal-missing-fixture' });
+  const staleStitchAfterGate = run('apex-router.mjs', ['status', project, runId, session]);
+  if (staleStitchAfterGate.nextRequiredAction !== 'recover' || staleStitchAfterGate.allowedActions.includes('implement') || staleStitchAfterGate.allowedActions.includes('verify')) throw new Error('missing Stitch seal must block post-Gate-2 implementation and verification');
+  const staleStitchAuth = spawnSync(process.execPath, [path.join(apexRoot, 'scripts/apex-router.mjs'), 'authorize', project, runId, session, 'verify'], { encoding: 'utf8' });
+  if (staleStitchAuth.status === 0) throw new Error('missing Stitch seal must not authorize post-Gate-2 verification');
+  const recoverAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'recover']);
+  const refusedRecovery = spawnSync(process.execPath, [path.join(apexRoot, 'scripts/apex-action.mjs'), 'run', project, runId, session, recoverAuth.authorizationRef, 'recover', 'apex-recover.mjs', runDir], { encoding: 'utf8', timeout: 30000 });
+  if (refusedRecovery.status === 0 || !refusedRecovery.stderr.includes('Stitch machine seal or its bound evidence is missing or changed')) throw new Error('recovery must not declare a missing Stitch seal repaired');
+  const restoredStitchState = JSON.parse(fs.readFileSync(stateFile)); restoredStitchState.artifacts.stitchMachineSeal = committedStitchSeal; restoredStitchState.revision += 1; commitRunState(runDir, restoredStitchState, { reason: 'post-gate-stitch-seal-restored-fixture' });
+  fs.appendFileSync(firstEvidence, ' ');
+  const changedStitchAfterGate = run('apex-router.mjs', ['status', project, runId, session]);
+  if (changedStitchAfterGate.nextRequiredAction !== 'recover' || changedStitchAfterGate.allowedActions.includes('implement') || changedStitchAfterGate.allowedActions.includes('verify')) throw new Error('changed Stitch evidence must block post-Gate-2 implementation and verification');
+  fs.writeFileSync(firstEvidence, originalEvidence);
   const formalCaptureAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
   run('apex-action.mjs', ['run', project, runId, session, formalCaptureAuth.authorizationRef, 'verify', 'browser-capture.mjs', 'capture', runDir, runtime.url, spec]);
   for (const screen of screens) {
