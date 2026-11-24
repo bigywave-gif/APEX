@@ -192,23 +192,34 @@ function projectRoot(input) {
   return target;
 }
 function projectId(root) { return `project_${sha(root).slice(0, 24)}`; }
-const trackIgnoredDirectories = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
+const trackIgnoredDirectories = new Set(['.git', '.apex', '.worktrees', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
+const trackTransientDirectory = name => trackIgnoredDirectories.has(name) || /^(visual-sandbox|runtime-demo|apex-demo|\.tmp|tmp)$/i.test(name);
 function classifyTrack(root) {
-  const gitFiles = spawnSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8' });
+  const gitFiles = spawnSync('git', ['-C', root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--deduplicate'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   let files = []; let sourceBasis = 'filesystem-with-transient-directories-excluded';
-  if (gitFiles.status === 0 && gitFiles.stdout) {
-    files = gitFiles.stdout.split('\0').filter(Boolean).filter(file => !/(^|\/)\.apex(\/|$)/.test(file) && fs.existsSync(path.join(root, file)));
-    sourceBasis = 'git-tracked-formal-project-files';
+  if (gitFiles.status === 0) {
+    const virtualEnvironment = new Map();
+    files = gitFiles.stdout.split('\0').filter(Boolean).filter(file => {
+      const parts = file.split('/');
+      if (parts.slice(0, -1).some(trackTransientDirectory) || !fs.existsSync(path.join(root, file))) return false;
+      for (let i = 1; i < parts.length; i++) {
+        const dir = parts.slice(0, i).join('/');
+        if (!virtualEnvironment.has(dir)) virtualEnvironment.set(dir, fs.existsSync(path.join(root, dir, 'pyvenv.cfg')));
+        if (virtualEnvironment.get(dir)) return false;
+      }
+      return true;
+    });
+    sourceBasis = 'git-tracked-and-unignored-project-files';
   } else {
     const pending = [root];
-    while (pending.length && files.length < 2500) {
+    while (pending.length) {
       const current = pending.pop();
       for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-        if (trackIgnoredDirectories.has(entry.name) || /^(visual-sandbox|runtime-demo|apex-demo|\.tmp|tmp)$/i.test(entry.name)) continue;
+        if (trackTransientDirectory(entry.name)) continue;
         const absolute = path.join(current, entry.name);
-        if (entry.isDirectory()) pending.push(absolute);
+        if (entry.isDirectory() && !fs.existsSync(path.join(absolute, 'pyvenv.cfg'))) pending.push(absolute);
         else if (entry.isFile()) files.push(path.relative(root, absolute).split(path.sep).join('/'));
-        if (files.length >= 2500) break;
+        if (files.length > 1000000) fail('automatic project classification exceeded 1000000 files; select the project root and track explicitly');
       }
     }
   }

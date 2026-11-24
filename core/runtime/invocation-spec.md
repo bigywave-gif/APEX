@@ -16,7 +16,7 @@
 ```text
 Track: Greenfield | Existing
 
-轨道默认由 Router 自动判定，不是用户确认项：判定只读取项目正式代码；Git 仓库以已跟踪源码为准，非 Git 仓库必须排除 `.apex`、visual-sandbox、runtime-demo 与临时目录。正式代码存在可运行页面、视图或 UI 入口时使用 Existing；正式代码仅有 API、数据模型、服务端能力或尚无页面时使用 Greenfield，同时将已有 API、数据模型和认证/权限契约作为新界面的不可破坏输入。Gate 2 前生成的临时 Demo、截图、Stitch 与沙箱代码不能改变轨道，也不能充当 Existing 基线。不得因缺少 Existing 视觉基线要求用户重启或手工选择 Greenfield。
+轨道默认由 Router 自动判定，不是用户确认项：判定读取当前项目代码；Git 仓库同时考虑已跟踪及未被忽略的未跟踪文件。扫描排除 `.apex`、`.worktrees`、虚拟环境、visual-sandbox、runtime-demo 与临时目录；非 Git 扫描超过安全上限时明确停止，不根据不完整结果猜测轨道。正式代码存在可运行页面、视图或 UI 入口时使用 Existing；正式代码仅有 API、数据模型、服务端能力或尚无页面时使用 Greenfield，同时将已有 API、数据模型和认证/权限契约作为新界面的不可破坏输入。Gate 2 前生成的临时 Demo、截图、Stitch 与沙箱代码不能改变轨道，也不能充当 Existing 基线。不得因缺少 Existing 视觉基线要求用户重启或手工选择 Greenfield。
 Scope: Lite | Standard | Full
 Authorization: Interactive | Autonomous
 Phase: Audit | Plan | Visual | Implement | Verify

@@ -52,6 +52,9 @@ try {
   fs.writeFileSync(path.join(apiOnly, 'server.ts'), 'export const api = true;\n');
   fs.mkdirSync(path.join(apiOnly, '.apex', 'runs', 'old-demo', 'visual-sandbox', 'src'), { recursive: true });
   fs.writeFileSync(path.join(apiOnly, '.apex', 'runs', 'old-demo', 'visual-sandbox', 'src', 'App.tsx'), 'export function App() { return <main>Temporary Demo</main>; }\n');
+  fs.mkdirSync(path.join(apiOnly, '.venv-fixture', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(apiOnly, '.venv-fixture', 'pyvenv.cfg'), 'home = fixture\n');
+  fs.writeFileSync(path.join(apiOnly, '.venv-fixture', 'src', 'App.tsx'), 'virtual environment fixture\n');
   const apiOnlyAuto = expect(run(router, ['intake', apiOnly, 'run-auto-api', 'auto', 'standard', 'interactive', 'session-auto-api']), 'API-only repositories must be classified automatically');
   if (apiOnlyAuto.track !== 'greenfield' || apiOnlyAuto.trackClassification?.preserveBackend !== true || apiOnlyAuto.trackClassification?.visualEntrypoint) throw new Error('temporary APEX Demo code must not turn an API-only formal project into an Existing visual track');
   if (apiOnlyAuto.nextRequiredAction !== 'analyze_requirement' || apiOnlyAuto.executionDirective?.automatic !== true || apiOnlyAuto.executionDirective?.streamingProgress?.mode !== 'commentary-step-progress' || apiOnlyAuto.terminalResponseContract?.mustContinueAction !== 'analyze_requirement') throw new Error('a new Greenfield run must automatically build its complete Gate 1 artifacts with visible non-interactive progress instead of entering a no-input state');
@@ -59,6 +62,18 @@ try {
   fs.mkdirSync(path.join(formalUi, 'src'), { recursive: true }); fs.writeFileSync(path.join(formalUi, 'src', 'App.tsx'), 'export function App() { return <main>Formal UI</main>; }\n');
   const formalUiAuto = expect(run(router, ['intake', formalUi, 'run-auto-ui', 'auto', 'standard', 'interactive', 'session-auto-ui']), 'formal UI repositories must be classified automatically');
   if (formalUiAuto.track !== 'existing' || formalUiAuto.trackClassification?.visualEntrypoint !== 'src/App.tsx') throw new Error('a formal project UI entrypoint must select Existing without asking the user');
+  const gitUi = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-git-ui-')); roots.push(gitUi);
+  if (spawnSync('git', ['-C', gitUi, 'init', '-q']).status !== 0) throw new Error('could not initialize isolated Git fixture');
+  fs.writeFileSync(path.join(gitUi, 'server.ts'), 'export const api = true;\n');
+  if (spawnSync('git', ['-C', gitUi, 'add', 'server.ts']).status !== 0) throw new Error('could not stage isolated Git fixture');
+  fs.mkdirSync(path.join(gitUi, 'src')); fs.writeFileSync(path.join(gitUi, 'src', 'App.tsx'), 'export const App = () => <main>uncommitted UI</main>;\n');
+  const gitUiAuto = expect(run(router, ['intake', gitUi, 'run-git-ui', 'auto', 'standard', 'interactive', 'session-git-ui']), 'untracked UI in a Git repository must be discovered');
+  if (gitUiAuto.track !== 'existing' || gitUiAuto.trackClassification?.visualEntrypoint !== 'src/App.tsx' || !gitUiAuto.trackClassification?.preserveBackend) throw new Error('tracked backend and untracked formal UI must retain both project facts');
+  const largeUi = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-large-ui-')); roots.push(largeUi);
+  for (let i = 0; i < 2600; i++) fs.writeFileSync(path.join(largeUi, `file-${i}.txt`), '');
+  fs.mkdirSync(path.join(largeUi, 'src')); fs.writeFileSync(path.join(largeUi, 'src', 'App.tsx'), 'export const App = () => <main>UI</main>;\n');
+  const largeUiAuto = expect(run(router, ['intake', largeUi, 'run-large-ui', 'auto', 'standard', 'interactive', 'session-large-ui']), 'non-Git project discovery must not silently stop at 2500 files');
+  if (largeUiAuto.track !== 'existing' || largeUiAuto.trackClassification?.visualEntrypoint !== 'src/App.tsx') throw new Error('large project discovery must reach the formal UI');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-contract-')); roots.push(root);
   expect(run(router, ['intake', root, 'run-a', 'greenfield', 'standard', 'interactive', 'session-a']), 'new session intake must create a run');
   expect(run(router, ['intake', root, 'run-cancel', 'greenfield', 'standard', 'interactive', 'session-cancel']), 'cancellation regression run must create an isolated session-bound run');
