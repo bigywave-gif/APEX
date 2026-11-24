@@ -91,8 +91,14 @@ export function observeResourceExemptions(checks) {
   const result = (check, status) => ({ ...check, kind: 'not-applicable', status });
   if (!checks.length) return [];
   try {
-    const nodes = [...document.querySelectorAll('*')];
-    if (nodes.length > 10000) return checks.map(check => result(check, 'unverified'));
+    const nodes = [], roots = [document];
+    for (let i = 0; i < roots.length; i++) {
+      for (const node of roots[i].querySelectorAll('*')) {
+        nodes.push(node);
+        if (nodes.length > 10000) return checks.map(check => result(check, 'unverified'));
+        if (node.shadowRoot) roots.push(node.shadowRoot);
+      }
+    }
     const hiddenCache = new WeakMap();
     const suppressed = node => {
       const path = []; let current = node, value = false;
@@ -101,7 +107,7 @@ export function observeResourceExemptions(checks) {
         path.push(current);
         const style = getComputedStyle(current);
         if (style.display === 'none' || Number(style.opacity) === 0) { value = true; break; }
-        current = current.parentElement;
+        current = current.parentElement || current.getRootNode?.()?.host || null;
       }
       for (const item of path) hiddenCache.set(item, value);
       return value;
@@ -109,10 +115,13 @@ export function observeResourceExemptions(checks) {
     // visibility is inherited but can be overridden by a descendant. Its
     // computed value on the element, not an ancestor's value, controls it.
     const hidden = node => { const visibility = getComputedStyle(node).visibility; return visibility === 'hidden' || visibility === 'collapse' || suppressed(node); };
-    const images = new Set(), backgrounds = new Set();
+    const images = new Set(), backgrounds = new Set(); let unknownImageCandidates = false;
     for (const node of nodes) {
       if (hidden(node)) continue;
-      if (node instanceof HTMLImageElement && node.currentSrc) images.add(new URL(node.currentSrc, location.href).href);
+      if (node instanceof HTMLImageElement) {
+        for (const source of [node.currentSrc, node.src]) if (source) images.add(new URL(source, location.href).href);
+        if (!node.currentSrc && (node.srcset || node.closest?.('picture')?.querySelector('source[srcset]'))) unknownImageCandidates = true;
+      }
       for (const pseudo of [null, '::before', '::after']) {
         const value = getComputedStyle(node, pseudo).backgroundImage || '';
         for (const match of value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi)) backgrounds.add(new URL((match[1] ?? match[2] ?? match[3]).trim(), location.href).href);
@@ -121,11 +130,11 @@ export function observeResourceExemptions(checks) {
     return checks.map(check => {
       try {
         const expected = new URL(check.reference, location.href);
-        const matches = [...document.querySelectorAll(check.selector)];
-        const present = check.resourceKind === 'visible-image' ? images.has(expected.href) : check.resourceKind === 'background-image' ? backgrounds.has(expected.href) : true;
+        const matches = roots.flatMap(root => [...root.querySelectorAll(check.selector)]);
+        const present = check.resourceKind === 'visible-image' ? unknownImageCandidates || images.has(expected.href) : check.resourceKind === 'background-image' ? backgrounds.has(expected.href) : true;
         return result(check, expected.origin === location.origin && matches.every(hidden) && !present ? 'not-rendered' : 'unverified');
       } catch { return result(check, 'unverified'); }
     });
   } catch { return checks.map(check => result(check, 'unverified')); }
 }
-export const resourceImageProbeCode = checks => `async (page) => JSON.stringify(await page.evaluate(async checks => { const images = ${observeResourceImages.toString()}; const backgrounds = ${observeBackgroundImages.toString()}; const exemptions = ${observeResourceExemptions.toString()}; const exemptResults = exemptions(checks.filter(item => item.kind === 'not-applicable')); let nextExemption = 0; const result = []; for (let i = 0; i < checks.length; i += 4) result.push(...await Promise.all(checks.slice(i, i + 4).map(async item => item.kind === 'background-image' ? (await backgrounds([item]))[0] : item.kind === 'not-applicable' ? exemptResults[nextExemption++] : images([item])[0]))); return result; }, ${JSON.stringify(checks)}))`;
+export const resourceImageProbeCode = checks => `async (page) => { const checks = ${JSON.stringify(checks)}; let topologySafe = true; if (checks.some(item => item.kind === 'not-applicable')) { let cdp; try { cdp = await page.context().newCDPSession(page); const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }); const pending = [root]; let count = 0; while (pending.length) { const node = pending.pop(); if (++count > 10000 || ['IFRAME', 'FRAME'].includes(node.nodeName) || (node.shadowRoots || []).some(root => root.shadowRootType === 'closed')) { topologySafe = false; break; } pending.push(...(node.children || []), ...(node.shadowRoots || []).filter(root => root.shadowRootType !== 'user-agent')); } } catch { topologySafe = false; } finally { if (cdp) await cdp.detach().catch(() => {}); } } return JSON.stringify(await page.evaluate(async ({ checks, topologySafe }) => { const images = ${observeResourceImages.toString()}; const backgrounds = ${observeBackgroundImages.toString()}; const exemptions = ${observeResourceExemptions.toString()}; const exemptChecks = checks.filter(item => item.kind === 'not-applicable'); const exemptResults = topologySafe ? exemptions(exemptChecks) : exemptChecks.map(item => ({ ...item, status: 'unverified' })); let nextExemption = 0; const result = []; for (let i = 0; i < checks.length; i += 4) result.push(...await Promise.all(checks.slice(i, i + 4).map(async item => item.kind === 'background-image' ? (await backgrounds([item]))[0] : item.kind === 'not-applicable' ? exemptResults[nextExemption++] : images([item])[0]))); return result; }, { checks, topologySafe })); }`;
