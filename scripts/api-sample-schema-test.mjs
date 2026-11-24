@@ -43,4 +43,21 @@ for (let index = 0; index < 17; index += 1) branching = { anyOf: [branching, bra
 assert.match(validateApiSample('x', branching).join(), /evaluation exceeds supported limit/);
 let longList = null; for (let index = 0; index < 130; index += 1) longList = { next: longList };
 assert.match(validateApiSample(longList, list).join(), /evaluation exceeds supported limit/);
+for (const value of [null, false, 0, '', [], {}]) {
+  assert.deepEqual(validateApiSample(value, true), []);
+  assert.match(validateApiSample(value, false).join(), /false schema/);
+}
+assert.deepEqual(validateApiSample([1, 'x'], { items: true }), []);
+assert.match(validateApiSample([1], { items: false }).join(), /false schema/);
+assert.deepEqual(validateApiSample({ allowed: 1 }, { properties: { allowed: true, forbidden: false } }), []);
+assert.match(validateApiSample({ forbidden: 1 }, { properties: { forbidden: false } }).join(), /false schema/);
+assert.deepEqual(validateApiSample(1, { $defs: { allow: true }, $ref: '#/$defs/allow' }), []);
+assert.match(validateApiSample(1, { $defs: { deny: false }, $ref: '#/$defs/deny' }).join(), /false schema/);
+assert.deepEqual(validateApiSample('ok', { oneOf: [true, false], not: { const: 'no' } }), []);
+assert.match(validateApiSample('no', { not: { const: 'no' } }).join(), /forbidden not/);
+assert.match(validateApiSample('x', { not: true }).join(), /forbidden not/);
+assert.deepEqual(validateApiSample('x', { not: false }), []);
+assert.match(validateApiSample('x', { not: { format: 'email' } }).join(), /unsupported schema keyword format/);
+assert.match(validateApiSample('x', { not: { $ref: '#' } }).join(), /circular reference/);
+assert.match(validateApiSample('x', { not: 'invalid' }).join(), /invalid or unsupported schema/);
 console.log(JSON.stringify({ status: 'passed', scope: 'API sample validation and unsupported-keyword rejection' }));

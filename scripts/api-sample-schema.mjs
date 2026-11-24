@@ -2,7 +2,7 @@
 import { isDeepStrictEqual } from 'node:util';
 
 const metadata = new Set(['$schema', '$id', 'title', 'description', 'examples', 'default']);
-const supported = new Set(['$ref', '$defs', 'definitions', 'type', 'required', 'properties', 'items', 'enum', 'const', 'additionalProperties', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', 'allOf', 'anyOf', 'oneOf']);
+const supported = new Set(['$ref', '$defs', 'definitions', 'type', 'required', 'properties', 'items', 'enum', 'const', 'additionalProperties', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', 'allOf', 'anyOf', 'oneOf', 'not']);
 const types = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']);
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const actualType = value => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
@@ -17,11 +17,12 @@ function resolveRef(root, ref) {
     if ((!object(value) && !Array.isArray(value)) || (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) || !Object.hasOwn(value, key)) throw new Error('reference target does not exist');
     value = value[key];
   }
-  if (!object(value)) throw new Error('reference target is not a supported schema');
+  if (!object(value) && typeof value !== 'boolean') throw new Error('reference target is not a supported schema');
   return value;
 }
 function schemaErrors(schema, at, root = schema, seen = new Set(), depth = 0) {
   if (depth > 128) return [`${at}: schema nesting exceeds supported limit`];
+  if (typeof schema === 'boolean') return [];
   if (!object(schema)) return [`${at}: invalid or unsupported schema`];
   if (seen.has(schema)) return [];
   seen.add(schema);
@@ -37,6 +38,7 @@ function schemaErrors(schema, at, root = schema, seen = new Set(), depth = 0) {
     if (!Array.isArray(schema[key]) || !schema[key].length) invalid(`invalid ${key}`);
     else schema[key].forEach((child, index) => errors.push(...schemaErrors(child, `${at}.${key}[${index}]`, root, seen, depth + 1)));
   }
+  if ('not' in schema) errors.push(...schemaErrors(schema.not, `${at}.not`, root, seen, depth + 1));
   const allowed = Array.isArray(schema.type) ? schema.type : schema.type === undefined ? [] : [schema.type];
   if (allowed.some(type => !types.has(type)) || (Array.isArray(schema.type) && !allowed.length)) invalid('invalid schema type');
   if ('enum' in schema && (!Array.isArray(schema.enum) || !schema.enum.length)) invalid('invalid enum');
@@ -53,6 +55,7 @@ function schemaErrors(schema, at, root = schema, seen = new Set(), depth = 0) {
 }
 function check(value, schema, at, root, active = new Set(), budget = { steps: 0 }, depth = 0) {
   if (++budget.steps > 100000 || depth > 128) throw new Error(`${at}: schema evaluation exceeds supported limit`);
+  if (typeof schema === 'boolean') return schema ? [] : [`${at}: false schema rejects all values`];
   const errors = [], invalid = message => errors.push(`${at}: ${message}`);
   if ('$ref' in schema) {
     const target = resolveRef(root, schema.$ref), key = `${at}\u0000${schema.$ref}`;
@@ -67,6 +70,7 @@ function check(value, schema, at, root, active = new Set(), budget = { steps: 0 
     else if (key === 'anyOf' && matches === 0) invalid('matches no anyOf branch');
     else if (key === 'oneOf' && matches !== 1) invalid(`matches ${matches} oneOf branches; expected exactly one`);
   }
+  if ('not' in schema && check(value, schema.not, at, root, active, budget, depth + 1).length === 0) invalid('matches forbidden not schema');
   const allowed = Array.isArray(schema.type) ? schema.type : schema.type === undefined ? [] : [schema.type], type = actualType(value);
   if (allowed.length && !allowed.some(expected => expected === type || (expected === 'integer' && type === 'number' && Number.isInteger(value)))) return [`${at}: expected ${allowed.join('|')}, received ${type}`];
   if ('const' in schema && !isDeepStrictEqual(value, schema.const)) invalid('value differs from const');
