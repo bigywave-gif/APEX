@@ -104,7 +104,8 @@ try {
   assert.throws(() => validateFormalInteractionEvidence(dir, state, interactions), /not an observed confirmed task/);
 } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 const selectors = [], auth = { usernameSelector: '#user', passwordSelector: '#pass', submitSelector: '#submit', successSelector: '#ready' };
-const authenticatedPage = { url: () => 'https://app.invalid/', waitForTimeout: async () => {}, locator: selector => ({ fill: async () => selectors.push(selector), click: async () => selectors.push(selector), first: () => ({ isVisible: async () => true }) }) };
+const routing = { route: async () => {}, unroute: async () => {} };
+const authenticatedPage = { ...routing, url: () => 'https://app.invalid/', waitForTimeout: async () => {}, locator: selector => ({ fill: async () => selectors.push(selector), click: async () => selectors.push(selector), first: () => ({ isVisible: async () => true }) }) };
 assert.deepEqual(await runFormalAuthentication(authenticatedPage, { authentication: auth, credentials: { username: 'fixture-user', password: 'fixture-password' }, url: 'https://app.invalid/' }), { authenticated: true });
 assert.deepEqual(selectors, ['#user', '#pass', '#submit']);
 const hiddenSuccessPage = { ...authenticatedPage, locator: selector => selector === '#ready' ? { first: () => ({ isVisible: async () => false }) } : authenticatedPage.locator(selector) };
@@ -113,11 +114,11 @@ let leaked = false;
 await assert.rejects(runFormalAuthentication({ url: () => 'https://outside.invalid/', locator: () => { leaked = true; } }, { authentication: auth, credentials: { username: 'fixture-user', password: 'fixture-password' }, url: 'https://app.invalid/' }), /outside the application origin/);
 assert.equal(leaked, false);
 let origin = 'https://app.invalid/', passwordFilled = false;
-const usernameRedirectPage = { url: () => origin, locator: selector => ({ fill: async () => { if (selector === '#user') origin = 'https://outside.invalid/'; else passwordFilled = true; } }) };
+const usernameRedirectPage = { ...routing, url: () => origin, locator: selector => ({ fill: async () => { if (selector === '#user') origin = 'https://outside.invalid/'; else passwordFilled = true; } }) };
 await assert.rejects(runFormalAuthentication(usernameRedirectPage, { authentication: auth, credentials: { username: 'fixture-user', password: 'fixture-password' }, url: 'https://app.invalid/' }), /outside the application origin/);
 assert.equal(passwordFilled, false);
 origin = 'https://app.invalid/'; let submitted = false;
-const passwordRedirectPage = { url: () => origin, locator: selector => ({ fill: async () => { if (selector === '#pass') origin = 'https://outside.invalid/'; }, click: async () => { submitted = true; } }) };
+const passwordRedirectPage = { ...routing, url: () => origin, locator: selector => ({ fill: async () => { if (selector === '#pass') origin = 'https://outside.invalid/'; }, click: async () => { submitted = true; } }) };
 await assert.rejects(runFormalAuthentication(passwordRedirectPage, { authentication: auth, credentials: { username: 'fixture-user', password: 'fixture-password' }, url: 'https://app.invalid/' }), /outside the application origin/);
 assert.equal(submitted, false);
 console.log(JSON.stringify({ status: 'passed', checks: 33 }));

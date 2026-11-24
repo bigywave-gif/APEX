@@ -45,15 +45,28 @@ export const formalJourneyCode = input => `async (page) => await (${runFormalJou
 
 export async function runFormalAuthentication(page, input) {
   const { authentication, credentials, url } = input;
-  const ensureOrigin = () => { if (new URL(page.url()).origin !== new URL(url).origin) throw new Error('authentication page is outside the application origin'); };
+  const origin = new URL(url).origin;
+  let blockedNavigation = false;
+  const ensureOrigin = () => { if (blockedNavigation || new URL(page.url()).origin !== origin) throw new Error('authentication page is outside the application origin'); };
+  const guard = async route => {
+    const request = route.request();
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame() && new URL(request.url()).origin !== origin) {
+      blockedNavigation = true;
+      await route.abort('blockedbyclient');
+    } else await route.continue();
+  };
   ensureOrigin();
-  await page.locator(authentication.usernameSelector).fill(credentials.username);
-  ensureOrigin();
-  await page.locator(authentication.passwordSelector).fill(credentials.password);
-  ensureOrigin();
-  await page.locator(authentication.submitSelector).click();
-  await page.waitForTimeout(350);
-  if (new URL(page.url()).origin !== new URL(url).origin) throw new Error('authentication left the application origin');
-  return { authenticated: await page.locator(authentication.successSelector).first().isVisible() };
+  await page.route('**/*', guard);
+  try {
+    ensureOrigin();
+    await page.locator(authentication.usernameSelector).fill(credentials.username);
+    ensureOrigin();
+    await page.locator(authentication.passwordSelector).fill(credentials.password);
+    ensureOrigin();
+    await page.locator(authentication.submitSelector).click();
+    await page.waitForTimeout(350);
+    ensureOrigin();
+    return { authenticated: await page.locator(authentication.successSelector).first().isVisible() };
+  } finally { await page.unroute('**/*', guard); }
 }
 export const formalAuthenticationCode = input => `async (page) => await (${runFormalAuthentication.toString()})(page, ${JSON.stringify(input)})`;
