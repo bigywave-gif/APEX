@@ -26,12 +26,15 @@ try {
     const pending = agentRuntimeStatus(runDir, jobId).jobs[0];
     if (!pending || pending.stage !== stage) throw new Error(`agent job does not belong to the authorized stage: ${jobId}/${stage}`);
     if (stage === 'visual' && pending.agentId === 'ui-designer' && !pending.payload?.tasteSkill) throw new Error('visual UI designer job is missing required taste-skill binding');
-    const skillInstructions = pending?.payload?.tasteSkill ? loadTasteSkill(pending.payload.tasteSkill) : null;
-    const optionalSkills = availableAgentSkills(stage, pending.payload?.roleId);
-    const claimed = claimAgentJob(runDir, jobId, { claimKey });
+    // A replay reconciles a potentially live executor; it must not redispatch
+    // or reload its instructions. New claims still validate the Skill first.
+    const replaying = pending.status === 'running';
+    const skillInstructions = !replaying && pending?.payload?.tasteSkill ? loadTasteSkill(pending.payload.tasteSkill) : null;
+    const optionalSkills = replaying ? [] : availableAgentSkills(stage, pending.payload?.roleId);
+    const claimed = claimAgentJob(runDir, jobId, { claimKey, replayOnly: replaying });
     if (claimed.status === 'budget-exhausted') fail(`${claimed.reason?.startsWith('run-budget-') ? 'run' : 'stage'}-token-budget-exhausted: ${JSON.stringify(claimed)}`);
-    if (claimed.status === 'running' && skillInstructions) appendLedgerEvent(runDir, { type: 'agent-required-skill-loaded', jobId, agentId: pending.agentId, stage, attempt: claimed.attempt, name: skillInstructions.name, sha256: skillInstructions.sha256, path: skillInstructions.path, operationReceipt: process.env.APEX_ROUTER_OPERATION_RECEIPT || null });
-    console.log(JSON.stringify({ ...claimed, ...(claimed.status === 'running' && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(claimed.status === 'running' && optionalSkills.length ? { optionalSkills } : {}) }));
+    if (claimed.status === 'running' && !claimed.idempotent && skillInstructions) appendLedgerEvent(runDir, { type: 'agent-required-skill-loaded', jobId, agentId: pending.agentId, stage, attempt: claimed.attempt, name: skillInstructions.name, sha256: skillInstructions.sha256, path: skillInstructions.path, operationReceipt: process.env.APEX_ROUTER_OPERATION_RECEIPT || null });
+    console.log(JSON.stringify({ ...claimed, ...(claimed.status === 'running' && !claimed.idempotent && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(claimed.idempotent && pending.payload?.tasteSkill ? { requiredSkillBinding: pending.payload.tasteSkill } : {}), ...(claimed.status === 'running' && !claimed.idempotent && optionalSkills.length ? { optionalSkills } : {}) }));
   } else if (command === 'skill') {
     const [jobId, stage, leaseToken, name, expectedSha256] = args;
     if (!stageAction[stage] || !jobId || !leaseToken || !name || !expectedSha256) fail('skill requires a valid agent job, stage, lease token, skill name and expected hash');

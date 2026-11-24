@@ -159,9 +159,20 @@ try {
   assert.equal(agentRuntimeStatus(runDir).sessions.find(session => session.agentId === 'ui-designer').status, 'working');
   const cachedClaim = invoke(claimAuth, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]);
   assert.notEqual(cachedClaim.status, 0); assert.match(cachedClaim.stderr, /fresh Router authorization/);
-  const replayedClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'recover a lost claim response with a current authorization');
+  const loadsBeforeReplay = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
+  const loadCount = loadsBeforeReplay.prepare("SELECT COUNT(*) AS n FROM events WHERE event_type = 'agent-required-skill-loaded'").get().n; loadsBeforeReplay.close();
+  const replaySkill = fs.realpathSync(queued.payload.tasteSkill.path), safeRoots = [os.tmpdir(), '/private/tmp'].filter(fs.existsSync).map(base => fs.realpathSync(base));
+  let replayedClaim;
+  if (safeRoots.some(base => replaySkill.startsWith(`${base}${path.sep}`))) {
+    const original = fs.readFileSync(replaySkill);
+    try { fs.appendFileSync(replaySkill, '\nfixture drift\n'); replayedClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'reconcile a live claim despite Skill drift'); }
+    finally { fs.writeFileSync(replaySkill, original); }
+  } else replayedClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'recover a lost claim response with a current authorization');
   assert.equal(replayedClaim.leaseToken, claimed.leaseToken); assert.equal(replayedClaim.attempt, claimed.attempt); assert.equal(replayedClaim.idempotent, true);
   assert.equal(replayedClaim.dispatchDirective, 'reconcile-existing-execution-before-start');
+  assert.equal(replayedClaim.requiredSkill, undefined); assert.deepEqual(replayedClaim.requiredSkillBinding, queued.payload.tasteSkill); assert.equal(replayedClaim.optionalSkills, undefined);
+  const loadsAfterReplay = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
+  assert.equal(loadsAfterReplay.prepare("SELECT COUNT(*) AS n FROM events WHERE event_type = 'agent-required-skill-loaded'").get().n, loadCount); loadsAfterReplay.close();
   assert.equal(claimed.requiredSkill.sha256, queued.payload.tasteSkill.sha256);
   assert.match(claimed.requiredSkill.content, /tasteskill/i);
   const optionalName = process.env.APEX_TEST_EXTRA_VISUAL_SKILL === '1' ? 'brandkit' : 'impeccable';

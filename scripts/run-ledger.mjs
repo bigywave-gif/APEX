@@ -725,7 +725,7 @@ function agentBudgetSnapshot(database, job) {
   const reportedAvailable = validLimit ? Math.max(0, limit - used - reserved) : null;
   return { used, reserved, stageBudget: validLimit ? limit : null, incompleteUsage, available: incompleteUsage ? null : reportedAvailable, reportedAvailable, overcommitted: !validLimit ? null : used + reserved > limit ? true : incompleteUsage ? null : false, budgetScope: validLimit && ownReserved > 0 ? 'reported-usage-only' : 'not-reserved', runBudget: runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job)) };
 }
-export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
+export function claimAgentJob(runDir, jobId, { claimKey = null, replayOnly = false } = {}) {
   requireNonEmpty(jobId, 'jobId');
   if (claimKey !== null && (typeof claimKey !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(claimKey))) throw new Error('claim key must be a durable random identifier of 16 to 128 safe characters');
   const database = open(runDir), timestamp = now();
@@ -742,6 +742,7 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       database.exec('COMMIT');
       return { ...job, leaseToken: job.lease_token, leaseExpiresAt: job.lease_expires_at, reservedTokens: Number(job.reserved_tokens || 0), ...budget, payload: parseJson(job.payload_json), idempotent: true, dispatchDirective: 'reconcile-existing-execution-before-start' };
     }
+    if (replayOnly) throw new Error(`agent replay no longer identifies the active claim: ${jobId}`);
     if (job.status !== 'queued') throw new Error(`agent job is not queued: ${jobId}/${job.status}`);
     const registration = database.prepare('SELECT stage FROM agents WHERE agent_id = ?').get(job.agent_id);
     if (!registration || registration.stage !== job.stage) throw new Error(`queued agent job stage does not match its registration; controlled role repair is required: ${jobId}`);

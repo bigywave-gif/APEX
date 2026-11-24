@@ -62,6 +62,8 @@ try {
   assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: secondKey }), /not queued/);
   assert.ok(renewAgentJobLease(root, interrupted.jobId, oldClaim.leaseToken).leaseExpiresAt);
   assert.equal(recoverAgentJobs(root, { force: true }).find(item => item.jobId === interrupted.jobId)?.status, 'queued');
+  assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: secondKey, replayOnly: true }), /replay no longer identifies/);
+  assert.equal(agentRuntimeStatus(root, interrupted.jobId).jobs[0].status, 'queued');
   assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: firstKey }), /prior agent attempt/);
   const intermediate = claimAgentJob(root, interrupted.jobId, { claimKey: secondKey });
   assert.equal(recoverAgentJobs(root, { force: true }).find(item => item.jobId === interrupted.jobId)?.status, 'queued');

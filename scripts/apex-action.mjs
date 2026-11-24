@@ -253,7 +253,11 @@ if (!stateHash) fail('Router authorization verification did not return its bound
 const claimBudgetInputs = agentClaimBudgetInputs();
 const revisionRetryInputs = revisionRecoveryRetryInputs();
 let requiredVisualSkill;
-if (action === 'plan_visual' && ((script === 'role-advisory.mjs' && ['select', 'record'].includes(scriptArgs[0]) && scriptArgs[2] === 'visual') || (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim' && scriptArgs[3] === 'visual'))) {
+let replayingVisualClaim = false;
+if (action === 'plan_visual' && script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim' && scriptArgs[3] === 'visual') {
+  try { replayingVisualClaim = agentRuntimeStatus(runDirectory, scriptArgs[2]).jobs[0]?.status === 'running'; } catch {}
+}
+if (!replayingVisualClaim && action === 'plan_visual' && ((script === 'role-advisory.mjs' && ['select', 'record'].includes(scriptArgs[0]) && scriptArgs[2] === 'visual') || (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim' && scriptArgs[3] === 'visual'))) {
   try { const skill = resolveTasteSkill(); requiredVisualSkill = { status: 'available', path: skill.path, sha256: skill.sha256 }; }
   catch { requiredVisualSkill = { status: 'unavailable' }; }
 }
