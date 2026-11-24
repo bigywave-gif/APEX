@@ -74,7 +74,7 @@ try {
   state.gates.gate1 = { status: 'passed', evidence: ['test-fixture'] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; commitRunState(runDir, state, { reason: 'interactive-browser-test-fixture' });
   const tokenHash = `sha256:${crypto.createHash('sha256').update('{}').digest('hex')}`;
   const markedFragment = demoFragment.replace('<div id="apex-chat-example"', `<div data-apex-node="demo-root" data-apex-component="demo-root" data-apex-component-kind="panel" data-apex-token-hash="${tokenHash}" id="apex-chat-example"`) + '\n<!-- data-apex-source-selection="comment-only-source" -->';
-  const input = write('demo-source-input.json', { schemaVersion: '3.0', entrypoint: 'index.html', interactionContract: demoContract, chatPreview: { fragment: 'preview.html' }, files: [{ path: 'preview.html', content: markedFragment }], sourceBindings: selections.map(item => ({ sourceSelectionId: item.id, files: ['preview.html'] })) });
+  const input = write('demo-source-input.json', { schemaVersion: '3.0', entrypoint: 'pages/index.html', interactionContract: demoContract, chatPreview: { fragment: 'preview.html' }, files: [{ path: 'preview.html', content: markedFragment }], sourceBindings: selections.map(item => ({ sourceSelectionId: item.id, files: ['preview.html'] })) });
   action('demo-source-compiler.mjs', 'compile', runDir, input);
   action('visual-sandbox-writer.mjs', 'materialize', runDir, path.join(runDir, 'demo-source-manifest.json'));
   action('visual-sandbox-runtime.mjs', 'start', runDir);

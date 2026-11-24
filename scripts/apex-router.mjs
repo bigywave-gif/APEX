@@ -809,6 +809,15 @@ function registerImplementation(root, run, sessionId, authorizationRef, leaseId,
   appendEvent(runRoot, { type: 'implementation-registered', sessionId, receipt: relative, pageDelta: receipt.pageDelta.path, files: files.length });
   return { receipt: relative, ...routerState(root, { ...run, state: stateOf(runRoot) }, sessionId) };
 }
+function demoSandboxRoot(runDir, manifest) {
+  try {
+    const realRun = fs.realpathSync(runDir), root = path.join(realRun, 'visual-sandbox');
+    if (fs.realpathSync(root) !== root || typeof manifest?.entrypoint !== 'string' || path.isAbsolute(manifest.entrypoint)) return null;
+    const entry = path.resolve(realRun, manifest.entrypoint);
+    if (!entry.startsWith(`${root}${path.sep}`) || !fs.realpathSync(entry).startsWith(`${root}${path.sep}`) || !fs.statSync(entry).isFile()) return null;
+    return root;
+  } catch { return null; }
+}
 function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
   if (!authorizationRef) fail('runtime Demo registration requires a current register_runtime_demo Router authorization');
   verifyAuthorization(root, run, sessionId, authorizationRef, 'register_runtime_demo');
@@ -828,8 +837,8 @@ function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
   const sandboxFiles = artifactFile(run.runDir, state.artifacts?.visualSandboxFiles);
   const demo = artifactFile(run.runDir, state.artifacts?.runtimeDemo) && read(artifactFile(run.runDir, state.artifacts.runtimeDemo));
   const runtime = runtimeFile && read(runtimeFile), manifest = sandboxFiles && read(sandboxFiles);
-  const sandboxRoot = manifest?.entrypoint && path.resolve(run.runDir, path.dirname(manifest.entrypoint));
-  if (!runtimeFile || !sandboxFiles || !runtime || !manifest || !sandboxRoot || path.resolve(run.runDir, runtime.runtimeRoot || '') !== sandboxRoot || runtime.status !== 'running' || !/^http:\/\/127\.0\.0\.1:\d+\/$/.test(String(runtime.url || '')) || demo?.url !== runtime.url || !actionOutputReceiptFor(run.runDir, runtimeFile, 'generate_visual', true) || !actionOutputReceiptFor(run.runDir, sandboxFiles, 'generate_visual', true)) fail('runtime Demo registration requires a successful current Run visual-sandbox runtime and manifest; file URLs, formal services, and unverified sources are forbidden');
+  const sandboxRoot = demoSandboxRoot(run.runDir, manifest);
+  if (!runtimeFile || !sandboxFiles || !runtime || !manifest || !sandboxRoot || path.resolve(fs.realpathSync(run.runDir), runtime.runtimeRoot || '') !== sandboxRoot || runtime.status !== 'running' || !/^http:\/\/127\.0\.0\.1:\d+\/$/.test(String(runtime.url || '')) || demo?.url !== runtime.url || !actionOutputReceiptFor(run.runDir, runtimeFile, 'generate_visual', true) || !actionOutputReceiptFor(run.runDir, sandboxFiles, 'generate_visual', true)) fail('runtime Demo registration requires a successful current Run visual-sandbox runtime and manifest; file URLs, formal services, and unverified sources are forbidden');
   if (!interactiveDemoReady(state, run.runDir)) fail('runtime Demo registration requires verified interactive user journeys for the current source');
   if (usesCombinedPlan(state)) {
     const coverage = observedControlCoverageStatus(verifyDemoInteractions(run.runDir, read(artifactFile(run.runDir, demo.interactionEvidence.path)), demo.url, { requireJourneyLocation: true }).controlCoverage, { requireScreens: true });
@@ -849,8 +858,8 @@ function runtimeDemoPresentationReady(root, run, state, sessionId = null) {
   if (!receiptFile || !runtimeDemoFile || !runtimeFile || !sandboxFiles) return false;
   try {
     const receipt = read(receiptFile), demo = read(runtimeDemoFile), runtime = read(runtimeFile), manifest = read(sandboxFiles);
-    const sandboxRoot = path.resolve(run.runDir, path.dirname(manifest.entrypoint || ''));
-    const expectedRoot = path.resolve(run.runDir, runtime.runtimeRoot || '');
+    const sandboxRoot = demoSandboxRoot(run.runDir, manifest);
+    const expectedRoot = path.resolve(fs.realpathSync(run.runDir), runtime.runtimeRoot || '');
     const url = String(demo.url || '');
     const ready = receipt.schemaVersion === '3.0' && receipt.type === 'runtime-demo-presentation'
       && receipt.projectId === projectId(root) && receipt.runId === run.runId
@@ -988,8 +997,8 @@ function presentRuntimeDemo(root, run, sessionId, authorizationRef, presentation
   const sandboxFiles = artifactFile(run.runDir, state.artifacts?.visualSandboxFiles);
   if (!runtimeDemoFile || !runtimeFile || !sandboxFiles) fail('runtime Demo presentation requires current run-local Demo, runtime, and sandbox manifest artifacts');
   const demo = read(runtimeDemoFile), runtime = read(runtimeFile), manifest = read(sandboxFiles);
-  const sandboxRoot = path.resolve(run.runDir, path.dirname(manifest.entrypoint || ''));
-  const runtimeRoot = path.resolve(run.runDir, runtime.runtimeRoot || '');
+  const sandboxRoot = demoSandboxRoot(run.runDir, manifest);
+  const runtimeRoot = path.resolve(fs.realpathSync(run.runDir), runtime.runtimeRoot || '');
   const url = String(demo.url || '');
   if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(url) || url !== runtime.url || runtime.status !== 'running' || runtimeRoot !== sandboxRoot) fail('runtime Demo must be presented from this Run visual-sandbox HTTP URL; file:// URLs, formal project services, and non-run-local sources are forbidden');
   if (demo.kind === 'interactive-ui-prototype' && !interactiveDemoReady(state, run.runDir)) fail('interactive Demo evidence is missing or stale; rebuild before presenting');

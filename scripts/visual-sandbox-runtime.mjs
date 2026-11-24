@@ -102,9 +102,9 @@ if (command === 'serve') {
   if (!filesManifest || filesManifest !== path.join(runDir, 'visual-sandbox-files.json') || !fs.existsSync(filesManifest) || fs.realpathSync(filesManifest) !== path.join(realRun, 'visual-sandbox-files.json')) die('a run-local materialized visual-sandbox-files.json is required');
   const manifest = read(filesManifest); const entrypoint = inside(runDir, manifest.entrypoint);
   if (manifest.status !== 'materialized' || !entrypoint || !fs.existsSync(entrypoint)) die('visual sandbox materialization is incomplete');
-  const sandboxRoot = fs.realpathSync(path.dirname(entrypoint));
   const expectedRoot = path.join(realRun, 'visual-sandbox');
-  if (sandboxRoot !== expectedRoot || !fs.realpathSync(entrypoint).startsWith(`${sandboxRoot}${path.sep}`) || !fs.statSync(entrypoint).isFile()) die('visual sandbox entrypoint must resolve inside the current Run sandbox');
+  const sandboxRoot = fs.realpathSync(expectedRoot);
+  if (sandboxRoot !== expectedRoot || !entrypoint.startsWith(`${path.join(runDir, 'visual-sandbox')}${path.sep}`) || !fs.realpathSync(entrypoint).startsWith(`${sandboxRoot}${path.sep}`) || !fs.statSync(entrypoint).isFile()) die('visual sandbox entrypoint must resolve inside the current Run sandbox');
   const runtimeFile = path.join(runDir, 'visual-sandbox-runtime.json');
   const registryFile = path.join(runDir, 'runtime-services.json');
   const intentFile = path.join(runDir, 'runtime-launch-intent.json');
