@@ -528,14 +528,15 @@ export function recordArtifact(runDir, { artifactId, reference, sha256, status =
 // Archived artifacts remain in the ledger and keep their lineage edges, but
 // are no longer the current materialization for a reference. This is needed
 // when an authorized repair preserves stale evidence under invalidated/.
-export function archiveArtifacts(runDir, references, reason = 'superseded-by-controlled-repair', { expectedHashes = null } = {}) {
+export function archiveArtifacts(runDir, references, reason = 'superseded-by-controlled-repair', { expectedHashes = null, onlyStatus = null } = {}) {
   const unique = [...new Set((references || []).filter(Boolean))];
   if (!unique.length) return 0;
+  if (onlyStatus !== null && onlyStatus !== 'input') throw new Error('unsupported restricted archival status');
   const database = open(runDir);
   let changes = 0;
   try {
     database.exec('BEGIN IMMEDIATE');
-    const statement = database.prepare(`UPDATE artifacts SET status = 'archived', metadata_json = ? WHERE reference = ? AND status != 'archived'`);
+    const statement = database.prepare(`UPDATE artifacts SET status = 'archived', metadata_json = ? WHERE reference = ? AND ${onlyStatus === 'input' ? "status = 'input'" : "status != 'archived'"}`);
     for (const reference of unique) {
       if (expectedHashes && Object.hasOwn(expectedHashes, reference)) {
         const current = database.prepare("SELECT sha256 FROM artifacts WHERE reference = ? AND status != 'archived' ORDER BY rowid DESC LIMIT 1").get(reference);
@@ -1120,7 +1121,7 @@ export function reconcileRun(runDir) {
     if (artifact.reference === 'visual-sandbox-runtime.json') continue;
     const candidate = path.resolve(root, artifact.reference);
     if (!candidate.startsWith(`${root}${path.sep}`) || !fs.existsSync(candidate)) issues.push({ type: 'registered-artifact-missing', artifactId: artifact.artifact_id, reference: artifact.reference, expectedSha256: artifact.sha256, registeredAt: artifact.created_at });
-    else if (`sha256:${crypto.createHash('sha256').update(fs.readFileSync(candidate)).digest('hex')}` !== artifact.sha256) issues.push({ type: 'registered-artifact-hash-mismatch', artifactId: artifact.artifact_id, reference: artifact.reference });
+    else if (`sha256:${crypto.createHash('sha256').update(fs.readFileSync(candidate)).digest('hex')}` !== artifact.sha256) issues.push({ type: 'registered-artifact-hash-mismatch', artifactId: artifact.artifact_id, artifactStatus: artifact.status, reference: artifact.reference });
   }
   for (const edge of edges) if (!registered.some(item => item.artifact_id === edge.parent_artifact_id) || !registered.some(item => item.artifact_id === edge.child_artifact_id)) issues.push({ type: 'artifact-lineage-broken', parentArtifactId: edge.parent_artifact_id, childArtifactId: edge.child_artifact_id });
   const agentRuntime = agentRuntimeStatus(runDir);

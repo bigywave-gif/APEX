@@ -77,7 +77,7 @@ const recoveredAgentJobs = recoverAgentJobs(runDir);
 // the new hash. Never archive a mismatched output/state artifact here.
 const preRecoveryReconciliation = reconcileRun(runDir);
 const staleInputReferences = (preRecoveryReconciliation.issues || [])
-  .filter(issue => issue.type === 'registered-artifact-hash-mismatch' && (String(issue.reference || '').endsWith('-input.json') || String(issue.reference || '').endsWith('-spec.json') || String(issue.reference || '').includes('/inputs/')))
+  .filter(issue => issue.type === 'registered-artifact-hash-mismatch' && issue.artifactStatus === 'input' && (String(issue.reference || '').endsWith('-input.json') || String(issue.reference || '').endsWith('-spec.json') || String(issue.reference || '').includes('/inputs/')))
   .map(issue => issue.reference);
 // A user-approved visual revision deliberately moves prior outputs into the
 // run-local invalidated archive. Their original operation registrations must
@@ -88,7 +88,7 @@ const staleArchivedOutputReferences = archivedMissingReferences(runDir, preRecov
 const mismatchedRuntimeEvidenceReferences = (preRecoveryReconciliation.issues || [])
   .filter(issue => issue.type === 'registered-artifact-hash-mismatch' && String(issue.reference || '') === 'evidence/runtime-browser-capture.json')
   .map(issue => issue.reference);
-const archivedArtifacts = archiveArtifacts(runDir, [...staleInputReferences, ...staleArchivedOutputReferences], 'recovery-recognized-invalidated-artifacts');
+const archivedArtifacts = archiveArtifacts(runDir, staleInputReferences, 'recovery-recognized-stale-inputs', { onlyStatus: 'input' }) + archiveArtifacts(runDir, staleArchivedOutputReferences, 'recovery-recognized-invalidated-artifacts');
 const refs = state.checkpoints || [];
 const changed = [];
 const latestRef = refs[refs.length - 1] || null;
