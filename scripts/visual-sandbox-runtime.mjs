@@ -65,14 +65,15 @@ if (command === 'serve') {
   const server = http.createServer((request, response) => {
     try {
       const pathname = decodeURIComponent(new URL(request.url || '/', 'http://127.0.0.1').pathname);
-      const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+      const manifestFile = path.join(path.dirname(realRoot), 'visual-sandbox-files.json');
+      if (!fs.existsSync(manifestFile) || fs.realpathSync(manifestFile) !== manifestFile) { response.writeHead(404); response.end('Not found'); return; }
+      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      const entrypoint = typeof manifest.entrypoint === 'string' ? path.resolve(path.dirname(realRoot), manifest.entrypoint) : '';
+      const relative = pathname === '/' ? path.relative(realRoot, entrypoint) : pathname.replace(/^\/+/, '');
       const file = inside(realRoot, relative);
       if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) { response.writeHead(404); response.end('Not found'); return; }
       const realFile = fs.realpathSync(file);
       if (!realFile.startsWith(`${realRoot}${path.sep}`)) { response.writeHead(404); response.end('Not found'); return; }
-      const manifestFile = path.join(path.dirname(realRoot), 'visual-sandbox-files.json');
-      if (!fs.existsSync(manifestFile) || fs.realpathSync(manifestFile) !== manifestFile) { response.writeHead(404); response.end('Not found'); return; }
-      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
       const reference = path.relative(path.dirname(realRoot), file);
       const matches = Array.isArray(manifest.files) ? manifest.files.filter(item => item?.path === reference) : [];
       if (matches.length !== 1) { response.writeHead(404); response.end('Not found'); return; }

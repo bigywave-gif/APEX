@@ -96,6 +96,14 @@ try {
   if (await fetchStatus(output.url) !== 409) throw new Error('Demo server must not serve changed manifest files');
   fs.writeFileSync(path.join(sandbox, 'index.html'), originalIndex);
   if (await fetchStatus(output.url) !== 200) throw new Error('Demo server must serve the restored manifest source');
+  const manifestFile = path.join(runDir, 'visual-sandbox-files.json'), savedManifest = fs.readFileSync(manifestFile), alternate = path.join(sandbox, 'app.html');
+  fs.writeFileSync(alternate, '<main>Alternate entrypoint</main>');
+  const alternateManifest = JSON.parse(savedManifest); alternateManifest.entrypoint = 'visual-sandbox/app.html'; alternateManifest.files.push({ path: alternateManifest.entrypoint, sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(alternate)).digest('hex')}` });
+  fs.writeFileSync(manifestFile, JSON.stringify(alternateManifest));
+  if (await fetchStatus(output.url) !== 200) throw new Error('Demo root must serve the manifest entrypoint even when it is not index.html');
+  const alternateResponse = await fetch(output.url);
+  if (!(await alternateResponse.text()).includes('Alternate entrypoint')) throw new Error('Demo root served a different file than the manifest entrypoint');
+  fs.writeFileSync(manifestFile, savedManifest); fs.unlinkSync(alternate);
   const afterStart = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'started Demo status');
   if (afterStart.executionDirective?.currentStep?.id !== 'capture-runtime-browser-evidence' || afterStart.terminalResponseContract?.allowed !== false) throw new Error('a started Demo must advance to browser capture automatically instead of ending the chain');
   fs.unlinkSync(path.join(runDir, 'visual-sandbox-runtime.json')); delete JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime;
@@ -125,7 +133,7 @@ try {
   if (formalReceipt.productionBoundary?.snapshotMode !== 'formal-source-discovery' || formalReceipt.productionBoundary?.changedFiles?.[0]?.path !== 'server/api.js' || !String(formalReceipt.stderr).includes('server/api.js')) throw new Error('a formal source boundary failure must identify its protected snapshot mode and exact changed file');
   pids.push(JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-runtime.json'), 'utf8')).pid);
   if (fs.existsSync(path.join(project, 'index.html'))) throw new Error('runtime start must not materialize files outside the run-local sandbox');
-  console.log(JSON.stringify({ status: 'passed', checks: 18 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 20 }));
 } finally {
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch {} }
   fs.rmSync(project, { recursive: true, force: true });

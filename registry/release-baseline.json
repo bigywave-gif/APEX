@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T19:25:14.010Z",
+  "generatedAt": "2026-11-24T19:33:57.546Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -251,8 +251,8 @@
     "scripts/visual-revision-binding.mjs": "6e2d276b7255de99198d6f5480993470d33635636753aa9f76d75d97a168408b",
     "scripts/visual-role-skill-integration-test.mjs": "4fdf42fc1480184a8e0aad498da6f4d0872d8dbdd3d8484cffd69d077acbb343",
     "scripts/visual-sandbox-dependency.mjs": "af95637d97f233dd75b103c23fc9dcdb12d9f5757a21176b004fdd2f6edcde89",
-    "scripts/visual-sandbox-runtime-contract-test.mjs": "e34d7820ea628250166947d6d704b7bdad3d43a6a48fb9c8ac26b4f71dd21493",
-    "scripts/visual-sandbox-runtime.mjs": "4f1a1c46f3aa51ce9d3ab6f82a29752ff8546881537e5114945ea4ab05ccb722",
+    "scripts/visual-sandbox-runtime-contract-test.mjs": "42c7cf0486fe591a37c107d9cd350b87e8730350d3e7047e7a6a2bbe88a88c21",
+    "scripts/visual-sandbox-runtime.mjs": "b9c86eeb7114e8f9fecacdc2db70d18df5405ee95df66f203095c9e5e1c0e67e",
     "scripts/visual-sandbox-writer-contract-test.mjs": "f7f711c8b3cfcc332443eb3bebc10873bdca09fedcf2beab62c9c6fda07f3153",
     "scripts/visual-sandbox-writer.mjs": "0dbb49833d2e65b70af58581717abcd303556991b98cfd1f977b1b39635940ba",
     "scripts/visual-skill-decision-test.mjs": "b71cfb2e850629cb27f23d236f2894db82c8512817fba3cabb3cca358a6b7117",
