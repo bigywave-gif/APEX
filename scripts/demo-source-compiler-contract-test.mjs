@@ -3,6 +3,8 @@ import { commitRunState } from './run-ledger.mjs';
 /** Proves the visual-confirmation chain compiles a source manifest before sandbox materialization. */
 import fs from 'node:fs';
 import { demoContract, demoFragment, seedDesignContract } from './interactive-demo-test-fixture.mjs';
+import { bindDemoEntrypointBase } from './demo-entrypoint-base.mjs';
+import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -13,6 +15,11 @@ const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
 const action = path.join(apexRoot, 'scripts', 'apex-action.mjs');
 const run = (file, args) => spawnSync(process.execPath, [file, ...args], { encoding: 'utf8' });
 const expect = (result, label) => { if (result.status !== 0) throw new Error(`${label}: ${(result.stderr || result.stdout).trim()}`); return JSON.parse(result.stdout); };
+const nested = { entrypoint: 'pages/app.html', files: [{ path: 'pages/app.html', content: '<!doctype html><!-- <base href="wrong"> --><html><head><title>Demo</title></head><body></body></html>' }] };
+assert.match(bindDemoEntrypointBase(nested).files[0].content, /<head><base href="\/pages\/app\.html">/);
+const explicit = { ...nested, files: [{ ...nested.files[0], content: '<head><base href="/custom/"></head>' }] };
+assert.equal(bindDemoEntrypointBase(explicit).files[0].content, explicit.files[0].content);
+assert.throws(() => bindDemoEntrypointBase({ ...nested, entrypoint: '../outside.html' }), /normalized relative path/);
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-demo-source-'));
 try {
   fs.mkdirSync(path.join(project, 'server'), { recursive: true }); fs.writeFileSync(path.join(project, 'server', 'api.js'), 'export const api = true;\n');
@@ -70,6 +77,11 @@ try {
   if (manifest.sourceBindings.length !== 5 || JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.demoSourceManifest !== 'demo-source-manifest.json') throw new Error('compiler did not register a complete run-local Demo source manifest');
   const writerAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize writer');
   expect(run(action, ['run', project, 'run-demo-source', 'session-demo-source', writerAuth.authorizationRef, 'generate_visual', 'visual-sandbox-writer.mjs', 'materialize', runDir, path.join(runDir, 'demo-source-manifest.json')]), 'materialize compiled manifest');
+  const nestedInput = path.join(runDir, 'nested-demo-source-input.json');
+  fs.writeFileSync(nestedInput, JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'pages/app.html', files: [{ path: 'pages/app.html', content: '<!doctype html><html><head></head><body><main data-apex-source-selection="layout-a chart-b style-a font-a content-a">Demo</main></body></html>' }], sourceBindings: manifest.sourceBindings.map(item => ({ ...item, files: ['pages/app.html'] })) }));
+  const nestedAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize nested compiler');
+  expect(run(action, ['run', project, 'run-demo-source', 'session-demo-source', nestedAuth.authorizationRef, 'generate_visual', 'demo-source-compiler.mjs', 'compile', runDir, nestedInput]), 'compile nested Demo');
+  assert.match(JSON.parse(fs.readFileSync(path.join(runDir, 'demo-source-manifest.json'))).files[0].content, /<head><base href="\/pages\/app\.html">/);
   const chatInput = path.join(runDir, 'chat-demo-source-input.json');
   fs.writeFileSync(chatInput, JSON.stringify({ schemaVersion: '3.0', interactionContract: demoContract, entrypoint: 'index.html', chatPreview: { fragment: 'preview.html' }, files: [{ path: 'preview.html', content: demoFragment }], sourceBindings: manifest.sourceBindings.map(item => ({ ...item, files: ['preview.html'] })) }));
   const chatCompile = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize chat compiler');
@@ -78,5 +90,5 @@ try {
   expect(run(action, ['run', project, 'run-demo-source', 'session-demo-source', chatWrite.authorizationRef, 'generate_visual', 'visual-sandbox-writer.mjs', 'materialize', runDir, path.join(runDir, 'demo-source-manifest.json')]), 'materialize chat Demo');
   const chatManifest = JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-files.json')));
   if (chatManifest.chatPreview?.fragment !== 'preview.html' || !fs.readFileSync(path.join(runDir, 'visual-sandbox/index.html'), 'utf8').includes(demoFragment)) throw new Error('chat and HTTP must use the same source');
-  console.log(JSON.stringify({ status: 'passed', checks: 12 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 16 }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

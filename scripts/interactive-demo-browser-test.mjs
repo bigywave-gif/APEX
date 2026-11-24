@@ -13,6 +13,7 @@ import { formalStitchProgress } from './formal-stitch-progress.mjs';
 import { formalDirectProgress } from './formal-direct-progress.mjs';
 import { validateFormalInteractionEvidence } from './formal-interaction-evidence.mjs';
 import { formalJourneyCode } from './formal-interaction.mjs';
+import { bindDemoEntrypointBase } from './demo-entrypoint-base.mjs';
 import { npmCacheRoot } from './apex-paths.mjs';
 import { buildStitchPrompt } from './stitch-adaptation.mjs';
 import { stitchMachineSealCurrent } from './stitch-machine-seal.mjs';
@@ -102,6 +103,19 @@ try {
   const cliCall = args => spawnSync(process.execPath, [cli, '--session', browserSession, ...args], { cwd: runDir, encoding: 'utf8', timeout: 45000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, PWTEST_DAEMON_SESSION_DIR: path.join(runDir, 'cache/playwright-daemon') } });
   try {
     const opened = cliCall(['open', runtime.url]); if (opened.status !== 0) throw new Error(opened.stderr || opened.stdout);
+    const nestedManifestFile = path.join(runDir, 'visual-sandbox-files.json'), savedNestedManifest = fs.readFileSync(nestedManifestFile);
+    const nestedPage = path.join(runDir, 'visual-sandbox/pages/asset-fixture.html'), nestedCss = path.join(runDir, 'visual-sandbox/pages/fixture.css'), nestedJs = path.join(runDir, 'visual-sandbox/pages/fixture.js');
+    try {
+      const entrypoint = 'pages/asset-fixture.html';
+      const page = bindDemoEntrypointBase({ entrypoint, files: [{ path: entrypoint, content: '<!doctype html><html><head><link rel="stylesheet" href="fixture.css"><script defer src="fixture.js"></script></head><body><main id="asset-test">Demo</main></body></html>' }] }).files[0].content;
+      fs.writeFileSync(nestedPage, page); fs.writeFileSync(nestedCss, '#asset-test { color: rgb(17, 34, 51) }'); fs.writeFileSync(nestedJs, 'document.querySelector("#asset-test").dataset.loaded="yes";');
+      const nestedManifest = JSON.parse(savedNestedManifest); nestedManifest.entrypoint = `visual-sandbox/${entrypoint}`;
+      for (const file of [nestedPage, nestedCss, nestedJs]) nestedManifest.files.push({ path: path.relative(runDir, file), sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}` });
+      fs.writeFileSync(nestedManifestFile, JSON.stringify(nestedManifest));
+      const result = cliCall(['run-code', `async (page) => { await page.goto(${JSON.stringify(runtime.url)}); return await page.locator('#asset-test').evaluate(node => ({ color: getComputedStyle(node).color, loaded: node.dataset.loaded })); }`]);
+      const match = result.stdout.match(/### Result\s*\n([\s\S]*?)\n### /); let actual = match && JSON.parse(match[1]); if (typeof actual === 'string') actual = JSON.parse(actual);
+      if (result.status !== 0 || actual?.color !== 'rgb(17, 34, 51)' || actual?.loaded !== 'yes') throw new Error('nested Demo entrypoint did not load its relative CSS and JavaScript');
+    } finally { fs.writeFileSync(nestedManifestFile, savedNestedManifest); for (const file of [nestedPage, nestedCss, nestedJs]) fs.rmSync(file, { force: true }); }
     const wrongButton = structuredClone(demoContract.journeys[0]); wrongButton.steps[0].selector = '#reset';
     const clicked = cliCall(['run-code', journeyCode({ journey: wrongButton, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/no-op-button.png') })]);
     const match = clicked.stdout.match(/### Result\s*\n([\s\S]*?)\n### /);
@@ -486,7 +500,7 @@ try {
 
 
   }
-  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 34 : 30, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
+  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 35 : 31, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
 } finally {
   if (mockServer) mockServer.kill('SIGTERM');
   if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }

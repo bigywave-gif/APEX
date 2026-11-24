@@ -3,6 +3,7 @@ import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 /** Compile a host-authored runtime Demo source input into the only manifest the sandbox writer accepts. */
 import fs from 'node:fs';
 import { compileChatPreview } from './chat-demo.mjs';
+import { bindDemoEntrypointBase } from './demo-entrypoint-base.mjs';
 import { validateInteractionContract } from './interactive-demo.mjs';
 import { requiredFormalTasks } from './formal-interaction-evidence.mjs';
 import path from 'node:path';
@@ -32,7 +33,7 @@ const selectionById = new Map((plan.sourceSelections || []).map(item => [item.id
 const bindings = new Map(input.sourceBindings.map(item => [item?.sourceSelectionId, item]));
 if (!selected.size || input.sourceBindings.length !== selected.size || bindings.size !== selected.size || [...selected].some(id => !bindings.has(id))) die('Demo source bindings must cover every confirmed visual source selection exactly once');
 for (const binding of bindings.values()) if (!Array.isArray(binding.files) || !binding.files.length || binding.files.some(file => typeof file !== 'string')) die('each Demo source binding must declare its materialized files');
-try { validateInteractionContract(input.interactionContract); input = compileChatPreview(input); } catch (error) { die(error.message); }
+try { validateInteractionContract(input.interactionContract); input = bindDemoEntrypointBase(compileChatPreview(input)); } catch (error) { die(error.message); }
 const declared = new Set(input.files.map(file => file?.path));
 if (declared.size !== input.files.length || [...bindings.values()].some(binding => binding.files.some(file => !declared.has(file)))) die('Demo source bindings must only reference declared Demo files');
 const contentByPath = new Map(input.files.map(file => [file.path, typeof file?.content === 'string' ? file.content : '']));
