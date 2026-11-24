@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T16:24:07.355Z",
+  "generatedAt": "2026-11-24T16:31:54.633Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -201,8 +201,8 @@
     "scripts/run-ledger-contract-test.mjs": "8c89b7edc24e0f49b3d415235b5712937ecd765253b95df21fd673b4547b4e44",
     "scripts/run-ledger-init-race-test.mjs": "da27ba17ade730304ed7dcb498c165724c453680450b880dd0c62d6387f229c3",
     "scripts/run-ledger.mjs": "1ee07b8c53e852a823cec1016f1607305f1fe2fc9039c1779ac6e8bb81e0fd6c",
-    "scripts/run-metrics-test.mjs": "a08f7ae731f586fe6942f522e7567a2a019016f3dbdd9840530f3cf4bf032917",
-    "scripts/run-metrics.mjs": "409f95f17e2d06dd20a6e5ec6b7b2a639fe69251ddaf45520975237358b2ca04",
+    "scripts/run-metrics-test.mjs": "0e6c209a17b9c1a170f71a22bad0858f89294e0ad9ddf5e9a6f504fa5d8ce6ef",
+    "scripts/run-metrics.mjs": "d0bce831b8a91cc0597c497e909461c11fae4564f3d01d086414553bdd75625b",
     "scripts/run-migrate.mjs": "62e99e398b3235efd2f2b4d4dc0c432642153ec574672e963ca647b8f4e4e216",
     "scripts/run-token-budget-test.mjs": "4daac6295eeac7771afed128ccb2781004c08919b5638239ef1ab249b3fc2470",
     "scripts/runtime-baseline-contract-test.mjs": "ab9623c04dbcd84d4e9555c93fa801dbad55269533c3223bbeab1f0d2b3837f3",

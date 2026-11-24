@@ -14,6 +14,8 @@ try {
     fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(state)); fs.writeFileSync(path.join(dir, 'delivery.json'), JSON.stringify({ capabilities: ['frontend'] })); initializeLedger(dir, state, 'fixture');
     state.gates.gate3.at = new Date().toISOString(); commitRunState(dir, state, { reason: 'fixture-finish' });
     recordArtifact(dir, { artifactId: 'delivery', reference: 'delivery.json', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, 'delivery.json'))).digest('hex')}` });
+    fs.writeFileSync(path.join(dir, 'proof.json'), '{"status":"passed"}\n');
+    recordArtifact(dir, { artifactId: 'proof', reference: 'proof.json', sha256: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, 'proof.json'))).digest('hex')}` });
     registerAgent(dir, { agentId: 'designer', vocation: 'design', stage: 'visual' });
     const job = enqueueAgentJob(dir, { agentId: 'designer', stage: 'visual', inputHash: 'fixture' });
     const first = claimAgentJob(dir, job.jobId); settleAgentJob(dir, job.jobId, { status: 'failed', leaseToken: first.leaseToken, retryDelayMs: 0, usage: { inputTokens, outputTokens: 3, usageSource: 'provider-reported' } });
@@ -33,6 +35,19 @@ try {
   assert.deepEqual(before.tokens.attemptUsage.map(({attempt,outcome,source,total}) => ({attempt,outcome,source,total})), [{attempt:1,outcome:'failed',source:'providerReported',total:23},{attempt:2,outcome:'succeeded',source:'unknown',total:null}]);
   assert.equal(before.agents.retries, 1); assert.equal(before.operations.failed, 1); assert.ok(before.elapsedWallMs >= 0);
   const compared = compareRuns(before, after); assert.equal(compared.status, 'eligible-for-review');
+  assert.equal(after.artifactIntegrity.status, 'consistent'); assert.equal(after.artifactIntegrity.checked, 2);
+  const proofFile = path.join(afterDir, 'proof.json'), proofBytes = fs.readFileSync(proofFile);
+  fs.writeFileSync(proofFile, '{"status":"changed"}\n');
+  const staleProof = readRunMetrics(afterDir); assert.equal(staleProof.artifactIntegrity.status, 'inconsistent'); assert.ok(staleProof.artifactIntegrity.issues.some(item => item.reference === 'proof.json' && item.reason === 'hash mismatch'));
+  assert.ok(compareRuns(before, staleProof).reasons.includes('registered artifact integrity is inconsistent or unverified')); assert.equal(compareRuns(before, staleProof).changes, null);
+  fs.writeFileSync(proofFile, proofBytes);
+  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-metrics-external-'));
+  try {
+    const externalProof = path.join(externalDir, 'proof.json'); fs.writeFileSync(externalProof, proofBytes); fs.unlinkSync(proofFile); fs.symlinkSync(externalProof, proofFile);
+    assert.equal(readRunMetrics(afterDir).artifactIntegrity.status, 'inconsistent');
+    assert.equal(compareRuns(before, readRunMetrics(afterDir)).status, 'not-comparable');
+    fs.unlinkSync(proofFile); fs.writeFileSync(proofFile, proofBytes);
+  } finally { fs.rmSync(externalDir, { recursive: true, force: true }); }
   const selfComparison = compareRuns(before, before); assert.equal(selfComparison.status, 'not-comparable'); assert.ok(selfComparison.reasons.includes('before and after refer to the same Run')); assert.equal(selfComparison.changes, null);
   const runAlias=path.join(root,'before-alias');fs.symlinkSync(beforeDir,runAlias,process.platform==='win32'?'junction':'dir');assert.equal(compareRuns(before,readRunMetrics(runAlias)).status,'not-comparable');
   const copiedRun=path.join(root,'before-copy');fs.cpSync(beforeDir,copiedRun,{recursive:true});const copyComparison=compareRuns(before,readRunMetrics(copiedRun));assert.equal(copyComparison.status,'not-comparable');assert.ok(copyComparison.reasons.includes('Runs may be copies of the same ledger'));
@@ -41,6 +56,8 @@ try {
   const corruptLatest = new DatabaseSync(path.join(copiedRun, 'run-ledger.sqlite')); corruptLatest.prepare('UPDATE state_snapshots SET state_json = ? WHERE id = (SELECT MAX(id) FROM state_snapshots)').run('{}'); corruptLatest.close(); assert.throws(() => readRunMetrics(copiedRun), /latest run ledger state snapshot is corrupt/);
   assert.ok(compareRuns(before, { ...after, runIdentity: null }).reasons.includes('Run identity is missing'));
   assert.equal(compared.changes.failedOperations, null); assert.equal(compared.operationAssessment.partialRecordedFailedDelta, 0);
+  assert.ok(compareRuns(before, { ...after, operations: { ...after.operations, running: 1 } }).reasons.includes('operations or Agent jobs are still running'));
+  assert.ok(compareRuns(before, { ...after, agents: { ...after.agents, running: 1 } }).reasons.includes('operations or Agent jobs are still running'));
   assert.equal(compared.tokenAssessment.status, 'not-comparable');
   assert.ok(compared.tokenAssessment.reasons.some(reason => reason.includes('unknown usage')));
   assert.ok(compared.tokenAssessment.reasons.some(reason => reason.includes('whole-host')));
@@ -117,5 +134,5 @@ try {
   assert.equal(compareRuns(before, damaged).status, 'not-comparable');
   fs.rmSync(path.join(afterDir, 'operations/a.json'));
   assert.equal(readRunMetrics(afterDir).operations.totalDurationMs, null);
-  console.log(JSON.stringify({ status: 'passed', checks: 57, scope: 'read-only-run-metrics-fixtures' }));
+  console.log(JSON.stringify({ status: 'passed', checks: 65, scope: 'read-only-run-metrics-fixtures' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

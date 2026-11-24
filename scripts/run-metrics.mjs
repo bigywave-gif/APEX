@@ -32,6 +32,22 @@ export function readRunMetrics(runDirectory) {
     } catch {}
     const rows = db.prepare('SELECT stage, agent_id, input_tokens, output_tokens, total_tokens, metadata_json FROM token_usage').all();
     const jobRows = db.prepare('SELECT status, attempt FROM agent_jobs').all();
+    const artifactRows = db.prepare('SELECT artifact_id, reference, sha256, status FROM artifacts ORDER BY rowid').all();
+    const activeArtifacts = new Map();
+    for (const item of artifactRows) if (item.status !== 'archived') activeArtifacts.set(item.reference, item);
+    const artifactIssues = [];
+    for (const item of activeArtifacts.values()) {
+      if (item.reference === 'visual-sandbox-runtime.json') continue;
+      try {
+        if (typeof item.reference !== 'string' || path.isAbsolute(item.reference)) throw new Error('invalid reference');
+        const file = path.resolve(root, item.reference);
+        if (!file.startsWith(`${root}${path.sep}`) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`) || !fs.statSync(file).isFile()) throw new Error('outside run or not a file');
+        if (`sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}` !== item.sha256) throw new Error('hash mismatch');
+      } catch (error) { artifactIssues.push({ reference: item.reference, reason: error.message }); }
+    }
+    const knownArtifacts = new Set(artifactRows.map(item => item.artifact_id));
+    for (const edge of db.prepare('SELECT parent_artifact_id, child_artifact_id FROM artifact_edges').all()) if (!knownArtifacts.has(edge.parent_artifact_id) || !knownArtifacts.has(edge.child_artifact_id)) artifactIssues.push({ reference: null, reason: 'artifact lineage is broken' });
+    const artifactIntegrity = { status: artifactIssues.length ? 'inconsistent' : 'consistent', checked: [...activeArtifacts.keys()].filter(ref => ref !== 'visual-sandbox-runtime.json').length, issues: artifactIssues, note: 'Only registered, non-archived artifacts are checked; this does not prove that required delivery evidence exists or is sufficient.' };
     const coverage = { providerReported: 0, estimated: 0, unknown: 0, unverified: 0 };
     const byStage = {};
     const sourceTotals = { providerReported: null, estimated: null, unverified: null };
@@ -125,7 +141,7 @@ export function readRunMetrics(runDirectory) {
     const elapsed = start && finished && Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(finished)) && Date.parse(finished) >= Date.parse(start) && Date.parse(finished) <= Date.now() ? Date.parse(finished) - Date.parse(start) : null;
     return {
       runId: state.runId, runIdentity: `sha256:${crypto.createHash('sha256').update(root).digest('hex')}`, ledgerOrigin, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
-      contractIntegrity, capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
+      contractIntegrity, artifactIntegrity, capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
       elapsedWallMs: elapsed, elapsedBasis: 'first-ledger-snapshot-to-passed-gate3-including-user-wait',
       operations: { receiptDirectory: operationsPresent ? 'present' : 'missing', recorded: operationsPresent ? receipts.length : null, failed: operationsPresent ? receipts.filter(x => x.status === 'failed').length : null, interrupted: operationsPresent ? receipts.filter(x => x.status === 'interrupted').length : null, running: operationsPresent ? receipts.filter(x => x.status === 'running').length : null, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: operationsPresent ? receipts.length - durations.length : null, unreadable: operationsPresent ? unreadable.length : null, completeness: 'unverified' },
       manualInterventions: null, // No complete host/user-intervention counter is available.
@@ -144,8 +160,10 @@ export function compareRuns(before, after) {
   if (before.track !== after.track || before.scope !== after.scope) reasons.push('track or scope differs');
   if (!before.capabilities || !after.capabilities || JSON.stringify(before.capabilities) !== JSON.stringify(after.capabilities)) reasons.push('capability sets are missing or differ');
   if (before.contractIntegrity !== 'verified' || after.contractIntegrity !== 'verified') reasons.push('delivery contract is missing, unregistered, stale or unreadable');
+  if (before.artifactIntegrity?.status !== 'consistent' || after.artifactIntegrity?.status !== 'consistent') reasons.push('registered artifact integrity is inconsistent or unverified');
   if (before.operations.unreadable || after.operations.unreadable) reasons.push('operation receipts are unreadable');
   if (before.operations.interrupted || after.operations.interrupted) reasons.push('interrupted operation outcomes require review');
+  if (before.operations.running || after.operations.running || before.agents.running || after.agents.running) reasons.push('operations or Agent jobs are still running');
   if (before.stateProjection !== 'consistent' || after.stateProjection !== 'consistent') reasons.push('state projection is missing, unreadable or diverged from the durable ledger');
   const eligible = reasons.length === 0;
   const coverageKeys = ['providerReported', 'estimated', 'unknown', 'unverified'];
