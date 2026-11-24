@@ -26,7 +26,7 @@ export function expandedProjectScanOptions(coverage) {
   return options;
 }
 export function scanProjectSources(root, input = {}) {
-  const limits = projectScanOptions(input), files = [], excludedVirtualEnvironments = [];
+  const limits = projectScanOptions(input), files = [], packageManifests = [], excludedVirtualEnvironments = [];
   function walk(current) {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       if (ignoredProjectDirectories.has(entry.name)) continue;
@@ -36,6 +36,10 @@ export function scanProjectSources(root, input = {}) {
         continue;
       }
       if (entry.isDirectory()) { if (walk(absolute)) return true; }
+      else if (entry.isFile() && entry.name === 'package.json' && current !== root) {
+        if (packageManifests.length === limits.maxSourceFiles) return true;
+        packageManifests.push(path.relative(root, absolute).split(path.sep).join('/'));
+      }
       else if (entry.isFile() && extensions.has(path.extname(entry.name))) {
         if (files.length === limits.maxSourceFiles) return true;
         files.push(path.relative(root, absolute).split(path.sep).join('/'));
@@ -45,5 +49,5 @@ export function scanProjectSources(root, input = {}) {
   }
   const sourceTruncated = walk(root), entries = files.filter(file => entryPattern.test(file)), routes = files.filter(file => routePattern.test(file));
   const entrypointsTruncated = entries.length > limits.maxEntrypoints, routesTruncated = routes.length > limits.maxRoutes;
-  return { files, excludedVirtualEnvironments, entrypoints: entries.slice(0, limits.maxEntrypoints), routeCandidates: routes.slice(0, limits.maxRoutes), coverage: { sourceCount: files.length, sourceLimit: limits.maxSourceFiles, sourceTruncated, entrypointCount: entries.length, entrypointLimit: limits.maxEntrypoints, entrypointsTruncated, routeCount: routes.length, routeLimit: limits.maxRoutes, routesTruncated, complete: !sourceTruncated && !entrypointsTruncated && !routesTruncated } };
+  return { files, packageManifests, excludedVirtualEnvironments, entrypoints: entries.slice(0, limits.maxEntrypoints), routeCandidates: routes.slice(0, limits.maxRoutes), coverage: { sourceCount: files.length, sourceLimit: limits.maxSourceFiles, sourceTruncated, entrypointCount: entries.length, entrypointLimit: limits.maxEntrypoints, entrypointsTruncated, routeCount: routes.length, routeLimit: limits.maxRoutes, routesTruncated, complete: !sourceTruncated && !entrypointsTruncated && !routesTruncated } };
 }

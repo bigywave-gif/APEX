@@ -28,5 +28,11 @@ try {
   assert.throws(() => projectScanOptions({ maxSourceFiles: 0 }));
   assert.throws(() => projectScanOptions({ maxRoutes: 1000001 }));
   assert.throws(() => projectScanOptions({ unknown: 1 }));
+  const packageOnly = path.join(root, 'package-only'); fs.mkdirSync(path.join(packageOnly, 'a'), { recursive: true }); fs.mkdirSync(path.join(packageOnly, 'b'));
+  fs.writeFileSync(path.join(packageOnly, 'a/package.json'), '{}'); fs.writeFileSync(path.join(packageOnly, 'b/package.json'), '{}');
+  const limitedPackages = scanProjectSources(packageOnly, { maxSourceFiles: 1 });
+  assert.equal(limitedPackages.coverage.sourceTruncated, true); assert.equal(limitedPackages.packageManifests.length, 1);
+  const completePackages = scanProjectSources(packageOnly, expandedProjectScanOptions(limitedPackages.coverage));
+  assert.equal(completePackages.coverage.complete, true); assert.equal(completePackages.packageManifests.length, 2);
   console.log(JSON.stringify({ status: 'passed', scope: 'scan limits, exact boundaries and ignored directories' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

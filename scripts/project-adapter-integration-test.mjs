@@ -17,12 +17,16 @@ try {
     { name: 'preact', dependencies: { preact: '10' }, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low', framework: 'preact' },
     { name: 'solid', dependencies: { 'solid-js': '1' }, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low', framework: 'solid' },
     { name: 'jsx-only', dependencies: {}, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low', framework: 'jsx-compatible' },
-    { name: 'mixed', dependencies: { react: '19', vue: '3' }, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low' }
+    { name: 'mixed', dependencies: { react: '19', vue: '3' }, source: 'src/app.tsx', adapter: 'generic-saas', confidence: 'low' },
+    { name: 'nested-react', dependencies: {}, source: 'packages/web/app.tsx', adapter: 'generic-saas', confidence: 'low', nested: { path: 'packages/web/package.json', dependencies: { react: '19' }, framework: 'react' } },
+    { name: 'nested-vue', dependencies: { react: '19' }, source: 'src/app.tsx', adapter: 'react-saas', confidence: 'low', nested: { path: 'packages/web/package.json', dependencies: { vue: '3' }, framework: 'vue' } },
+    { name: 'nested-invalid', dependencies: { react: '19' }, source: 'src/app.tsx', adapter: 'react-saas', confidence: 'low', nested: { path: 'packages/web/package.json', invalid: true } }
   ];
   for (const item of cases) {
     const project = path.join(base, item.name), run = 'adapter', session = 'adapter-session', runDir = path.join(project, '.apex/runs', run);
     fs.mkdirSync(path.dirname(path.join(project, item.source)), { recursive: true });
     fs.writeFileSync(path.join(project, item.source), 'export const fixture = true;\n');
+    if (item.nested) { const file = path.join(project, item.nested.path); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, item.nested.invalid ? '{invalid' : JSON.stringify({ dependencies: item.nested.dependencies })); }
     if (item.name === 'vue') {
       for (let i = 0; i < 4; i++) fs.writeFileSync(path.join(path.dirname(path.join(project, item.source)), `extra${i}.ts`), 'export const extra = true;\n');
       fs.mkdirSync(path.join(project, '.custom-env'));
@@ -37,6 +41,7 @@ try {
     assert.equal(inventory.adapterRecommendation.id, item.adapter, item.name);
     if (item.confidence) assert.equal(inventory.adapterRecommendation.confidence, item.confidence, item.name);
     if (item.framework) { assert.ok(inventory.frameworks.includes(item.framework), item.name); assert.ok(!inventory.frameworks.includes('react'), item.name); }
+    if (item.nested) { const evidence = inventory.nestedPackages.find(record => record.path === item.nested.path); assert.ok(evidence, item.name); assert.equal(evidence.status, item.nested.invalid ? 'unverified' : 'read'); if (item.nested.framework) assert.ok(evidence.frameworks.includes(item.nested.framework)); }
     assert.equal(inventory.scanCoverage.complete, true);
     if (item.name === 'vue') {
       assert.ok(inventory.ignoredPaths.includes('.custom-env'));
