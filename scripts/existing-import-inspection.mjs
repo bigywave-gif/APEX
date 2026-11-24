@@ -49,6 +49,13 @@ export function embeddedScriptPositions(text) {
 }
 
 const marker = 'APEX_UNRESOLVED_LOCAL_IMPORTS:';
+function failureSnapshot(stderr) {
+  const line = String(stderr || '').split(/\r?\n/).find(item => item.startsWith(marker));
+  if (!line) return null;
+  const value = JSON.parse(line.slice(marker.length));
+  if (!Array.isArray(value) || !value.length || value.length > 10000) throw new Error('invalid unresolved import evidence');
+  return value;
+}
 function digest(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function safePath(root, relative) {
   if (typeof relative !== 'string' || !relative || path.isAbsolute(relative)) throw new Error('invalid unresolved import path');
@@ -87,10 +94,25 @@ export function unresolvedFailure(imports) {
 }
 export function unresolvedCauseChanged(stderr, projectRoot) {
   try {
-    const line = String(stderr || '').split(/\r?\n/).find(item => item.startsWith(marker));
-    if (!line) return false;
-    const previous = JSON.parse(line.slice(marker.length));
+    const previous = failureSnapshot(stderr);
+    if (!previous) return false;
     const imports = previous.map(item => ({ source: item.source, reference: item.reference, candidates: item.candidates.map(candidate => candidate.path) }));
     return JSON.stringify(previous) !== JSON.stringify(unresolvedSnapshot(projectRoot, imports));
   } catch { return false; }
+}
+
+// The full evidence remains in the controlled receipt. Router status exposes
+// a bounded digest so an analyst can identify the exact references without
+// repeatedly loading or transmitting a potentially large receipt.
+export function unresolvedFailureSummary(stderr) {
+  try {
+    const entries = failureSnapshot(stderr);
+    if (!entries) return null;
+    const visible = entries.slice(0, 10).map(item => {
+      if (typeof item?.source !== 'string' || !item.source || typeof item.reference !== 'string' || !item.reference || typeof item.sourceState !== 'string' || !Array.isArray(item.candidates) || item.candidates.length > 100) throw new Error('invalid unresolved import evidence');
+      if (item.source.length > 4096 || item.reference.length > 4096 || item.sourceState.length > 128 || !item.candidates.every(candidate => typeof candidate?.path === 'string' && candidate.path.length <= 4096 && typeof candidate.state === 'string' && candidate.state.length <= 128)) throw new Error('invalid unresolved import evidence');
+      return { source: item.source.slice(0, 256), sourceTruncated: item.source.length > 256, reference: item.reference.slice(0, 256), referenceTruncated: item.reference.length > 256, sourceState: item.sourceState, candidateCount: item.candidates.length, candidates: item.candidates.slice(0, 2).map(candidate => ({ path: candidate.path.slice(0, 256), pathTruncated: candidate.path.length > 256, state: candidate.state })), candidatesTruncated: item.candidates.length > 2 };
+    });
+    return { status: 'unverified', recordedCount: entries.length, entries: visible, entriesTruncated: entries.length > visible.length, recordedEvidenceMayBePartial: true, fullEvidence: 'controlled-operation-receipt' };
+  } catch { return { status: 'unreadable', fullEvidence: 'controlled-operation-receipt' }; }
 }

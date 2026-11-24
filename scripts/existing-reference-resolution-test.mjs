@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
 import { assessResourceVerification, observeResourceImages, observeResourceExemptions, observeBackgroundImages, resourceVerificationBinding, resourceImageProbeCode } from './existing-resource-runtime.mjs';
-import { unresolvedSnapshot, unresolvedFailure, unresolvedCauseChanged } from './existing-import-inspection.mjs';
+import { unresolvedSnapshot, unresolvedFailure, unresolvedCauseChanged, unresolvedFailureSummary } from './existing-import-inspection.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-reference-resolution-'));
@@ -22,6 +22,12 @@ try {
   put('src/race-candidate.ts', 'export const appeared = true;');
   const recordedMissing = unresolvedFailure(scannedMissing);
   assert.equal(unresolvedCauseChanged(recordedMissing, project), true, 'a candidate appearing after inspection must allow recovery');
+  const manyMissing = Array.from({ length: 25 }, (_, index) => ({ ...scannedMissing[0], reference: `./missing-${index}`, candidates: Array.from({ length: 8 }, () => ({ path: 'x'.repeat(800), state: 'absent' })) }));
+  const bounded = unresolvedFailureSummary(unresolvedFailure(manyMissing));
+  assert.equal(bounded.status, 'unverified'); assert.equal(bounded.recordedCount, 25); assert.equal(bounded.entries.length, 10); assert.equal(bounded.entriesTruncated, true);
+  assert.equal(bounded.entries[0].candidates.length, 2); assert.equal(bounded.entries[0].candidatesTruncated, true); assert.equal(bounded.entries[0].candidates[0].pathTruncated, true);
+  assert.ok(JSON.stringify(bounded).length < 12000, 'Router diagnostics must remain bounded');
+  assert.equal(unresolvedFailureSummary('APEX_UNRESOLVED_LOCAL_IMPORTS:{invalid').status, 'unreadable');
   const scannedPresent = unresolvedSnapshot(project, racedImport);
   assert.equal(unresolvedCauseChanged(unresolvedFailure(scannedPresent), project), false);
   put('src/race-source.ts', "import './other-candidate';");
@@ -59,6 +65,11 @@ try {
   assert.equal(fs.existsSync(path.join(dir, 'code-reference.json')), false);
   const failedStatus = call('apex-router.mjs', ['status', project, run, session]);
   assert.equal(failedStatus.terminalResponseContract?.blockingOperation?.category, 'unresolved-local-import');
+  const diagnostics = failedStatus.terminalResponseContract.blockingOperation.unresolvedImportDiagnostics;
+  assert.equal(diagnostics.status, 'unverified'); assert.equal(diagnostics.recordedEvidenceMayBePartial, true);
+  assert.ok(diagnostics.entries.some(item => item.source === 'src/main.ts' && item.reference === './missing-local-module'));
+  assert.equal(diagnostics.fullEvidence, 'controlled-operation-receipt');
+  assert.doesNotMatch(failedStatus.terminalResponseContract.blockingOperation.observedError, /APEX_UNRESOLVED_LOCAL_IMPORTS/);
   const sameAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
   const repeated = spawnSync(process.execPath, [path.join(core, 'scripts/apex-action.mjs'), ...captureArgs.map(arg => arg === firstAuth.authorizationRef ? sameAuth.authorizationRef : arg)], { encoding: 'utf8', timeout: 30000 });
   assert.notEqual(repeated.status, 0); assert.match(repeated.stderr, /identical controlled operation/);

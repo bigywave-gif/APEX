@@ -34,7 +34,7 @@ import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, valid
 import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage } from './existing-resource-freshness.mjs';
-import { unresolvedCauseChanged } from './existing-import-inspection.mjs';
+import { unresolvedCauseChanged, unresolvedFailureSummary } from './existing-import-inspection.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
@@ -169,13 +169,14 @@ function latestBlockingOperation(runDir, action) {
   const latest = unresolved || receipts[0];
   if (!latest || latest.receipt.status === 'succeeded') return null;
   const receipt = latest.receipt;
-  const observedError = `${receipt.stderr || receipt.stdout || 'controlled operation failed without stderr'}`.trim().slice(0, 1200);
+  const category = receipt.status === 'interrupted' ? 'operation-interrupted' : failureCategory(receipt);
+  const observedError = category === 'unresolved-local-import' ? 'Literal local imports could not be resolved; inspect the bounded diagnostics and original controlled operation receipt.' : `${receipt.stderr || receipt.stdout || 'controlled operation failed without stderr'}`.trim().slice(0, 1200);
   return {
     kind: receipt.status === 'interrupted' ? 'operation-interrupted' : 'operation-failed',
-    category: receipt.status === 'interrupted' ? 'operation-interrupted' : failureCategory(receipt),
+    category,
     action,
     script: receipt.script || null,
-    ...(failureCategory(receipt) === 'unresolved-local-import' ? { unresolvedImportCauseChanged: unresolvedCauseChanged(receipt.stderr, path.resolve(runDir, '..', '..', '..')) } : {}),
+    ...(category === 'unresolved-local-import' ? { unresolvedImportCauseChanged: unresolvedCauseChanged(receipt.stderr, path.resolve(runDir, '..', '..', '..')), unresolvedImportDiagnostics: unresolvedFailureSummary(receipt.stderr) } : {}),
     ...(receipt.optionalSkillContext ? { optionalSkillContext: receipt.optionalSkillContext } : {}),
     operationReceipt: path.relative(runDir, latest.path),
     exitCode: receipt.exitCode ?? null,

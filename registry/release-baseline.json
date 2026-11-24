@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T23:00:56.405Z",
+  "generatedAt": "2026-11-24T23:11:33.441Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -68,7 +68,7 @@
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-reconcile.mjs": "b827d327e518916fa6187df1e4a1f52c8d49bdffe1bd4402e944b13ed5c5877a",
     "scripts/apex-recover.mjs": "52424517bbe1cc1677999b89c9ce686cf84fc2195992357f04671f69cafa9279",
-    "scripts/apex-router.mjs": "1a989ae53271fbd468eb7c3b19852359da0c085482eeedc151d6a2293d141dab",
+    "scripts/apex-router.mjs": "0690b6011d4800d1f5f37f098186012434db909e34196d004dc6cb342ab6a761",
     "scripts/apex-run.mjs": "46e1524c809022d0d2cb58ea2bc0db8bfe6a746f8d8b0b7f2c53b4b9e19225df",
     "scripts/apex-runtime-guard.mjs": "86f7341158c31e5566dbecaf0a3de446e7b624680d40d9586ce819441ac1e9fe",
     "scripts/apex-validate.mjs": "6a653f16b86f1f739da3295ef62da576e0a78db519f70d53a4f88638db31485b",
@@ -120,8 +120,8 @@
     "scripts/evidence-provenance.mjs": "ec1725afc9db49574ff08b04739deed7fdf09b04c79ef3e02d9abef2787bc650",
     "scripts/existing-baseline-browser-test.mjs": "7ae5b6b8fb1685e9755456a553eba9e1d5f75459340ff2d1ff3c63c20f83f461",
     "scripts/existing-code-reference.mjs": "865965bfda10fa1ab25befd5867c3c2ab0a16c4efb4ce5b58d7fd40be6335230",
-    "scripts/existing-import-inspection.mjs": "3c35ceb4b3e5890a3569f71b98bdabc89ecc829350dc55aade3abbc5cd5a8eb2",
-    "scripts/existing-reference-resolution-test.mjs": "e4f083aaa85444890bc8098e2384be4b35ab07c3ed7226f46f426244190d684c",
+    "scripts/existing-import-inspection.mjs": "e66d95d157d4d030821213785300a5cbca683a7ab532284d2b7dc97d5db77952",
+    "scripts/existing-reference-resolution-test.mjs": "c49d69e7d9c2298a5f647ef797500405a84d541c09de34d70856e9ee52b0c7f1",
     "scripts/existing-resource-freshness.mjs": "63bcefda9f3169a5310d3cf111d6d365483d786010a4136ccf8a01523aee4004",
     "scripts/existing-resource-runtime.mjs": "f103ed456c99dc108075575bde80e9f05c7933351b0791f5d2e1c08c9f6b1438",
     "scripts/experience-evaluator.mjs": "97034f0159a68bcd3d6cbba36edd8d8d62074879659b24dd38decb77d7e78ea6",
