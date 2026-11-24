@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T10:52:04.200Z",
+  "generatedAt": "2026-11-24T10:59:29.501Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -67,7 +67,7 @@
     "scripts/apex-action.mjs": "eb005e2e18e77ab4414608455e25accc688f3fa0987599573b09155fc9890df5",
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-reconcile.mjs": "b827d327e518916fa6187df1e4a1f52c8d49bdffe1bd4402e944b13ed5c5877a",
-    "scripts/apex-recover.mjs": "e2d9933d41a8e883164504344710b240b6da55ebc20d1c15481dfc6b0a97c253",
+    "scripts/apex-recover.mjs": "cc112d3974e2a4b7e57c6ea9ff85ad2ec5551c990d07370436c89f64065ac6da",
     "scripts/apex-router.mjs": "8f578b9f458afbb56a12c025f5b7cb2be1af5d20ee2001752b30e98bc8e36f08",
     "scripts/apex-run.mjs": "46e1524c809022d0d2cb58ea2bc0db8bfe6a746f8d8b0b7f2c53b4b9e19225df",
     "scripts/apex-runtime-guard.mjs": "f1e30bcb63296a31f8a2f6472ef0164f37c90d759b9a7183b0f3c4c89c8e5719",
@@ -177,7 +177,7 @@
     "scripts/quality-measurement.mjs": "5c277ae1b93ee79e850e78d210db7cab7786b922a6c45db06e65737301b2c160",
     "scripts/quality-workflow-test.mjs": "76499023673371bfaedc3cda4bd734192106a6a6d4bd555eb654d764e64cc0dc",
     "scripts/quality-workflow.mjs": "b6064bad5431d9a163239fd95ea5c094a810a0da69c4ea075d29a12aedb9ca26",
-    "scripts/recovery-archive-router-test.mjs": "2288d327fa2b986b7bec66e063ff605ec6544a5cb48ae3a891074b34023cad7f",
+    "scripts/recovery-archive-router-test.mjs": "317db7dd86b6343d067132e9b65d9d56f7c7f7d8c9ffd2518f2c146dc85d9f29",
     "scripts/recovery-archive-test.mjs": "b24fc9c4c8f7934c086e4a7fadd4f25587f7c6e2ff35a8a0dac9919cfbbb1d65",
     "scripts/recovery-archive.mjs": "e43c6c4be0d992234b8330bf90cbba3e3540ccaba15a65014f4831b45a026e45",
     "scripts/release-version-cache-test.mjs": "a21fd4078d7a7cc04221e5bd98c64f1f548e4940f859d8d59e2585d809672dff",

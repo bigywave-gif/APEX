@@ -83,14 +83,12 @@ const staleInputReferences = (preRecoveryReconciliation.issues || [])
 // run-local invalidated archive. Their original operation registrations must
 // be retired too; otherwise a correct revision is permanently repair-required.
 const staleArchivedOutputReferences = archivedMissingReferences(runDir, preRecoveryReconciliation.issues, invalidationEvents(runDir), state);
-// Runtime browser capture is an append-only observation that is deliberately
-// replaced by a later authorized capture.  Preserve the old ledger artifact
-// as archived lineage and let the next capture register its new hash; treating
-// that controlled replacement as tampering otherwise deadlocks recovery.
-const staleRuntimeEvidenceReferences = (preRecoveryReconciliation.issues || [])
+// A changed browser capture has no proven replacement until a controlled
+// capture archives the old registration before writing the new evidence.
+const mismatchedRuntimeEvidenceReferences = (preRecoveryReconciliation.issues || [])
   .filter(issue => issue.type === 'registered-artifact-hash-mismatch' && String(issue.reference || '') === 'evidence/runtime-browser-capture.json')
   .map(issue => issue.reference);
-const archivedArtifacts = archiveArtifacts(runDir, [...staleInputReferences, ...staleArchivedOutputReferences, ...staleRuntimeEvidenceReferences], 'recovery-recognized-invalidated-artifacts');
+const archivedArtifacts = archiveArtifacts(runDir, [...staleInputReferences, ...staleArchivedOutputReferences], 'recovery-recognized-invalidated-artifacts');
 const refs = state.checkpoints || [];
 const changed = [];
 const latestRef = refs[refs.length - 1] || null;
@@ -115,7 +113,7 @@ if (changed.length || invalidates.has('gate3')) state.gates.gate3 = { status: 'r
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
 commitRunState(runDir, state, { reason: 'controlled-recovery', event: { type: 'run-recovered', changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs } });
-appendLedgerEvent(runDir, { type: 'recovery-complete', interruptedOperations, recoveredAgentJobs, archivedArtifacts, staleInputReferences, staleRuntimeEvidenceReferences, implementationSealRecovery });
+appendLedgerEvent(runDir, { type: 'recovery-complete', interruptedOperations, recoveredAgentJobs, archivedArtifacts, staleInputReferences, mismatchedRuntimeEvidenceReferences, implementationSealRecovery });
 const reconciliation = reconcileRun(runDir);
 console.log(JSON.stringify({ checkpoint: latestRef?.path || null, changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs, archivedArtifacts, revisionRecovery, reconciliation, gate2: state.gates.gate2.status, gate3: state.gates.gate3.status }));
 if (reconciliation.status !== 'consistent') process.exitCode = 2;

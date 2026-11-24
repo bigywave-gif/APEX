@@ -51,5 +51,22 @@ try {
       assert.ok(reconcileRun(dir).issues.some(issue => issue.type === 'registered-artifact-missing' && issue.reference === reference));
     }
   }
+  {
+    const id = 'changed-browser-capture', session = 'session-changed-browser-capture';
+    let result = run('apex-router.mjs', ['intake', project, id, 'greenfield', 'standard', 'interactive', session, '确认调用 APEX']);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const dir = path.join(project, '.apex', 'runs', id), reference = 'evidence/runtime-browser-capture.json', file = path.join(dir, reference);
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'original');
+    recordArtifact(dir, { artifactId: 'original-browser-capture', reference, sha256: sha('original') });
+    fs.writeFileSync(file, 'externally-changed');
+    result = run('apex-router.mjs', ['authorize', project, id, session, 'recover']);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    result = run('apex-action.mjs', ['run', project, id, session, JSON.parse(result.stdout).authorizationRef, 'recover', 'apex-recover.mjs', dir]);
+    assert.notEqual(result.status, 0, 'unproven browser evidence changes must keep recovery blocked');
+    assert.ok(reconcileRun(dir).issues.some(issue => issue.type === 'registered-artifact-hash-mismatch' && issue.reference === reference));
+    const db = new DatabaseSync(path.join(dir, 'run-ledger.sqlite'), { readOnly: true });
+    assert.equal(db.prepare('SELECT status FROM artifacts WHERE artifact_id = ?').get('original-browser-capture').status, 'verified'); db.close();
+    assert.equal(fs.readFileSync(file, 'utf8'), 'externally-changed');
+  }
   console.log(JSON.stringify({ status: 'passed', scope: 'Router recovery rejects unrelated archives and accepts exact historical evidence' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }
