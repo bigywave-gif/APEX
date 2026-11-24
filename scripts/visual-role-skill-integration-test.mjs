@@ -76,10 +76,23 @@ try {
       assert.notEqual(refreshed.tasteSkill.sha256, savedSelection.tasteSkill.sha256);
       assert.notEqual(refreshed.agentJobs['ui-designer'], jobId);
       const replacementId = refreshed.agentJobs['ui-designer'];
-      expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, replacementId, 'visual', 'running_skill_drift']), 'claim updated designer');
+      const runningClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, replacementId, 'visual', 'running_skill_drift']), 'claim updated designer');
       fs.appendFileSync(skillFile, '\n# Changed while running\n');
       const runningDrift = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect running designer after skill drift');
       assert.equal(runningDrift.executionDirective?.currentStep?.id, 'visual-role-wait', 'a running attempt must not be archived or duplicated');
+      const currentJob = agentRuntimeStatus(runDir, replacementId).jobs[0];
+      const inputFile = path.join(runDir, 'running-drift-advisory.json');
+      fs.writeFileSync(inputFile, JSON.stringify({ schemaVersion: '1.0', roleId: 'ui-designer', stage: 'visual', adapterVersion: '1.0.0', inputBindings: refreshed.inputBindings, findings: [{ id: 'visual-fact', classification: 'fact', statement: 'The contract is bound to the current role.', evidence: refreshed.inputBindings.map(item => item.path) }], recommendations: [{ id: 'visual-choice', choice: 'Use a task-oriented hierarchy.', rationale: 'The choice follows the product task.', acceptance: ['The hierarchy is readable.'] }], execution: { inputTokens: 3, outputTokens: 2, usageSource: 'provider-reported', model: 'test-fixture', sessionId: currentJob.payload.agentSessionId, skillBindings: currentJob.payload.skillBindings, leaseToken: runningClaim.leaseToken, tasteSkillUsage: { sha256: refreshed.tasteSkill.sha256, appliedRules: ['Use appropriate hierarchy.'], notApplicableRules: [] } }, status: 'ready' }));
+      const failed = invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', inputFile]);
+      assert.notEqual(failed.status, 0); assert.match(failed.stderr, /required taste-skill changed after role selection/);
+      const afterFailure = agentRuntimeStatus(runDir);
+      assert.equal(afterFailure.tokenUsage.visual, 5, 'reported tokens must settle once');
+      assert.notEqual(afterFailure.jobs.find(job => job.jobId === replacementId).status, 'running');
+      const resumed = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect settled skill drift');
+      assert.equal(resumed.executionDirective?.currentStep?.id, 'visual-role-repair');
+      assert.equal(resumed.executionDirective?.blockingOperation, null);
+      assert.notEqual(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', inputFile]).status, 0);
+      assert.equal(agentRuntimeStatus(runDir).tokenUsage.visual, 5, 'replaying the settled attempt must not charge it twice');
       console.log(JSON.stringify({ status: 'passed', scope: 'changed taste-skill causes fenced repair and selection with updated hash' }));
     } finally { fs.writeFileSync(skillFile, originalSkill); fs.rmSync(root, { recursive: true, force: true }); }
     process.exit(0);
