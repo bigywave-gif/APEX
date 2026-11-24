@@ -243,6 +243,7 @@ function assertStyleBaseline(style, expectedMode) {
 
 function assertExistingCodeReferenceUnchanged(runDir, state) {
   const reference = validateFile('code-reference.schema.json', requireArtifact(runDir, state, 'codeReference', 'code-reference.json'));
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'static-relative-js-ts-v1') throw new Error('Existing code reference predates static local import inspection; its dependency coverage is unverified');
   const projectRoot = path.resolve(reference.projectRoot);
   // Once Gate 2 has opened, the Existing snapshot remains immutable evidence,
   // but files inside the frozen implementation closure are expected to differ.

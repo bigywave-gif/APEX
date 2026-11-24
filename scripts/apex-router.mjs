@@ -34,6 +34,7 @@ import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, valid
 import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage } from './existing-resource-freshness.mjs';
+import { unresolvedCauseChanged } from './existing-import-inspection.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
@@ -127,6 +128,7 @@ function receiptFor(dir, artifact, action, strict) {
 }
 function failureCategory(receipt) {
   const evidence = `${receipt.stderr || ''}\n${receipt.stdout || ''}`;
+  if (receipt.script === 'existing-code-reference.mjs' && /^APEX_UNRESOLVED_LOCAL_IMPORTS:/m.test(evidence)) return 'unresolved-local-import';
   if (/project code changed after complete reference capture|scoped source changed after code reference capture/i.test(evidence)) return 'source-drift';
   if (/generate_visual modified formal project files outside \.apex/i.test(evidence)) {
     // Receipts written before the formal-source boundary fix contained only a
@@ -173,6 +175,7 @@ function latestBlockingOperation(runDir, action) {
     category: receipt.status === 'interrupted' ? 'operation-interrupted' : failureCategory(receipt),
     action,
     script: receipt.script || null,
+    ...(failureCategory(receipt) === 'unresolved-local-import' ? { unresolvedImportCauseChanged: unresolvedCauseChanged(receipt.stderr, path.resolve(runDir, '..', '..', '..')) } : {}),
     ...(receipt.optionalSkillContext ? { optionalSkillContext: receipt.optionalSkillContext } : {}),
     operationReceipt: path.relative(runDir, latest.path),
     exitCode: receipt.exitCode ?? null,
@@ -1186,6 +1189,7 @@ function existingCodeReferenceFreshness(runDir, state) {
     const reference = read(referenceFile), skeleton = read(skeletonFile);
     const projectRoot = path.resolve(reference.projectRoot || path.join(runDir, '..', '..', '..'));
     if (reference.complete !== true || !reference.sourceTreeHash || !Array.isArray(reference.files) || !reference.files.length) return { ready: false, reason: 'code reference is not a complete source snapshot' };
+    if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'static-relative-js-ts-v1') return { ready: false, reason: 'code reference predates static local import inspection; recapture before proceeding' };
     const newResources = newlyAvailableResources(reference, projectRoot);
     if (newResources.length) return { ready: false, reason: `scoped source changed after code reference capture: previously unavailable resource ${newResources[0]}` };
     const newConfigs = newlyAvailableConfigs(reference, projectRoot);
@@ -2286,7 +2290,7 @@ function executionDirective(state, runDir = null) {
   }
   const releasedRuntimeStart = action === 'generate_visual' && latestFailure?.category === 'runtime-start-locked' && latestFailure.script === 'visual-sandbox-runtime.mjs' && runtimeStartLockAvailable(runDir);
   const recoveredRuntime = action === 'generate_visual' && latestFailure?.category === 'runtime-recovery-unavailable' && latestFailure.script === 'visual-sandbox-runtime.mjs' && recoveredRuntimeReady(runDir, state.runId);
-  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || releasedRuntimeStart || recoveredRuntime || latestFailure?.category === 'obsolete-boundary-snapshot');
+  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'unresolved-local-import' && latestFailure.unresolvedImportCauseChanged) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || releasedRuntimeStart || recoveredRuntime || latestFailure?.category === 'obsolete-boundary-snapshot');
   const blockingOperation = continuationStall(runDir, action, currentStep.id) || (automaticallyRemediableFailure ? null : latestFailure);
   return {
     kind: 'must-complete-before-user-response',

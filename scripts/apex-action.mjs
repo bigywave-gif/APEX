@@ -13,6 +13,7 @@ import { recordLateCancelledOperation } from './cancelled-operation-finalizer.mj
 import { runControlledSubprocess } from './controlled-subprocess.mjs';
 import { runtimeStartLockAvailable } from './runtime-start-lock.mjs';
 import { recoveredRuntimeReady } from './runtime-launch-intent.mjs';
+import { unresolvedCauseChanged } from './existing-import-inspection.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
@@ -212,6 +213,10 @@ function failedOperationWithSameKey(operationKey) {
   }
   return null;
 }
+function unresolvedRetryAllowed(operationKey) {
+  const matching = fs.readdirSync(operationDirectory).filter(name => name.endsWith('.json')).map(name => JSON.parse(fs.readFileSync(path.join(operationDirectory, name), 'utf8'))).filter(record => ['failed', 'interrupted'].includes(record.status) && record.operationKey === operationKey);
+  return matching.length > 0 && matching.every(record => record.status === 'failed' && unresolvedCauseChanged(record.stderr, projectRoot));
+}
 function outputFileHashes(stdout) {
   const runRoot = fs.realpathSync(runDirectory), paths = new Set();
   const collect = value => {
@@ -281,7 +286,8 @@ if (priorFailure) {
   const prior = JSON.parse(fs.readFileSync(path.join(runDirectory, priorFailure), 'utf8'));
   const releasedRuntimeLock = script === 'visual-sandbox-runtime.mjs' && scriptArgs[0] === 'start' && prior.status === 'failed' && /another runtime start is active or its lock is unavailable/.test(prior.stderr || '') && runtimeStartLockAvailable(runDirectory);
   const recoveredRuntime = script === 'visual-sandbox-runtime.mjs' && scriptArgs[0] === 'start' && prior.status === 'failed' && /existing run-local Demo process is running but its URL is unavailable/.test(prior.stderr || '') && recoveredRuntimeReady(runDirectory, runId);
-  if (!releasedRuntimeLock && !recoveredRuntime) fail(`an identical controlled operation already failed or was interrupted (${priorFailure}); inspect its outcome and change the observed cause, state, or input before requesting another retry`);
+  const changedImport = script === 'existing-code-reference.mjs' && scriptArgs[0] === 'capture' && unresolvedRetryAllowed(operationKey);
+  if (!releasedRuntimeLock && !recoveredRuntime && !changedImport) fail(`an identical controlled operation already failed or was interrupted (${priorFailure}); inspect its outcome and change the observed cause, state, or input before requesting another retry`);
 }
 const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
