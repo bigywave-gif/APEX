@@ -50,7 +50,7 @@
 - `scripts/preflight.mjs` 在干净当前用户目录中可执行
 - `scripts/portable-install-contract-test.mjs` 证明无维护者绝对路径、Bridge 可发布且 Preflight 状态可解释
 - `scripts/role-advisory-contract-test.mjs` 证明受控角色只能经 Router action 选择、记录、汇总与校验，且不产生角色级用户确认
-- `registry/agency-role-registry.json` 固定上游 commit、许可证、适配职责与来源文件哈希；默认角色链不超过每阶段 3 个角色
+- `registry/agency-role-registry.json` 固定上游 commit、许可证、适配职责与来源文件哈希；按阶段和变更范围选择全部必要角色，独立角色受控并发，不能因数量上限遗漏必要职责
 
 ### 接入
 
