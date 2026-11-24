@@ -231,7 +231,14 @@ try {
  const incompleteAuth=route(['authorize',project,id,session,'compile_visual_bundle']);
  const incomplete=run(action,['run',project,id,session,incompleteAuth.authorizationRef,'compile_visual_bundle','visual-source.mjs','compile',dir,incompleteInput]);
  assert.notEqual(incomplete.status,0);assert.match(incomplete.stderr,/exactly preserve/);
- invoke('compile_visual_bundle','visual-source.mjs',['compile',dir,sourceInput]);
+ if (process.env.APEX_TEST_EXTRA_VISUAL_SKILL === '1') {
+  const skillFile=fs.realpathSync(path.join(process.env.CODEX_HOME || '', 'skills', 'brandkit', 'SKILL.md'));
+  const temporaryRoots=[os.tmpdir(),'/private/tmp'].filter(fs.existsSync).map(base=>fs.realpathSync(base));
+  assert.ok(temporaryRoots.some(base=>skillFile.startsWith(base+path.sep)),'optional skill removal test requires an isolated temporary CODEX_HOME');
+  const skillBytes=fs.readFileSync(skillFile);
+  try {fs.unlinkSync(skillFile);invoke('compile_visual_bundle','visual-source.mjs',['compile',dir,sourceInput]);}
+  finally {fs.writeFileSync(skillFile,skillBytes);}
+ } else invoke('compile_visual_bundle','visual-source.mjs',['compile',dir,sourceInput]);
  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'visual-source-manifest.json'))).skillRuleDecisions, plan.selectionAnalysis.skillRuleDecisions, 'designer Skill decisions must survive visual-source handoff');
  const beforeDependencies=route(['status',project,id,session]);
  assert.equal(beforeDependencies.executionDirective.currentStep.id,'resolve-visual-dependencies');
