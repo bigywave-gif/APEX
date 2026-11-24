@@ -47,6 +47,16 @@ try {
   assert.equal(observed.filter(item => !item.idempotent).length, 1);
   assert.equal(observed.filter(item => item.idempotent).length, 5);
   assert.equal(agentRuntimeStatus(root).tokenUsage.gate1, 7);
+  const replayedUnknown = { stage: 'gate1', observationKey: 'reconciled_host_call_0001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown' };
+  recordObservedTokenUsage(root, replayedUnknown);
+  reconcileObservedTokenUsage(root, { stage: 'gate1', observationKey: replayedUnknown.observationKey, inputTokens: 5, outputTokens: 4, usageSource: 'provider-reported', evidence: 'fixture billing receipt' });
+  assert.equal(recordObservedTokenUsage(root, replayedUnknown).idempotent, true);
+  assert.equal(agentRuntimeStatus(root).tokenUsage.gate1, 16, 'replaying an original unknown must retain reconciled nonzero usage exactly once');
+  assert.throws(() => recordObservedTokenUsage(root, { ...replayedUnknown, usageSource: 'provider-reported', inputTokens: 2 }), /identity conflict/);
+  registerAgent(root, { agentId: 'replay-budget-check', vocation: 'review', stage: 'gate1' });
+  const replayBudgetJob = enqueueAgentJob(root, { agentId: 'replay-budget-check', stage: 'gate1', inputHash: 'replay-budget', payload: { tokenBudget: 6, stageTokenBudget: 20 } });
+  const replayBudgetResult = claimAgentJob(root, replayBudgetJob.jobId);
+  assert.equal(replayBudgetResult.status, 'budget-exhausted'); assert.equal(replayBudgetResult.reportedAvailable, 4);
   assert.throws(() => recordObservedTokenUsage(root, { ...observation, observationKey: 'unknown_usage_00001', usageSource: 'unknown' }), /invalid observed token usage/);
   const unknown = recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'unknown_usage_00001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown', limit: 100 });
   assert.equal(unknown.available, null); assert.equal(unknown.overcommitted, null); assert.equal(unknown.incompleteUsage, true);
@@ -60,6 +70,9 @@ try {
   const uncertainClaim = claimAgentJob(root, eligible.jobId, { claimKey });
   assert.equal(uncertainClaim.status, 'budget-exhausted'); assert.equal(uncertainClaim.reason, 'stage-budget-unknown-usage'); assert.equal(uncertainClaim.available, null);
   reconcileObservedTokenUsage(root, { stage: 'baseline', observationKey: 'unknown_usage_00001', inputTokens: 0, outputTokens: 0, usageSource: 'provider-reported', evidence: 'fixture provider receipt' });
+  const originalReplay = recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'unknown_usage_00001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown', limit: 100 });
+  assert.equal(originalReplay.idempotent, true); assert.equal(originalReplay.incompleteUsage, false);
+  assert.throws(() => recordObservedTokenUsage(root, { stage: 'visual', observationKey: 'unknown_usage_00001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown' }), /identity conflict/);
   const correctedClaim = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(correctedClaim.status, 'running'); assert.equal(correctedClaim.available, 60);
   const replay = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(replay.idempotent, true); assert.equal(replay.available, 60); assert.equal(replay.incompleteUsage, false);
   recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'late_host_usage_0001', inputTokens: 70, outputTokens: 0, usageSource: 'provider-reported', limit: 100 });

@@ -977,7 +977,9 @@ export function recordObservedTokenUsage(runDir, { stage, observationKey, inputT
     if (existing) {
       const row = database.prepare('SELECT stage, agent_id, input_tokens, output_tokens, total_tokens, metadata_json FROM token_usage WHERE id = ?').get(existing.usage_id);
       let metadata; try { metadata = JSON.parse(row?.metadata_json || '{}'); } catch { metadata = {}; }
-      if (!row || row.stage !== stage || row.agent_id !== null || Number(row.input_tokens) !== inputTokens || Number(row.output_tokens) !== outputTokens || Number(row.total_tokens) !== total || metadata.usageSource !== usageSource || metadata.observationKey !== observationKey || metadata.kind !== 'independent-host-call') throw new Error('observed token usage identity conflict');
+      const reconciledUnknownReplay = metadata.reconciled === true && metadata.previousUsageSource === 'unknown' && usageSource === 'unknown' && inputTokens === 0 && outputTokens === 0;
+      const sameUsage = Number(row?.input_tokens) === inputTokens && Number(row?.output_tokens) === outputTokens && Number(row?.total_tokens) === total && metadata.usageSource === usageSource;
+      if (!row || row.stage !== stage || row.agent_id !== null || (!sameUsage && !reconciledUnknownReplay) || metadata.observationKey !== observationKey || metadata.kind !== 'independent-host-call') throw new Error('observed token usage identity conflict');
     }
     if (!existing) {
       const result = database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, NULL, ?, ?, ?, ?, ?)').run(stage, inputTokens, outputTokens, total, now(), JSON.stringify({ usageSource, observationKey, kind: 'independent-host-call' }));

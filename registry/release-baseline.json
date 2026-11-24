@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T20:29:31.359Z",
+  "generatedAt": "2026-11-24T20:37:30.991Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -60,7 +60,7 @@
     "scripts/adapter-coverage-status-test.mjs": "832ab5ae2c2a39825870c5db4eda234dde7b7b2ef26fdc3b3b4f51b873545702",
     "scripts/adapter-coverage.mjs": "31b3205c86eabdcc0e345b400b1ce91ff9a192612afb43fc920aa29beed45e54",
     "scripts/agent-attempt-usage-test.mjs": "ce43c4328db20e2e6c666d2d3c31c8010a5073df39f7cdc0e65bfb4f354233af",
-    "scripts/agent-budget-reservation-test.mjs": "5c25315ce87737cf901ba9c6059a03744e4666dfe7b11fead79b55914bf8382d",
+    "scripts/agent-budget-reservation-test.mjs": "4642a667a906db13e98e4f1d7385a49a0525c46be60c110442a86749ebcf63e3",
     "scripts/agent-concurrency-contract-test.mjs": "086bfbb0c9e2b0a29749a45932e2ba1f3ad00fa0a0a2b914c55af588e4b70a7b",
     "scripts/agent-runtime-contract-test.mjs": "97ae1e73faf82b0199751529ea090e9f2da00db02740d558b12d34a2f75a5646",
     "scripts/agent-runtime.mjs": "e8f1fddbc2d82041b70d3d74b0334019f0ff45d0b30bb15894b780e3c370c2a0",
@@ -201,7 +201,7 @@
     "scripts/router-contract-test.mjs": "eebc1d43307500c83a4e373b4959aaacd7b4412cf4effa39de8525fb79d71edb",
     "scripts/run-ledger-contract-test.mjs": "8c89b7edc24e0f49b3d415235b5712937ecd765253b95df21fd673b4547b4e44",
     "scripts/run-ledger-init-race-test.mjs": "da27ba17ade730304ed7dcb498c165724c453680450b880dd0c62d6387f229c3",
-    "scripts/run-ledger.mjs": "c936ad70fd27250e1b37a5840590c7c06cd32ed51dc8da4920046bad95df61ba",
+    "scripts/run-ledger.mjs": "d20de61648873752ef01b875f0a7663248085ede73956ec88ad7ad127979e10c",
     "scripts/run-metrics-test.mjs": "0e6c209a17b9c1a170f71a22bad0858f89294e0ad9ddf5e9a6f504fa5d8ce6ef",
     "scripts/run-metrics.mjs": "56be2b78b79a8ea65e42602d29d5f0686cdd486d5d48ae1d7da0037132f66a02",
     "scripts/run-migrate.mjs": "62e99e398b3235efd2f2b4d4dc0c432642153ec574672e963ca647b8f4e4e216",
