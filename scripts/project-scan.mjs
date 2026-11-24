@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const ignoredProjectDirectories = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
+export const ignoredProjectDirectories = new Set(['.git', '.apex', '.worktrees', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.vue', '.svelte', '.html', '.htm', '.ejs', '.hbs', '.pug', '.php', '.py', '.java', '.go', '.rb', '.cs']);
 const entryPattern = /(^|\/)(main|index|app|server|client|layout|page)\.(js|jsx|mjs|cjs|ts|tsx|vue|svelte|py|html|htm)$/i;
 const routePattern = /(^|\/)(pages|app|routes|router|views)\/|(^|\/)(routes?|router)\.(js|jsx|ts|tsx|py)$/;
@@ -26,11 +26,15 @@ export function expandedProjectScanOptions(coverage) {
   return options;
 }
 export function scanProjectSources(root, input = {}) {
-  const limits = projectScanOptions(input), files = [];
+  const limits = projectScanOptions(input), files = [], excludedVirtualEnvironments = [];
   function walk(current) {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       if (ignoredProjectDirectories.has(entry.name)) continue;
       const absolute = path.join(current, entry.name);
+      if (entry.isDirectory() && fs.existsSync(path.join(absolute, 'pyvenv.cfg'))) {
+        excludedVirtualEnvironments.push(path.relative(root, absolute).split(path.sep).join('/'));
+        continue;
+      }
       if (entry.isDirectory()) { if (walk(absolute)) return true; }
       else if (entry.isFile() && extensions.has(path.extname(entry.name))) {
         if (files.length === limits.maxSourceFiles) return true;
@@ -41,5 +45,5 @@ export function scanProjectSources(root, input = {}) {
   }
   const sourceTruncated = walk(root), entries = files.filter(file => entryPattern.test(file)), routes = files.filter(file => routePattern.test(file));
   const entrypointsTruncated = entries.length > limits.maxEntrypoints, routesTruncated = routes.length > limits.maxRoutes;
-  return { files, entrypoints: entries.slice(0, limits.maxEntrypoints), routeCandidates: routes.slice(0, limits.maxRoutes), coverage: { sourceCount: files.length, sourceLimit: limits.maxSourceFiles, sourceTruncated, entrypointCount: entries.length, entrypointLimit: limits.maxEntrypoints, entrypointsTruncated, routeCount: routes.length, routeLimit: limits.maxRoutes, routesTruncated, complete: !sourceTruncated && !entrypointsTruncated && !routesTruncated } };
+  return { files, excludedVirtualEnvironments, entrypoints: entries.slice(0, limits.maxEntrypoints), routeCandidates: routes.slice(0, limits.maxRoutes), coverage: { sourceCount: files.length, sourceLimit: limits.maxSourceFiles, sourceTruncated, entrypointCount: entries.length, entrypointLimit: limits.maxEntrypoints, entrypointsTruncated, routeCount: routes.length, routeLimit: limits.maxRoutes, routesTruncated, complete: !sourceTruncated && !entrypointsTruncated && !routesTruncated } };
 }

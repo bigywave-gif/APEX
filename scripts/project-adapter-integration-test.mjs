@@ -17,7 +17,12 @@ try {
     const project = path.join(base, item.name), run = 'adapter', session = 'adapter-session', runDir = path.join(project, '.apex/runs', run);
     fs.mkdirSync(path.dirname(path.join(project, item.source)), { recursive: true });
     fs.writeFileSync(path.join(project, item.source), 'export const fixture = true;\n');
-    if (item.name === 'vue') for (let i = 0; i < 4; i++) fs.writeFileSync(path.join(path.dirname(path.join(project, item.source)), `extra${i}.ts`), 'export const extra = true;\n');
+    if (item.name === 'vue') {
+      for (let i = 0; i < 4; i++) fs.writeFileSync(path.join(path.dirname(path.join(project, item.source)), `extra${i}.ts`), 'export const extra = true;\n');
+      fs.mkdirSync(path.join(project, '.custom-env'));
+      fs.writeFileSync(path.join(project, '.custom-env', 'pyvenv.cfg'), 'home = fixture\n');
+      fs.writeFileSync(path.join(project, '.custom-env', 'index.py'), 'pass\n');
+    }
     fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ dependencies: item.dependencies }));
     call('apex-router.mjs', ['intake', project, run, 'existing', 'standard', 'interactive', session, '确认调用 APEX']);
     const authorization = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
@@ -26,6 +31,8 @@ try {
     assert.equal(inventory.adapterRecommendation.id, item.adapter, item.name);
     assert.equal(inventory.scanCoverage.complete, true);
     if (item.name === 'vue') {
+      assert.ok(inventory.ignoredPaths.includes('.custom-env'));
+      assert.ok(!inventory.runtime.includes('python'));
       const options = path.join(runDir, 'project-scan-options.json');
       fs.writeFileSync(options, JSON.stringify({ maxSourceFiles: 1 }));
       const limitedAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);

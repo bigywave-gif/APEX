@@ -4,6 +4,8 @@ Existing 基线必须同时读取“目标范围完整代码”和“真实前�
 
 扫描默认限制为 12000 个源文件、80 个入口和 160 个路由候选。`scanCoverage` 分别记录计数、限制及是否截断；源文件截断时，入口和路由计数仅为已扫描部分的下界。出现截断时宿主按 Router 指令以新授权调用 `project-intake.mjs expand <run-dir> <project-root>`，脚本将截断项限制加倍并重扫，直至完整。各限制最高为 1000000，达到上限仍截断则保留未验证状态，不能通过 Gate 1。选项 JSON 只接受 `maxSourceFiles`、`maxEntrypoints`、`maxRoutes`，作为 scan 命令最后一个参数传入，不新增用户确认。历史清单未记录此字段时维持原协议，不能据此宣称历史扫描完整。
 
+发现阶段排除 `.worktrees` 和具有 `pyvenv.cfg` 标记的 Python 虚拟环境，并在清单的 `ignoredPaths` 中记录；`complete` 仅表示这些排除规则以内的扫描没有截断，不证明被排除内容已纳入项目。明确位于其他 worktree 的任务应以该 worktree 自身作为项目根目录。
+
 这两个脚本均只能使用 `collect_existing_baseline` 授权，经 Action Gateway 运行：
 
 ```text
