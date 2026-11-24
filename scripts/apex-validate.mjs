@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { newlyAvailableResources, newlyAvailableConfigs, assertResourceCoverage, validateResourceReviews } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage, validateResourceReviews } from './existing-resource-freshness.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
@@ -263,6 +263,8 @@ function assertExistingCodeReferenceUnchanged(runDir, state) {
   if (newResources.length) throw new Error(`Existing code changed outside the approved scoped implementation closure: previously unavailable resource ${newResources[0]}`);
   const newConfigs = newlyAvailableConfigs(reference, projectRoot, changedTargets);
   if (newConfigs.length) throw new Error(`Existing code changed outside the approved scoped implementation closure: new entrypoint configuration ${newConfigs[0]}`);
+  const newImports = newlyPreferredImports(reference, projectRoot, changedTargets);
+  if (newImports.length) throw new Error(`Existing code changed outside the approved scoped implementation closure: new higher-priority import ${newImports[0]}`);
   for (const item of reference.files) {
     const source = path.resolve(projectRoot, item.path); const copy = path.resolve(runDir, item.copyPath);
     if (!source.startsWith(`${projectRoot}${path.sep}`) || !copy.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(source) || !fs.existsSync(copy)) throw new Error(`Existing code reference is missing: ${item.path}`);

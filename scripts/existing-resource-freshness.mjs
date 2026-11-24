@@ -91,3 +91,16 @@ export function newlyAvailableConfigs(reference, projectRoot, allowed = new Set(
   }
   return [...result].sort();
 }
+
+export function newlyPreferredImports(reference, projectRoot, allowed = new Set()) {
+  if (reference.absentImportCandidates === undefined) return [];
+  if (!Array.isArray(reference.absentImportCandidates)) throw new Error('absent import candidates are invalid');
+  const root = path.resolve(projectRoot), result = new Set();
+  for (const candidate of reference.absentImportCandidates) {
+    if (typeof candidate !== 'string' || !candidate || path.isAbsolute(candidate)) throw new Error('absent import candidate is invalid');
+    const file = path.resolve(root, candidate);
+    if (!file.startsWith(`${root}${path.sep}`)) throw new Error('absent import candidate escapes the project');
+    if (!allowed.has(candidate) && fs.existsSync(file) && fs.statSync(file).isFile()) result.add(candidate);
+  }
+  return [...result].sort();
+}

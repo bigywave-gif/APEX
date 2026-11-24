@@ -8,12 +8,12 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { newlyAvailableConfigs } from './existing-resource-freshness.mjs';
+import { newlyAvailableConfigs, newlyPreferredImports } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '10';
+const CAPTURE_VERSION = '11';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -36,6 +36,7 @@ function parseJsonComments(text) {
 }
 let compilerOptions = {}, tsconfigFile = null, configHash = null, configFiles = [], workspaces = new Map(), publicRoots = [];
 const missingResources = new Map();
+const absentImportCandidates = new Set();
 function workspaceTarget(specifier) {
   const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
   const item = workspaces.get(name); if (!item) return null;
@@ -64,11 +65,17 @@ function resolveImport(projectRoot, from, specifier) {
     for (const target of targets) if (typeof target === 'string') bases.push(path.resolve(projectRoot, compilerOptions.baseUrl || '.', target.replace('*', match)));
   }
   }
+  const earlierCandidates = [];
   for (const base of bases) {
     const stem = /\.(?:mjs|cjs|js|jsx)$/.test(base) ? base.replace(/\.(?:mjs|cjs|js|jsx)$/, '') : null;
     const candidates = [base, ...(stem ? ['.ts', '.tsx', '.mts', '.cts'].map(ext => `${stem}${ext}`) : []), ...extensions.map(ext => `${base}${ext}`), ...extensions.map(ext => path.join(base, `index${ext}`))];
-    const found = candidates.find(candidate => inside(projectRoot, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile());
-    if (found) return found;
+    for (const candidate of candidates) {
+      if (!inside(projectRoot, candidate)) continue;
+      if (fs.existsSync(candidate)) {
+        if (fs.statSync(candidate).isFile()) { for (const previous of earlierCandidates) absentImportCandidates.add(rel(projectRoot, previous)); return candidate; }
+      }
+      earlierCandidates.push(candidate);
+    }
   }
   return null;
 }
@@ -205,7 +212,7 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
     const prior = JSON.parse(fs.readFileSync(priorReferenceFile, 'utf8')); const index = JSON.parse(fs.readFileSync(integrityIndexFile, 'utf8'));
     const requestedEntries = entries.map(entry => rel(projectRoot, entry)).sort(); const indexedEntries = (index.entrypoints || []).slice().sort();
     const scopeHash = sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: requestedEntries, configHash, publicRoots })));
-    const unchanged = prior.complete === true && index.captureVersion === CAPTURE_VERSION && index.scopeHash === scopeHash && JSON.stringify(requestedEntries) === JSON.stringify(indexedEntries) && (index.files || []).length === (prior.files || []).length && (index.files || []).every(item => sameFingerprint(item.sourceFingerprint, path.join(projectRoot, item.path)) && sameFingerprint(item.copyFingerprint, path.join(runDir, item.copyPath))) && Array.isArray(index.missingCandidates) && index.missingCandidates.every(file => !fs.existsSync(path.join(projectRoot, file))) && Array.isArray(prior.absentConfigCandidates) && newlyAvailableConfigs(prior, projectRoot).length === 0;
+    const unchanged = prior.complete === true && index.captureVersion === CAPTURE_VERSION && index.scopeHash === scopeHash && JSON.stringify(requestedEntries) === JSON.stringify(indexedEntries) && (index.files || []).length === (prior.files || []).length && (index.files || []).every(item => sameFingerprint(item.sourceFingerprint, path.join(projectRoot, item.path)) && sameFingerprint(item.copyFingerprint, path.join(runDir, item.copyPath))) && Array.isArray(index.missingCandidates) && index.missingCandidates.every(file => !fs.existsSync(path.join(projectRoot, file))) && Array.isArray(prior.absentConfigCandidates) && newlyAvailableConfigs(prior, projectRoot).length === 0 && Array.isArray(prior.absentImportCandidates) && newlyPreferredImports(prior, projectRoot).length === 0;
     if (unchanged) {
       state.artifacts.codeReference = 'code-reference.json'; state.artifacts.pageSkeleton = 'page-skeleton.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'existing-code-reference-state-update', expectedStateHash });
       console.log(JSON.stringify({ codeReference: priorReferenceFile, pageSkeleton: path.join(runDir, 'page-skeleton.json'), complete: true, reused: true, sourceFileCount: prior.sourceFileCount, totalBytes: prior.totalBytes, sourceTreeHash: prior.sourceTreeHash }));
@@ -232,7 +239,7 @@ const files = [...selected].sort((a, b) => rel(projectRoot, a).localeCompare(rel
 });
 if (!nodes.length) die('target code closure has no mappable page skeleton nodes');
 const sourceTreeHash = `sha256:${aggregate.digest('hex')}`; const skeletonPayload = { sourceTreeHash, entrypoints: entries.map(entry => rel(projectRoot, entry)), nodes }; const skeletonHash = sha(Buffer.from(JSON.stringify(skeletonPayload)));
-const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, absentConfigCandidates: [...absentConfigCandidates].sort(), unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
+const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
 if (!reference.scope.routes.length) die('baseline input must declare target routes');
 const output = path.join(runDir, 'code-reference.json'); const skeletonOutput = path.join(runDir, 'page-skeleton.json'); write(output, reference); write(skeletonOutput, { schemaVersion: '3.0', ...skeletonPayload, skeletonHash });
 write(integrityIndexFile, { schemaVersion: '3.0', captureVersion: CAPTURE_VERSION, capturedAt: new Date().toISOString(), purpose: 'fast-path-only; Gate validation recomputes all SHA-256 values', sourceTreeHash, scopeHash: sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints.slice().sort(), configHash, publicRoots }))), entrypoints: skeletonPayload.entrypoints, files: integrityFiles, missingCandidates: [...new Set([...missingResources.values()].flatMap(item => item.candidates))] });

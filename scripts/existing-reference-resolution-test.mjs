@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { newlyAvailableResources, newlyAvailableConfigs, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
 import { assessResourceVerification, observeResourceImages, observeResourceExemptions, observeBackgroundImages, resourceVerificationBinding, resourceImageProbeCode } from './existing-resource-runtime.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,6 +39,16 @@ try {
   const paths = () => new Set(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).files.map(item => item.path));
   for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/module.mts', 'src/module-common.cts', 'src/components/Button.vue', 'src/components/button.ts', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
   assert.equal(capture().reused, true);
+  const beforePreferred = JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json')));
+  assert.ok(beforePreferred.absentImportCandidates.includes('src/module.ts'));
+  put('src/module.ts', 'export const moduleValue = "preferred";');
+  assert.ok(newlyPreferredImports(beforePreferred, project).includes('src/module.ts'));
+  assert.throws(() => newlyPreferredImports({ absentImportCandidates: ['../outside.js'] }, project), /escapes the project/);
+  const preferredStatus = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(preferredStatus.executionDirective?.currentStep?.id, 'freeze-code-reference');
+  assert.match(preferredStatus.executionDirective.currentStep.details, /higher-priority import/);
+  assert.notEqual(capture().reused, true); assert.ok(paths().has('src/module.ts')); assert.ok(!paths().has('src/module.mts'));
+  fs.unlinkSync(path.join(project, 'src/module.ts')); assert.notEqual(capture().reused, true); assert.ok(paths().has('src/module.mts'));
   put('src/App.tsx', 'export const App = () => <main>Changed</main>;');
   const changedQueryImport = call('apex-router.mjs', ['status', project, run, session]);
   assert.equal(changedQueryImport.executionDirective?.currentStep?.id, 'freeze-code-reference');

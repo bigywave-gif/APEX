@@ -33,7 +33,7 @@ import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
-import { newlyAvailableResources, newlyAvailableConfigs, assertResourceCoverage } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
@@ -1190,6 +1190,8 @@ function existingCodeReferenceFreshness(runDir, state) {
     if (newResources.length) return { ready: false, reason: `scoped source changed after code reference capture: previously unavailable resource ${newResources[0]}` };
     const newConfigs = newlyAvailableConfigs(reference, projectRoot);
     if (newConfigs.length) return { ready: false, reason: `scoped source changed after code reference capture: new entrypoint configuration ${newConfigs[0]}` };
+    const newImports = newlyPreferredImports(reference, projectRoot);
+    if (newImports.length) return { ready: false, reason: `scoped source changed after code reference capture: new higher-priority import ${newImports[0]}` };
     if (skeleton.sourceTreeHash !== reference.sourceTreeHash || !skeleton.skeletonHash || !Array.isArray(skeleton.nodes) || !skeleton.nodes.length) return { ready: false, reason: 'page skeleton does not bind the complete code reference' };
     for (const item of reference.files) {
       const source = path.resolve(projectRoot, item.path || ''); const copy = path.resolve(runDir, item.copyPath || '');
