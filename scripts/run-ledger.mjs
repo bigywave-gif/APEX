@@ -759,7 +759,7 @@ function assertCurrentAgentLease(job, jobId, leaseToken) {
 }
 function recordSettledAttemptUsage(database, job, usage, outcome, timestamp) {
   const report = usage || { inputTokens: 0, outputTokens: 0, usageSource: 'unknown' };
-  if (![report.inputTokens, report.outputTokens].every(value => Number.isInteger(value) && value >= 0) || !['provider-reported', 'estimated', 'unknown', 'legacy-unverified'].includes(report.usageSource)) throw new Error('invalid Agent attempt usage');
+  if (![report.inputTokens, report.outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(report.inputTokens + report.outputTokens) || !['provider-reported', 'estimated', 'unknown', 'legacy-unverified'].includes(report.usageSource)) throw new Error('invalid Agent attempt usage');
   if (report.usageSource === 'unknown' && (report.inputTokens !== 0 || report.outputTokens !== 0)) throw new Error('unknown Agent attempt usage requires zero placeholders');
   database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, report.inputTokens, report.outputTokens, report.inputTokens + report.outputTokens, timestamp, JSON.stringify({ jobId: job.job_id, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome, usageSource: report.usageSource }));
 }
@@ -851,7 +851,8 @@ export function renewAgentJobLease(runDir, jobId, leaseToken) {
 }
 export function recordTokenUsage(runDir, { stage, agentId = null, inputTokens = 0, outputTokens = 0, limit = null, metadata = {} }) {
   requireNonEmpty(stage, 'stage');
-  for (const value of [inputTokens, outputTokens]) if (!Number.isInteger(value) || value < 0) throw new Error('token usage must be non-negative integers');
+  if (![inputTokens, outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(inputTokens + outputTokens)) throw new Error('token usage must be non-negative safe integers with a safe total');
+  if (metadata.usageSource === 'unknown' && (inputTokens !== 0 || outputTokens !== 0)) throw new Error('unknown token usage requires zero placeholders');
   const database = open(runDir); const total = inputTokens + outputTokens;
   try {
     database.exec('BEGIN IMMEDIATE');
@@ -896,7 +897,8 @@ export function recordObservedTokenUsage(runDir, { stage, observationKey, inputT
 // Hold the ledger write lock while checking the lease and publishing an advisory.
 // A crash can leave an uncommitted file, but never a successful job or action receipt.
 export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, content, inputTokens, outputTokens, limit, metadata = {} }) {
-  if (![inputTokens, outputTokens].every(value => Number.isInteger(value) && value >= 0)) throw new Error('token usage must be non-negative integers');
+  if (![inputTokens, outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(inputTokens + outputTokens)) throw new Error('token usage must be non-negative safe integers with a safe total');
+  if (metadata.usageSource === 'unknown' && (inputTokens !== 0 || outputTokens !== 0)) throw new Error('unknown token usage requires zero placeholders');
   const database = open(runDir), timestamp = now(); let wrote = false, previous = null;
   try {
     database.exec('BEGIN IMMEDIATE');

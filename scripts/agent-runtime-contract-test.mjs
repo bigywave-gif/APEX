@@ -48,6 +48,9 @@ try {
   recordTokenUsage(root, { stage: 'coverage', inputTokens: 4, outputTokens: 2, metadata: { usageSource: 'provider-reported' } });
   assert.deepEqual(agentRuntimeStatus(root).tokenUsageCoverage.coverage, { providerReported: 1, estimated: 0, unknown: 1, unverified: 0 });
   assert.throws(() => recordTokenUsage(root, { stage: 'gate1', inputTokens: 21, outputTokens: 0, limit: 50 }), /budget exceeded/);
+  assert.throws(() => recordTokenUsage(root, { stage: 'gate1', inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 }), /safe integer/);
+  assert.throws(() => recordTokenUsage(root, { stage: 'gate1', inputTokens: 1, metadata: { usageSource: 'unknown' } }), /unknown token usage/);
+  assert.equal(agentRuntimeStatus(root).tokenUsage.gate1, 30);
   const span = startTraceSpan(root, { name: 'backend-contract', kind: 'agent' }); endTraceSpan(root, span.spanId, { status: 'passed' });
   const interrupted = enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:interrupted' });
   const firstKey = 'claim_key_first_0001', secondKey = 'claim_key_second_002', thirdKey = 'claim_key_third_0003';

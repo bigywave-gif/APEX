@@ -9,6 +9,13 @@ try {
   registerAgent(root, { agentId: 'reviewer', vocation: 'review', stage: 'visual' });
   const job = enqueueAgentJob(root, { agentId: 'reviewer', stage: 'visual', inputHash: 'fixture', maxAttempts: 3 });
   let claim = claimAgentJob(root, job.jobId);
+  for (const [inputTokens, outputTokens] of [[Number.MAX_SAFE_INTEGER + 1, 0], [Number.MAX_SAFE_INTEGER, 1]]) {
+    assert.throws(() => settleAgentJob(root, job.jobId, { status: 'failed', leaseToken: claim.leaseToken, usage: { inputTokens, outputTokens, usageSource: 'provider-reported' } }), /invalid Agent attempt usage/);
+    assert.throws(() => completeAgentAdvisory(root, job.jobId, { leaseToken: claim.leaseToken, output: path.join(root, 'unsafe.json'), content: '{}', inputTokens, outputTokens }), /safe integer/);
+  }
+  assert.throws(() => completeAgentAdvisory(root, job.jobId, { leaseToken: claim.leaseToken, output: path.join(root, 'unsafe.json'), content: '{}', inputTokens: 1, outputTokens: 0, metadata: { usageSource: 'unknown' } }), /unknown token usage/);
+  assert.equal(agentRuntimeStatus(root, job.jobId).jobs[0].status, 'running');
+  assert.equal(agentRuntimeStatus(root).tokenUsage.visual, undefined);
   settleAgentJob(root, job.jobId, { status: 'failed', error: 'provider error after usage', leaseToken: claim.leaseToken, retryDelayMs: 0, usage: { inputTokens: 40, outputTokens: 30, usageSource: 'provider-reported' } });
   assert.equal(agentRuntimeStatus(root).tokenUsage.visual, 70);
   claim = claimAgentJob(root, job.jobId); recoverAgentJobs(root, { force: true });
