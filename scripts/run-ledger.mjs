@@ -695,6 +695,9 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
     database.exec('BEGIN IMMEDIATE');
     const job = database.prepare('SELECT * FROM agent_jobs WHERE job_id = ?').get(jobId);
     if (!job) throw new Error(`agent job does not exist: ${jobId}`);
+    const payload = parseJson(job.payload_json);
+    const policy = database.prepare("SELECT value FROM ledger_meta WHERE key = 'projectionPolicy'").get()?.value;
+    if (policy === 'ledger-authoritative' && payload?.roleId && !claimKey) throw new Error('a durable claim key is required for a new Run professional role');
     if (job.status === 'running' && claimKey && job.claim_key === claimKey) {
       assertCurrentAgentLease(job, jobId, job.lease_token);
       const budget = agentBudgetSnapshot(database, job);
@@ -716,7 +719,6 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       database.exec('COMMIT');
       return { jobId, status: 'waiting', reason: activeForAgent ? 'agent-already-running' : 'agent-concurrency-limit', activeJobs: Number(activeTotal), maxConcurrency: 2 };
     }
-    const payload = parseJson(job.payload_json);
     let reservedTokens = 0;
     const runBudget = runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job));
     if (runBudget) {

@@ -45,7 +45,7 @@ try {
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'succeed', d2, generic.jobId, 'gate1', '{}', genericClaim.leaseToken]);
   assert.equal(r.status, 0, r.stderr || r.stdout); assert.equal(agentRuntimeStatus(d2, generic.jobId).jobs[0].status, 'succeeded');
   rebudgetAgentJobs(d2, { stage: 'gate1', jobIds: [jobId], perAgentBudget: 100, stageBudget: selection.tokenBudget.stage });
-  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout); const oldLease = JSON.parse(r.stdout).leaseToken;
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1', 'recovery_claim_attempt_1']); assert.equal(r.status, 0, r.stderr || r.stdout); const oldLease = JSON.parse(r.stdout).leaseToken;
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'succeed', d2, jobId, 'gate1', '{}', oldLease]);
   assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /must complete through role-advisory record/);
   assert.equal(agentRuntimeStatus(d2, jobId).jobs[0].status, 'running');
@@ -59,7 +59,7 @@ try {
   r = run('apex-router.mjs', ['status', p2, 'budget', 'budget-session']); assert.equal(JSON.parse(r.stdout).nextRequiredAction, 'recover');
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('recover'), 'recover', 'role-advisory.mjs', 'rebudget', d2, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout);
   assert.equal(agentRuntimeStatus(d2, jobId).jobs[0].status, 'queued');
-  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout); const newLease = JSON.parse(r.stdout).leaseToken;
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1', 'recovery_claim_attempt_2']); assert.equal(r.status, 0, r.stderr || r.stdout); const newLease = JSON.parse(r.stdout).leaseToken;
   assert.throws(() => settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: oldLease }), /stale or missing/);
   settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: newLease, usage: { inputTokens: 2, outputTokens: 1, usageSource: 'provider-reported' } });
   assert.equal(agentRuntimeStatus(d2).tokenUsage.gate1, 104);
@@ -71,7 +71,7 @@ try {
   r = action3(['agent-runtime.mjs', 'run-budget', d3, 'gate1', '100', '0', '0']); assert.equal(r.status, 0, r.stderr || r.stdout);
   r = action3(['role-advisory.mjs', 'select', d3, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout);
   const selection3 = JSON.parse(fs.readFileSync(path.join(d3, 'advisories/gate1/selection.json'))), job3 = selection3.agentJobs[selection3.selectedRoles[0]];
-  const claim3 = () => action3(['agent-runtime.mjs', 'claim', d3, job3, 'gate1']);
+  const claim3 = () => action3(['agent-runtime.mjs', 'claim', d3, job3, 'gate1', 'run_budget_claim_key_0001']);
   r = claim3(); assert.notEqual(r.status, 0); assert.match(r.stderr, /run-token-budget-exhausted/);
   r = claim3(); assert.notEqual(r.status, 0); assert.match(r.stderr, /identical controlled operation already failed/);
   r = action3(['agent-runtime.mjs', 'run-budget', d3, 'gate1', '500000', '50000', '25000']); assert.equal(r.status, 0, r.stderr || r.stdout);

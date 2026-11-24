@@ -260,7 +260,7 @@ try {
     const selection = JSON.parse(fs.readFileSync(path.join(runDir, 'advisories/verify/selection.json')));
     if (!selection.selectedRoles.includes('product-manager')) throw new Error('verify must schedule the product role');
     const job = agentRuntimeStatus(runDir).jobs.find(item => item.jobId === selection.agentJobs['product-manager']);
-    const claim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, job.jobId, 'verify']);
+    const claim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, job.jobId, 'verify', crypto.randomUUID()]);
     if (claim.status !== 'running') throw new Error('product reviewer must claim a running job');
     const productReview = repeated.formalInteractions.journeys.map(item => ({ task: item.task, interactionId: item.id, evidence: item.evidence, expectedOutcome: `示例任务“${item.task}”按合同改变状态`, observedOutcome: item.steps.map(step => `${JSON.stringify(step.before)} → ${JSON.stringify(step.after)}`).join('；'), rationale: '测试夹具中的动作与观察结果对应该示例任务', verdict: 'passed' }));
     const intent = JSON.parse(fs.readFileSync(path.join(runDir, roleState.artifacts.intentBrief)));
@@ -272,7 +272,7 @@ try {
     if (agentRuntimeStatus(runDir, job.jobId).jobs[0].status !== 'succeeded') throw new Error('product review must settle its own durable job');
     for (const roleId of selection.selectedRoles.filter(id => id !== 'product-manager')) {
       const otherJob = agentRuntimeStatus(runDir).jobs.find(item => item.jobId === selection.agentJobs[roleId]);
-      const otherClaim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, otherJob.jobId, 'verify']);
+      const otherClaim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, otherJob.jobId, 'verify', crypto.randomUUID()]);
       const otherInput = write(`fixture-${roleId}-review.json`, { ...advisory, roleId, productReview: undefined, requirementReview: undefined, requestCoverage: undefined, execution: { ...advisory.execution, sessionId: otherJob.payload.agentSessionId, skillBindings: otherJob.payload.skillBindings, leaseToken: otherClaim.leaseToken } });
       run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'record', runDir, 'verify', otherInput]);
     }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Contract test for the controlled, non-interactive professional role chain. */
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -66,7 +67,7 @@ try {
     };
     const input = path.join(runDir, `${roleId}-input.json`); fs.writeFileSync(input, `${JSON.stringify(advisory, null, 2)}\n`);
     const claimAuthorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), `role ${roleId} claim authorization must be current`);
-    let claim = expect(run(action, ['run', root, 'role-run', 'role-session', claimAuthorization.authorizationRef, 'analyze_requirement', 'agent-runtime.mjs', 'claim', runDir, selection.agentJobs[roleId], 'gate1']), `role ${roleId} must claim its dedicated Agent job before work`);
+    let claim = expect(run(action, ['run', root, 'role-run', 'role-session', claimAuthorization.authorizationRef, 'analyze_requirement', 'agent-runtime.mjs', 'claim', runDir, selection.agentJobs[roleId], 'gate1', crypto.randomUUID()]), `role ${roleId} must claim its dedicated Agent job before work`);
     advisory.execution.leaseToken = claim.leaseToken;
     if (roleId === failedRole) {
       const binding = selection.inputBindings.find(item => item.artifact === 'deliveryContract');
@@ -83,7 +84,7 @@ try {
       const db = new DatabaseSync(path.join(runDir, 'run-ledger.sqlite'));
       db.prepare("UPDATE agent_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE job_id = ?").run(job.jobId); db.close();
       const next = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'authorize retry');
-      claim = expect(run(action, ['run', root, 'role-run', 'role-session', next.authorizationRef, 'analyze_requirement', 'agent-runtime.mjs', 'claim', runDir, job.jobId, 'gate1']), 'claim after stale input');
+      claim = expect(run(action, ['run', root, 'role-run', 'role-session', next.authorizationRef, 'analyze_requirement', 'agent-runtime.mjs', 'claim', runDir, job.jobId, 'gate1', crypto.randomUUID()]), 'claim after stale input');
       advisory.execution.leaseToken = claim.leaseToken;
     }
     const research = roleId === 'product-manager' && claim.optionalSkills?.find(item => item.name === 'research-intake');

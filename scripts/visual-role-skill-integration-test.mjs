@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
@@ -135,6 +136,9 @@ try {
   assert.equal(expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect repaired budget').integrity.status, 'consistent');
 
   const claimKey = 'designer_claim_key_2026';
+  const missingKeyClaim = invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual']);
+  assert.notEqual(missingKeyClaim.status, 0); assert.match(missingKeyClaim.stderr, /durable claim key is required/);
+  assert.equal(agentRuntimeStatus(runDir, jobId).jobs[0].status, 'queued');
   const claimAuth = authorize();
   const claimed = expect(invoke(claimAuth, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'claim design role');
   assert.equal(claimed.dispatchDirective, 'start-once'); assert.equal(claimed.idempotent, false);
@@ -220,7 +224,7 @@ try {
     const db = new DatabaseSync(runLedgerPaths(runDir).ledger);
     db.prepare("UPDATE agent_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE job_id = ? AND status = 'queued'").run(jobId); db.close();
     const authorization = authorize();
-    return { claim: expect(invoke(authorization, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual']), 'claim replacement designer'), authorization };
+    return { claim: expect(invoke(authorization, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', crypto.randomUUID()]), 'claim replacement designer'), authorization };
   };
   const input = path.join(runDir, 'designer-advisory.json');
   fs.writeFileSync(input, JSON.stringify(advisory));
@@ -290,7 +294,7 @@ try {
   assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.providerReported, 3);
   const uxId = savedSelection.agentJobs['ux-architect'];
   const uxJob = agentRuntimeStatus(runDir, uxId).jobs[0];
-  let uxClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, uxId, 'visual']), 'claim UX role');
+  let uxClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, uxId, 'visual', crypto.randomUUID()]), 'claim UX role');
   // Over-budget stopping and controlled recovery are covered in budget-recovery-router-test.
   const ux = { ...advisory, roleId: 'ux-architect', execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'unmetered-fixture', sessionId: uxJob.payload.agentSessionId, skillBindings: uxJob.payload.skillBindings, leaseToken: uxClaim.leaseToken } };
   const uxInput = path.join(runDir, 'ux-advisory.json'); fs.writeFileSync(uxInput, JSON.stringify(ux));
@@ -298,7 +302,7 @@ try {
   assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 3); // independent host, invalid attempt usage, and unmetered UX
   for (const roleId of savedSelection.selectedRoles.filter(id => !['ui-designer', 'ux-architect'].includes(id))) {
     const selectedJob = agentRuntimeStatus(runDir, savedSelection.agentJobs[roleId]).jobs[0];
-    const claim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, selectedJob.jobId, 'visual']), `claim ${roleId}`);
+    const claim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, selectedJob.jobId, 'visual', crypto.randomUUID()]), `claim ${roleId}`);
     const review = { ...ux, roleId, execution: { ...ux.execution, sessionId: selectedJob.payload.agentSessionId, skillBindings: selectedJob.payload.skillBindings, leaseToken: claim.leaseToken } };
     const file = path.join(runDir, `fixture-${roleId}.json`); fs.writeFileSync(file, JSON.stringify(review));
     expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', file]), `record ${roleId}`);
@@ -375,7 +379,7 @@ try {
   const spent = agentRuntimeStatus(runDir).tokenUsage.visual || 0;
   recordTokenUsage(runDir, { stage: 'visual', inputTokens: repaired.tokenBudget.stage - spent, metadata: { usageSource: 'provider-reported', fixture: true } });
   const blockedId = repaired.agentJobs['ui-designer'];
-  const exhausted = invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, blockedId, 'visual']);
+  const exhausted = invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, blockedId, 'visual', crypto.randomUUID()]);
   assert.notEqual(exhausted.status, 0); assert.match(exhausted.stderr, /stage-token-budget-exhausted/);
   const blocked = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect exhausted budget');
   assert.equal(blocked.executionDirective?.blockingOperation?.category, 'token-budget-exhausted');

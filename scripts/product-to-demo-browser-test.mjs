@@ -17,7 +17,7 @@ const project=fs.mkdtempSync(path.join(os.tmpdir(),'apex-product-handoff-')), id
 const run=(file,args)=>spawnSync(process.execPath,[file,...args],{encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024});
 const ok=(r,label)=>{if(r.status!==0)throw Error(label+': '+(r.stderr||r.stdout));return JSON.parse(r.stdout)};
 const route=args=>ok(run(router,args),args[0]);
-const invoke=(kind,script,args)=>{const auth=route(['authorize',project,id,session,kind]);return ok(run(action,['run',project,id,session,auth.authorizationRef,kind,script,...args]),script+' '+args[0])};
+const invoke=(kind,script,args)=>{if(script==='agent-runtime.mjs'&&args[0]==='claim'&&args.length===4)args=[...args,crypto.randomUUID()];const auth=route(['authorize',project,id,session,kind]);return ok(run(action,['run',project,id,session,auth.authorizationRef,kind,script,...args]),script+' '+args[0])};
 const put=(name,value)=>{const file=path.join(dir,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,typeof value==='string'?value:JSON.stringify(value));return file};
 function loadOptionalAfterRestoration(kind,stage,job,claim,skill){
  const file=fs.realpathSync(skill.path),roots=[os.tmpdir(),'/private/tmp'].filter(fs.existsSync).map(root=>fs.realpathSync(root));assert.ok(roots.some(root=>file.startsWith(root+path.sep)),'restoration test requires an isolated temporary CODEX_HOME');
