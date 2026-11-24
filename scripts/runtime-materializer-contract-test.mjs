@@ -29,14 +29,32 @@ try {
   fs.writeFileSync(path.join(runDir, 'runtime-source-lock.json'), JSON.stringify({ schemaVersion: '3.0', projectRoot: root, sourceKind: 'project-installed', patterns: [{ id: 'fixture-card', sourceSelectionId: 'motion-package', visualNodes: ['card'], package: 'fixture-motion', version: '1.2.3', componentPath: 'node_modules/fixture-motion/dist/Card.js', stylePaths: ['node_modules/fixture-motion/dist/Card.css'], props: {}, completeStyle: true, noCssPatch: true, files }] }));
   // This isolated materialization fixture seeds historical pre-confirmation gates.
   state.roleChain.confirmationModel = 'gate-summary-only';
-  state.gates.gate1 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.gates.gate2 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.locks.requirementsApproved = true; state.locks.implementationAllowed = true; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; state.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
+  state.gates.gate1 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.gates.gate2 = { status: 'passed', at: '2026-08-03T00:00:00.000Z', evidence: ['test'] }; state.locks.requirementsApproved = true; state.locks.implementationAllowed = true; state.phase = 'G-09 PROOF_IMPLEMENT'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; state.artifacts.runtimeSourceLock = 'runtime-source-lock.json'; commitRunState(path.dirname(stateFile), state, { reason: 'state-authority-test-fixture' });
+  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-runtime-foreign-'));
+  try {
+    const packageFile = path.join(foreign, 'package.json'); fs.writeFileSync(packageFile, '{"name":"foreign-sentinel"}\n');
+    const lease = expect(run(router, ['lease', root, 'run-runtime-material', 'runtime-material-session']), 'runtime lease');
+    const auth = expect(run(router, ['authorize', root, 'run-runtime-material', 'runtime-material-session', 'implement', lease.lease.leaseId]), 'runtime install authorization');
+    const blocked = run(action, ['run', root, 'run-runtime-material', 'runtime-material-session', auth.authorizationRef, 'implement', 'runtime-materializer.mjs', 'install', runDir, foreign]);
+    reject(blocked, 'runtime install must reject another project'); assert.match(blocked.stderr, /project root does not match Router authorization/);
+    assert.equal(fs.readFileSync(packageFile, 'utf8'), '{"name":"foreign-sentinel"}\n'); assert.equal(fs.existsSync(path.join(foreign, 'node_modules')), false);
+  } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
+  const verifyState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); verifyState.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); commitRunState(runDir, verifyState, { reason: 'state-authority-test-fixture' });
   const audit = expect(run(router, ['authorize', root, 'run-runtime-material', 'runtime-material-session', 'verify']), 'runtime audit authorization');
   expect(run(action, ['run', root, 'run-runtime-material', 'runtime-material-session', audit.authorizationRef, 'verify', 'runtime-materializer.mjs', 'audit', runDir, root]), 'exact runtime audit');
   const materialState = JSON.parse(fs.readFileSync(stateFile)); const plan = JSON.parse(fs.readFileSync(path.join(runDir, 'visual-execution-plan.json')));
   assert.doesNotThrow(() => assertMaterializationCurrent(runDir, root, materialState, plan));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-runtime-style-outside-'));
+  try {
+    const bytes = fs.readFileSync(style), external = path.join(outside, 'Card.css'); fs.writeFileSync(external, bytes); fs.unlinkSync(style); fs.symlinkSync(external, style);
+    const linkAuth = expect(run(router, ['authorize', root, 'run-runtime-material', 'runtime-material-session', 'verify']), 'linked runtime audit authorization');
+    reject(run(action, ['run', root, 'run-runtime-material', 'runtime-material-session', linkAuth.authorizationRef, 'verify', 'runtime-materializer.mjs', 'audit', runDir, root]), 'runtime audit must reject an external style symlink');
+    const evidence = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence', 'runtime-materialization-audit.json'))); assert.match(evidence.errors.join(' '), /runtime pattern file differs/);
+    fs.unlinkSync(style); fs.writeFileSync(style, bytes);
+  } finally { fs.rmSync(outside, { recursive: true, force: true }); }
   fs.writeFileSync(style, '.card { color: substitute; }');
   assert.throws(() => assertMaterializationCurrent(runDir, root, materialState, plan), /materialized source changed/);
   const changed = expect(run(router, ['authorize', root, 'run-runtime-material', 'runtime-material-session', 'verify']), 'changed runtime audit authorization');
   reject(run(action, ['run', root, 'run-runtime-material', 'runtime-material-session', changed.authorizationRef, 'verify', 'runtime-materializer.mjs', 'audit', runDir, root]), 'runtime audit must reject a substituted package style');
-  console.log(JSON.stringify({ status: 'passed', checks: 3 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 5 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

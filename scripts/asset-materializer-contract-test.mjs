@@ -60,9 +60,13 @@ try {
     fs.mkdirSync(path.join(escapeRoot, 'icons'));
     const external = path.join(escapeRoot, 'icons', 'triangle-alert.svg');
     fs.writeFileSync(external, 'outside sentinel');
+    let auth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'other project authorization');
+    let blocked = run(action, ['run', root, 'run-assets', 'asset-session', auth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, escapeRoot]);
+    reject(blocked, 'apply must reject a different project'); assert.match(blocked.stderr, /project root does not match Router authorization/);
+    assert.equal(fs.existsSync(path.join(escapeRoot, 'src')), false);
     fs.symlinkSync(escapeRoot, path.join(root, 'src'));
-    let auth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'ancestor escape authorization');
-    let blocked = run(action, ['run', root, 'run-assets', 'asset-session', auth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, root]);
+    auth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'implement', lease.lease.leaseId]), 'ancestor escape authorization');
+    blocked = run(action, ['run', root, 'run-assets', 'asset-session', auth.authorizationRef, 'implement', 'asset-materializer.mjs', 'apply', runDir, root]);
     reject(blocked, 'apply must reject an external parent symlink'); assert.match(blocked.stdout, /project materialization path missing or outside project/);
     assert.equal(fs.readFileSync(external, 'utf8'), 'outside sentinel');
     fs.unlinkSync(path.join(root, 'src'));
@@ -90,5 +94,5 @@ try {
   assert.throws(() => assertMaterializationCurrent(runDir, root, materialState, plan), /materialized source changed/);
   const changedAuditAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'verify']), 'changed audit authorization');
   reject(run(action, ['run', root, 'run-assets', 'asset-session', changedAuditAuth.authorizationRef, 'verify', 'asset-materializer.mjs', 'audit', runDir, root]), 'audit must reject a substituted selected asset');
-  console.log(JSON.stringify({ status: 'passed', checks: 7 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 8 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

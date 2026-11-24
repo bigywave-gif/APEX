@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { requireRouterAction } from './apex-runtime-guard.mjs';
+import { requireRouterAction, requireRouterProject } from './apex-runtime-guard.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function die(message) { console.error(`Runtime materializer failed: ${message}`); process.exit(1); }
@@ -27,10 +27,11 @@ const [command, runArg, projectArg] = process.argv.slice(2);
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 if (!['install', 'audit'].includes(command) || !runArg || !projectArg) die('usage: install|audit <run-dir> <project-root>');
 const runDir = path.resolve(runArg), projectRoot = path.resolve(projectArg);
-try { requireRouterAction(runDir, command === 'install' ? 'implement' : 'verify'); } catch (error) { die(error.message); }
+try { requireRouterAction(runDir, command === 'install' ? 'implement' : 'verify'); requireRouterProject(projectRoot); } catch (error) { die(error.message); }
 const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const plan = read(path.join(runDir, state.artifacts.visualExecutionPlan || 'visual-execution-plan.json'));
 const lock = read(path.join(runDir, state.artifacts.runtimeSourceLock || 'runtime-source-lock.json'));
+try { if (!lock.projectRoot || fs.realpathSync(lock.projectRoot) !== fs.realpathSync(projectRoot)) die('runtime source lock project does not match Router authorization'); } catch { die('runtime source lock project is unavailable'); }
 const selections = new Map((plan.sourceSelections || []).map(selection => [selection.id, selection]));
 const runtimeSelections = [...selections.values()].filter(selection => selection.materialization === 'runtime-package');
 const patternBySelection = new Map();
@@ -42,6 +43,7 @@ for (const selection of runtimeSelections) if (!patternBySelection.get(selection
 const packageMap = new Map();
 for (const selection of runtimeSelections) {
   const patterns = patternBySelection.get(selection.id); const first = patterns[0];
+  if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/i.test(first.package || '') || !/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/.test(first.version || '')) die(`invalid exact runtime package or version: ${selection.id}`);
   if (first.package !== selection.sourceId || first.version !== selection.version) die(`runtime selection diverges from rendered pattern: ${selection.id}`);
   if (patterns.some(pattern => pattern.package !== first.package || pattern.version !== first.version)) die(`runtime selection resolves to multiple packages: ${selection.id}`);
   const key = `${first.package}@${first.version}`; const current = packageMap.get(key) || { package: first.package, version: first.version, selectionIds: [], patterns: [] };
@@ -55,10 +57,12 @@ if (command === 'install' && packages.length) {
 const errors = []; const verified = [];
 for (const item of packages) {
   const manifest = packageFile(projectRoot, item.package);
-  if (!fs.existsSync(manifest) || read(manifest).version !== item.version) { errors.push(`${item.package}@${item.version}: exact runtime package is not installed in the project`); continue; }
+  const realProject = fs.realpathSync(projectRoot);
+  const safeFile = file => { try { return fs.realpathSync(file).startsWith(`${realProject}${path.sep}`) && fs.statSync(file).isFile(); } catch { return false; } };
+  if (!safeFile(manifest) || read(manifest).version !== item.version) { errors.push(`${item.package}@${item.version}: exact runtime package is not installed in the project`); continue; }
   const files = [...new Map(item.patterns.flatMap(pattern => pattern.files || []).map(file => [file.path, file])).values()];
   if (!files.length) { errors.push(`${item.package}@${item.version}: rendered pattern has no frozen files`); continue; }
-  for (const file of files) { const target = inside(projectRoot, file.path); if (!target || !fs.existsSync(target) || hash(target) !== file.sha256) errors.push(`${item.package}@${item.version}: runtime pattern file differs from the rendered source: ${file.path}`); }
+  for (const file of files) { const target = typeof file.path === 'string' && !path.isAbsolute(file.path) && inside(projectRoot, file.path); if (!target || !safeFile(target) || hash(target) !== file.sha256) errors.push(`${item.package}@${item.version}: runtime pattern file differs from the rendered source: ${file.path}`); }
   verified.push({ package: item.package, version: item.version, selectionIds: item.selectionIds, files });
 }
 const result = { schemaVersion: '3.0', status: errors.length ? 'failed' : 'passed', packages: verified, errors, verifiedAt: new Date().toISOString() };

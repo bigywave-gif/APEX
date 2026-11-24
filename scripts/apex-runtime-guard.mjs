@@ -6,6 +6,11 @@ import { fileURLToPath } from 'node:url';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
 
+export function requireRouterProject(projectRoot) {
+  const authorized = process.env.APEX_ROUTER_PROJECT_ROOT;
+  if (!authorized || !projectRoot || fs.realpathSync(projectRoot) !== fs.realpathSync(authorized)) throw new Error('project root does not match Router authorization');
+}
+
 export function requireRouterAction(runDir, expectedActions) {
   const { APEX_ROUTER_PROJECT_ROOT: projectRoot, APEX_ROUTER_RUN_ID: runId, APEX_ROUTER_SESSION_ID: sessionId, APEX_ROUTER_AUTHORIZATION_REF: reference, APEX_ROUTER_ACTION: issuedAction } = process.env;
   const allowed = Array.isArray(expectedActions) ? expectedActions : [expectedActions];
