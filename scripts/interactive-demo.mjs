@@ -85,7 +85,7 @@ export function interactionSource(runDir) {
     assert(item.path?.startsWith('visual-sandbox/'), 'source must belong to visual-sandbox');
     assert(demoHash(fs.readFileSync(localFile(runDir, item.path))) === item.sha256, `source changed after materialization: ${item.path}`);
   }
-  return { contract, contractHash: objectHash(contract), sourceManifestHash: demoHash(fs.readFileSync(manifestFile)) };
+  return { contract, contractHash: objectHash(contract), sourceManifestHash: demoHash(fs.readFileSync(manifestFile)), requireResourceObservation: state.roleChain?.confirmationModel === 'two-confirmations' };
 }
 
 export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLocation = false } = {}) {
@@ -98,6 +98,7 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     assert(matches.length === 1, `missing or duplicate journey: ${expected.id}`);
     const actual = matches[0];
     assert(actual.status === 'passed' && actual.url === new URL(expected.route, url).href && actual.noticeVisible === true && actual.blockedRequests?.length === 0, `journey failed or attempted non-Demo requests: ${expected.id}`);
+    if (source.requireResourceObservation || actual.failedResources !== undefined) assert(Array.isArray(actual.failedResources) && actual.failedResources.length === 0, `journey has missing or failed browser resource observations: ${expected.id}`);
     if (requireJourneyLocation || actual.finalUrl !== undefined || actual.viewport !== undefined) {
       let finalOrigin = null;
       try { finalOrigin = new URL(actual.finalUrl).origin; } catch {}
@@ -130,7 +131,7 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
 // dependencies; UI actions and assertions execute in the real browser.
 export async function runDemoJourney(page, input) {
   const { journey, url, notice, screenshotPath } = input;
-  const blockedRequests = [], steps = [], controls = new Map(), exercisedControls = new Set(), identityConflicts = new Set();
+  const blockedRequests = [], failedResources = [], steps = [], controls = new Map(), exercisedControls = new Set(), identityConflicts = new Set();
   let controlInventoryTruncated = false;
   const controlInventoryLimit = input.controlInventoryLimit ?? 500;
   if (!Number.isInteger(controlInventoryLimit) || controlInventoryLimit < 1 || controlInventoryLimit > 5000) throw new Error('control inventory limit must be an integer between 1 and 5000');
@@ -163,6 +164,10 @@ export async function runDemoJourney(page, input) {
     catch (cause) { return { version: '1.2', status: 'failed', error: cause.message }; }
   }
   const origin = new URL(url).origin;
+  const resourceTypes = new Set(['document', 'stylesheet', 'script', 'image', 'font']);
+  const resource = request => { try { const target = new URL(request.url()); return target.origin === origin && resourceTypes.has(request.resourceType()) ? `${target.pathname}` : null; } catch { return null; } };
+  const responseFailure = response => { const target = resource(response.request()); if (target && response.status() >= 400) failedResources.push({ path: target, status: response.status() }); };
+  const requestFailure = request => { const target = resource(request); if (target && !String(request.failure()?.errorText || '').includes('ERR_ABORTED')) failedResources.push({ path: target, status: 'network-error' }); };
   const guard = async route => {
     const target = new URL(route.request().url());
     if (target.origin === origin || ['data:', 'blob:'].includes(target.protocol)) await route.continue();
@@ -187,6 +192,7 @@ export async function runDemoJourney(page, input) {
     throw new Error(`Expected ${probe.selector} ${probe.property}=${JSON.stringify(probe.equals)}, observed ${JSON.stringify(actual)}`);
   };
   let noticeVisible = false, error = null;
+  page.on('response', responseFailure); page.on('requestfailed', requestFailure);
   await page.route('**/*', guard);
   try {
     const initialUrl = new URL(journey.route, url).href;
@@ -212,9 +218,10 @@ export async function runDemoJourney(page, input) {
   let html = '';
   try { await page.screenshot({ path: screenshotPath, fullPage: true }); html = await page.content(); }
   catch (cause) { error ||= cause.message; }
-  finally { await page.unroute('**/*', guard); }
+  finally { await page.unroute('**/*', guard); page.off('response', responseFailure); page.off('requestfailed', requestFailure); }
+  if (failedResources.length) error ||= `Demo failed to load required browser resources: ${failedResources.map(item => `${item.path} (${item.status})`).join(', ')}`;
   const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, controlInventoryVersion: '1.2', observedControls: [...controls.values()], exercisedControls: [...exercisedControls], controlIdentityConflicts: [...identityConflicts], controlInventoryTruncated, error, html };
+  return { id: journey.id, url: new URL(journey.route, url).href, finalUrl: page.url(), viewport: `${viewport.width}x${viewport.height}`, status: error ? 'failed' : 'passed', noticeVisible, steps, blockedRequests, failedResources, controlInventoryVersion: '1.2', observedControls: [...controls.values()], exercisedControls: [...exercisedControls], controlIdentityConflicts: [...identityConflicts], controlInventoryTruncated, error, html };
 }
 
 export function journeyCode(input) {

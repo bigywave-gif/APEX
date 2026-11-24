@@ -45,7 +45,7 @@ export function seedInteractionFixture(runDir, url = 'http://127.0.0.1:4173/', c
   const source = interactionSource(runDir);
   const interactiveDemo = {
     url, status: 'passed', contractHash: source.contractHash, sourceManifestHash: source.sourceManifestHash,
-    journeys: demoContract.journeys.map(journey => ({ id: journey.id, url: new URL(journey.route, url).href, finalUrl: new URL(journey.route, url).href, viewport: '1440x900', status: 'passed', noticeVisible: true, blockedRequests: [], steps: journey.steps.map(step => ({ action: step.action, selector: step.selector, before: step.before.equals, after: step.after.equals, passed: true })), screenshot: artifact, dom: artifact }))
+    journeys: demoContract.journeys.map(journey => ({ id: journey.id, url: new URL(journey.route, url).href, finalUrl: new URL(journey.route, url).href, viewport: '1440x900', status: 'passed', noticeVisible: true, blockedRequests: [], failedResources: [], steps: journey.steps.map(step => ({ action: step.action, selector: step.selector, before: step.before.equals, after: step.after.equals, passed: true })), screenshot: artifact, dom: artifact }))
   };
   return interactiveDemo;
 }

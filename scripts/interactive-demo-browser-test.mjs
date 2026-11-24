@@ -115,6 +115,11 @@ try {
       const result = cliCall(['run-code', `async (page) => { await page.goto(${JSON.stringify(runtime.url)}); return await page.locator('#asset-test').evaluate(node => ({ color: getComputedStyle(node).color, loaded: node.dataset.loaded })); }`]);
       const match = result.stdout.match(/### Result\s*\n([\s\S]*?)\n### /); let actual = match && JSON.parse(match[1]); if (typeof actual === 'string') actual = JSON.parse(actual);
       if (result.status !== 0 || actual?.color !== 'rgb(17, 34, 51)' || actual?.loaded !== 'yes') throw new Error('nested Demo entrypoint did not load its relative CSS and JavaScript');
+      const missing = bindDemoEntrypointBase({ entrypoint, files: [{ path: entrypoint, content: '<!doctype html><html><head><link rel="stylesheet" href="missing.css"></head><body><p id="notice">交互预览 · 示例数据</p><p id="count">0</p><button id="increment" onclick="document.querySelector(\'#count\').textContent=\'1\'">添加</button></body></html>' }] }).files[0].content;
+      fs.writeFileSync(nestedPage, missing); nestedManifest.files.find(item => item.path === `visual-sandbox/${entrypoint}`).sha256 = `sha256:${crypto.createHash('sha256').update(missing).digest('hex')}`; fs.writeFileSync(nestedManifestFile, JSON.stringify(nestedManifest));
+      const missingResult = cliCall(['run-code', journeyCode({ journey: demoContract.journeys[0], url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/missing-css.png') })]);
+      const missingMatch = missingResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /); let missingTrace = missingMatch && JSON.parse(missingMatch[1]); if (typeof missingTrace === 'string') missingTrace = JSON.parse(missingTrace);
+      if (missingResult.status !== 0 || missingTrace?.status !== 'failed' || !missingTrace.failedResources?.some(item => item.path === '/pages/missing.css' && item.status === 404)) throw new Error('missing Demo stylesheet must fail the real-browser journey');
     } finally { fs.writeFileSync(nestedManifestFile, savedNestedManifest); for (const file of [nestedPage, nestedCss, nestedJs]) fs.rmSync(file, { force: true }); }
     const wrongButton = structuredClone(demoContract.journeys[0]); wrongButton.steps[0].selector = '#reset';
     const clicked = cliCall(['run-code', journeyCode({ journey: wrongButton, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/no-op-button.png') })]);
@@ -500,7 +505,7 @@ try {
 
 
   }
-  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 35 : 31, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
+  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 36 : 32, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
 } finally {
   if (mockServer) mockServer.kill('SIGTERM');
   if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }

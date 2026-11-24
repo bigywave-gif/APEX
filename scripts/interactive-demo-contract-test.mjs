@@ -22,6 +22,11 @@ const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-interactive-contract-
 try {
   const interactiveDemo = seedInteractionFixture(runDir), url = interactiveDemo.url;
   const capture = { status: 'passed', interactiveDemo };
+  fs.writeFileSync(path.join(runDir, 'state.json'), JSON.stringify({ roleChain: { confirmationModel: 'two-confirmations' } }));
+  const missingResourceObservation = structuredClone(capture); delete missingResourceObservation.interactiveDemo.journeys[0].failedResources;
+  reject(() => verifyDemoInteractions(runDir, missingResourceObservation, url));
+  const failedResourceObservation = structuredClone(capture); failedResourceObservation.interactiveDemo.journeys[0].failedResources.push({ path: '/missing.css', status: 404 });
+  reject(() => verifyDemoInteractions(runDir, failedResourceObservation, url));
   const verified = verifyDemoInteractions(runDir, capture, url); checks++;
   assert.equal(verified.controlCoverage.scope, 'declared-journeys-only'); checks++;
   assert.equal(verified.controlCoverage.otherVisibleControls, 'not-inventoried'); checks++;
