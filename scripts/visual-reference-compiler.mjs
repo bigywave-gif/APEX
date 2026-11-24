@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { archiveArtifacts } from './run-ledger.mjs';
+import { archiveArtifacts, commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { evidenceFor, pass } from './structure-evidence.mjs';
 import { bindStitchScreen } from './stitch-screen-binding.mjs';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,7 +18,7 @@ if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX 
 if (!['compile', 'emit', 'emit-screen'].includes(command) || !runArg || !inputArg) die('usage: compile|emit <run-dir> <visual-reference-input.json>');
 const runDir = path.resolve(runArg); const input = read(path.resolve(inputArg));
 try { requireRouterAction(runDir, command === 'emit-screen' ? ['generate_visual', 'sync_stitch', 'verify'] : command === 'emit' ? ['compile_visual_bundle', 'generate_visual'] : 'compile_visual_bundle'); } catch (error) { die(error.message); }
-const state = read(path.join(runDir, 'state.json'));
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 if (state.track === 'existing') {
   if (!state.artifacts.codeReference) die('Existing Visual requires a complete code reference');
   const codeReference = read(path.resolve(runDir, state.artifacts.codeReference));
@@ -91,10 +91,10 @@ if (command === 'emit-screen') {
   index.entries = index.entries.filter(item => item.kind !== input.demoCapture.kind || item.id !== input.demoCapture.id);
   index.entries.push({ ...input.demoCapture, path: path.relative(runDir, output), sha256: hash(output) });
   write(indexFile, index);
-  const stateFile = path.join(runDir, 'state.json'); state.artifacts.visualScreenReferences = 'visual-screen-references.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+  const stateFile = path.join(runDir, 'state.json'); state.artifacts.visualScreenReferences = 'visual-screen-references.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-reference-compiler-state-update', expectedStateHash });
   console.log(JSON.stringify({ visualScreenReference: output, index: indexFile, referenceHash: artifact.referenceImage.sha256 }));
   process.exit(0);
 }
 const output = path.join(runDir, 'visual-reference.json'); write(output, artifact);
-const stateFile = path.join(runDir, 'state.json'); if (fs.existsSync(stateFile)) { state.artifacts.visualReference = 'visual-reference.json'; if (command === 'emit') { write(path.join(runDir, 'gate1-visual-output.json'), input); state.artifacts.gate1VisualOutput = 'gate1-visual-output.json'; } state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state); }
+const stateFile = path.join(runDir, 'state.json'); if (fs.existsSync(stateFile)) { state.artifacts.visualReference = 'visual-reference.json'; if (command === 'emit') { write(path.join(runDir, 'gate1-visual-output.json'), input); state.artifacts.gate1VisualOutput = 'gate1-visual-output.json'; } state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-reference-compiler-state-update', expectedStateHash }); }
 console.log(JSON.stringify({ visualReference: output, gate1VisualOutput: command === 'emit' ? path.join(runDir, 'gate1-visual-output.json') : null, referenceHash: artifact.referenceImage.sha256 }));

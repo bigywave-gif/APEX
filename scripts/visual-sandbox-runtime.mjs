@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 /** Start and verify the only HTTP runtime permitted for a run-local visual sandbox. */
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
@@ -57,7 +58,7 @@ if (command === 'serve') {
   if (command !== 'start' || !arg || (portArg && portArg !== '--bind-host')) die('usage: start <run-dir> [--bind-host 127.0.0.1|::1]');
   const runDir = path.resolve(arg); try { requireRouterAction(runDir, 'generate_visual'); } catch (error) { die(error.message); }
   const { runId } = assertCurrentRun(runDir);
-  const stateFile = path.join(runDir, 'state.json'), state = read(stateFile);
+  const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
   const filesRef = state.artifacts?.visualSandboxFiles;
   const filesManifest = filesRef && inside(runDir, filesRef);
   if (!filesManifest || !fs.existsSync(filesManifest)) die('a materialized visual-sandbox-files.json is required');
@@ -66,13 +67,11 @@ if (command === 'serve') {
   const sandboxRoot = fs.realpathSync(path.dirname(entrypoint));
   const runtimeFile = path.join(runDir, 'visual-sandbox-runtime.json');
   if (fs.existsSync(runtimeFile)) {
-    try {
-      const prior = read(runtimeFile);
-      if (prior.entrypointHash === hash(entrypoint) && prior.url && await reachable(prior.url)) {
-        state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.updatedAt = new Date().toISOString(); write(stateFile, state);
-        console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url: prior.url, reused: true })); process.exit(0);
-      }
-    } catch {}
+    let prior = null; try { prior = read(runtimeFile); } catch {}
+    if (prior?.entrypointHash === hash(entrypoint) && prior.url && await reachable(prior.url)) {
+      state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-sandbox-runtime-state-update', expectedStateHash });
+      console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url: prior.url, reused: true })); process.exit(0);
+    }
   }
   const port = await availablePort(host);
   const child = spawn(process.execPath, [process.argv[1], 'serve', sandboxRoot, String(port), '--apex-run-id', runId, '--bind-host', host], { detached: true, stdio: 'ignore' }); child.unref();
@@ -82,6 +81,8 @@ if (command === 'serve') {
   const output = { schemaVersion: '3.0', runId, runtimeRoot: path.relative(fs.realpathSync(runDir), sandboxRoot), entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), url, pid: child.pid, startedAt: new Date().toISOString(), status: 'running' };
   write(runtimeFile, output);
   write(path.join(runDir, 'runtime-services.json'), { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: child.pid, url, runtimeRoot: output.runtimeRoot, startedAt: output.startedAt }] });
-  state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+  state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString();
+  try { commitRunState(runDir, state, { reason: 'visual-sandbox-runtime-state-update', expectedStateHash }); }
+  catch (error) { child.kill('SIGTERM'); throw error; }
   console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url, pid: child.pid, reused: false }));
 }
