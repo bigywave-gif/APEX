@@ -7,7 +7,7 @@ import { seedInteractionFixture } from './interactive-demo-test-fixture.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { recordArtifact, commitRunState, initializeLedger, readRunState, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recordTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
 
@@ -98,6 +98,14 @@ try {
   const forgedDb = new DatabaseSync(path.join(forgedDir, 'run-ledger.sqlite'), { readOnly: true });
   if (JSON.parse(forgedDb.prepare('SELECT state_json FROM state_snapshots ORDER BY id DESC LIMIT 1').get().state_json).gates.gate1.status === 'passed') throw new Error('forged Gate was imported into the ledger');
   forgedDb.close();
+  expect(run(router, ['intake', root, 'run-state-race', 'greenfield', 'standard', 'interactive', 'session-state-race']), 'state race fixture');
+  const raceDir = path.join(root, '.apex', 'runs', 'run-state-race'), raceHook = path.join(root, 'state-race-hook.cjs');
+  const concurrentCode = `import {readRunState,commitRunState} from ${JSON.stringify(pathToFileURL(path.join(apexRoot, 'scripts/run-ledger.mjs')).href)};const state=readRunState(process.argv[1]);state.artifacts.concurrentFixture='concurrent-marker.json';state.revision+=1;commitRunState(process.argv[1],state,{reason:'router-race-fixture'});`;
+  fs.writeFileSync(raceHook, `const fs=require('node:fs'),cp=require('node:child_process');const rename=fs.renameSync;fs.renameSync=(from,to)=>{const result=rename(from,to);if(String(to).endsWith('/handoff-gate1-cas-race.json'))cp.execFileSync(process.execPath,['--input-type=module','-e',${JSON.stringify(concurrentCode)},${JSON.stringify(raceDir)}],{env:{...process.env,NODE_OPTIONS:''}});return result};`);
+  const raced = run(router, ['handoff', root, 'run-state-race', 'session-state-race', 'gate1', 'cas-race', '并发状态测试'], { NODE_OPTIONS: `--require=${raceHook}` });
+  reject(raced, 'run state changed before atomic commit', 'stale Router decision must not overwrite a concurrent state update');
+  const raceState = readRunState(raceDir);
+  if (raceState.lifecycle !== 'active' || raceState.artifacts.concurrentFixture !== 'concurrent-marker.json') throw new Error('Router race must retain the concurrent update and reject the stale handoff');
   expect(run(router, ['intake', root, 'run-cancel', 'greenfield', 'standard', 'interactive', 'session-cancel']), 'cancellation regression run must create an isolated session-bound run');
   expect(run(router, ['intake', root, 'run-cancel-other', 'greenfield', 'standard', 'interactive', 'session-cancel-other']), 'cancellation regression must preserve another session run');
   const cancelRunDir = path.join(root, '.apex', 'runs', 'run-cancel');

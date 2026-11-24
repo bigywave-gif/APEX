@@ -51,14 +51,22 @@ function invalidateConfirmationEpochs(state, gates) {
 function fail(message) { console.error(`APEX router failed: ${message}`); process.exit(1); }
 function json(value) { console.log(JSON.stringify(value, null, 2)); }
 function now() { return new Date().toISOString(); }
-function read(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+const stateReadVersions = new WeakMap();
+function rememberState(file, value) {
+  if (path.basename(file) === 'state.json' && value && typeof value === 'object') stateReadVersions.set(value, { directory: path.resolve(path.dirname(file)), hash: sha256Text(JSON.stringify(value)) });
+  return value;
+}
+function read(file) { return rememberState(file, JSON.parse(fs.readFileSync(file, 'utf8'))); }
 function write(file, value) {
   // state.json remains a compatibility projection, while the durable ledger is
   // committed first.  This lets a later Router invocation repair a torn or
   // stale projection instead of guessing a flow transition from chat history.
   if (path.basename(file) === 'state.json') {
     const runDirectory = path.dirname(file);
-    commitRunState(runDirectory, value, { reason: 'router-state-write' });
+    const observed = stateReadVersions.get(value);
+    if (observed && observed.directory !== path.resolve(runDirectory)) throw new Error('state snapshot belongs to a different Run');
+    const committed = commitRunState(runDirectory, value, { reason: 'router-state-write', expectedStateHash: observed?.hash || null });
+    stateReadVersions.set(value, { directory: path.resolve(runDirectory), hash: committed.stateHash });
     return;
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -364,7 +372,7 @@ function runDir(root, runId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId || '')) fail('runId must contain only letters, numbers, dot, underscore, or dash');
   return path.join(root, '.apex', 'runs', runId);
 }
-function stateOf(dir) { try { return readRunState(dir); } catch (error) { fail(error.message); } }
+function stateOf(dir) { try { return rememberState(path.join(dir, 'state.json'), readRunState(dir)); } catch (error) { fail(error.message); } }
 function appendEvent(dir, event) {
   const entry = { at: now(), ...event };
   appendLedgerEvent(dir, entry);
