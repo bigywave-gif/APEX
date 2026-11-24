@@ -50,7 +50,7 @@ export function readRunMetrics(runDirectory) {
         else agent.sourceTotals[key] = (agent.sourceTotals[key] ?? 0) + Number(row.total_tokens);
         agentTotals.set(row.agent_id, agent);
       }
-      if (typeof metadata?.jobId === 'string' && Number.isInteger(metadata?.attempt) && metadata.attempt > 0) attemptUsage.push({ jobId: metadata.jobId, attempt: metadata.attempt, agentId: row.agent_id, stage: row.stage, outcome: typeof metadata.outcome === 'string' ? metadata.outcome : null, source: key, input: key === 'unknown' ? null : Number(row.input_tokens), output: key === 'unknown' ? null : Number(row.output_tokens), total: key === 'unknown' ? null : Number(row.total_tokens) });
+      if (typeof metadata?.jobId === 'string' && Number.isInteger(metadata?.attempt) && metadata.attempt > 0) attemptUsage.push({ jobId: metadata.jobId, attempt: metadata.attempt, agentId: row.agent_id, stage: row.stage, outcome: typeof metadata.outcome === 'string' ? metadata.outcome : null, source: key, input: key === 'unknown' ? null : Number(row.input_tokens), output: key === 'unknown' ? null : Number(row.output_tokens), total: key === 'unknown' ? null : Number(row.total_tokens), overReservation: metadata.overReservation === true });
       if (key !== 'unknown') sourceTotals[key] = (sourceTotals[key] ?? 0) + Number(row.total_tokens);
       const entry = byStage[row.stage] ||= { input: null, output: null, total: null, records: 0, unknownRecords: 0 };
       entry.records++;

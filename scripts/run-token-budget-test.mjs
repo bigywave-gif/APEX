@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, reconcileAgentAttemptUsage, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
+import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, reconcileAgentAttemptUsage, rebudgetAgentJobs, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
 import { readRunMetrics } from './run-metrics.mjs';
 
 const run = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-run-token-budget-'));
@@ -147,6 +148,24 @@ try {
     const budget = agentRuntimeStatus(unverified).runBudget;
     assert.equal(budget.used, 30); assert.equal(budget.unknownAttempts.held, 40); assert.equal(budget.admissionAvailable, 30, 'unverified recorded usage must not consume the original reservation twice');
   } finally { fs.rmSync(unverified, { recursive: true, force: true }); }
+  const lateOverrun = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-late-usage-overrun-'));
+  try {
+    configureRunTokenBudget(lateOverrun, { limit: 200, verificationReserve: 0 });
+    registerAgent(lateOverrun, { agentId: 'late-overrun', vocation: 'review', stage: 'visual' });
+    const job = enqueueAgentJob(lateOverrun, { agentId: 'late-overrun', stage: 'visual', inputHash: 'late', payload: { tokenBudget: 70, stageTokenBudget: 200 } });
+    const lease = claimAgentJob(lateOverrun, job.jobId);
+    settleAgentJob(lateOverrun, job.jobId, { status: 'succeeded', leaseToken: lease.leaseToken });
+    const usage = { jobId: job.jobId, attempt: 1, inputTokens: 50, outputTokens: 30, usageSource: 'provider-reported', evidence: 'isolated provider fixture' };
+    const resolved = reconcileAgentAttemptUsage(lateOverrun, usage);
+    assert.equal(resolved.overReservation, true); assert.equal(resolved.fenced, true);
+    assert.equal(agentRuntimeStatus(lateOverrun, job.jobId).jobs[0].status, 'dead-letter');
+    assert.equal(reconcileAgentAttemptUsage(lateOverrun, usage).overReservation, true);
+    const ledger = new DatabaseSync(path.join(lateOverrun, 'run-ledger.sqlite'), { readOnly: true });
+    const record = JSON.parse(ledger.prepare("SELECT payload_json FROM events WHERE event_type = 'agent-attempt-usage-reconciled'").get().payload_json); ledger.close();
+    assert.equal(record.previousUsage.metadata.usageSource, 'unknown'); assert.equal(record.previousUsage.totalTokens, 0);
+    rebudgetAgentJobs(lateOverrun, { stage: 'visual', jobIds: [job.jobId], perAgentBudget: 100, stageBudget: 200 });
+    assert.equal(claimAgentJob(lateOverrun, job.jobId).status, 'running', 'late overrun needs an explicit budget change before retry');
+  } finally { fs.rmSync(lateOverrun, { recursive: true, force: true }); }
   const historical = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-unknown-historical-budget-'));
   try {
     registerAgent(historical, { agentId: 'historical', vocation: 'review', stage: 'visual' });

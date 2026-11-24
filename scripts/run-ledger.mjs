@@ -806,21 +806,29 @@ export function reconcileAgentAttemptUsage(runDir, { jobId, attempt, inputTokens
   const database = open(runDir);
   try {
     database.exec('BEGIN IMMEDIATE');
-    const job = database.prepare('SELECT stage, agent_id, reserved_tokens, payload_json FROM agent_jobs WHERE job_id = ?').get(jobId);
+    const job = database.prepare('SELECT * FROM agent_jobs WHERE job_id = ?').get(jobId);
     if (!job) throw new Error('attempt job does not exist');
     const matches = database.prepare('SELECT * FROM token_usage WHERE stage = ? AND agent_id = ?').all(job.stage, job.agent_id).filter(row => { const meta = parseJson(row.metadata_json); return meta?.jobId === jobId && Number(meta.attempt) === attempt; });
     if (matches.length !== 1) throw new Error('attempt usage record is missing or ambiguous');
     const row = matches[0], previous = parseJson(row.metadata_json);
     if (!['unknown', 'legacy-unverified'].includes(previous.usageSource)) {
-      if (previous.reconciled && previous.usageSource === usageSource && Number(row.input_tokens) === inputTokens && Number(row.output_tokens) === outputTokens && previous.reconciliationEvidence === evidence) { database.exec('COMMIT'); return { status: 'already-reconciled', jobId, attempt }; }
+      if (previous.reconciled && previous.usageSource === usageSource && Number(row.input_tokens) === inputTokens && Number(row.output_tokens) === outputTokens && previous.reconciliationEvidence === evidence) { database.exec('COMMIT'); return { status: 'already-reconciled', jobId, attempt, overReservation: Boolean(previous.overReservation) }; }
       throw new Error('attempt usage has already been recorded with different values');
     }
     const overReservation = Number(previous.reservedTokens || 0) > 0 && inputTokens + outputTokens > Number(previous.reservedTokens);
-    const metadata = { ...previous, usageSource, reconciled: true, previousUsageSource: previous.usageSource, reconciliationEvidence: evidence, reconciledAt: now(), overReservation };
+    const fenceJob = overReservation && Number(job.attempt) === attempt && ['succeeded', 'queued'].includes(job.status);
+    const metadata = { ...previous, ...(fenceJob ? { outcome: 'budget-exceeded', priorOutcome: previous.outcome } : {}), usageSource, reconciled: true, previousUsageSource: previous.usageSource, reconciliationEvidence: evidence, reconciledAt: now(), overReservation };
     database.prepare('UPDATE token_usage SET input_tokens = ?, output_tokens = ?, total_tokens = ?, metadata_json = ? WHERE id = ?').run(inputTokens, outputTokens, inputTokens + outputTokens, JSON.stringify(metadata), row.id);
-    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('agent-attempt-usage-reconciled', now(), JSON.stringify({ jobId, attempt, previous, inputTokens, outputTokens, usageSource, evidence }));
+    if (fenceJob) {
+      const reason = 'late-reconciled agent attempt exceeded its recorded token budget', timestamp = now();
+      database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(reason, timestamp, jobId);
+      database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, attempt, reason, job.payload_json, timestamp);
+      database.prepare("UPDATE agent_sessions SET status = 'failed', updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(timestamp, jobId, job.agent_id);
+    }
+    const previousUsage = { inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens), totalTokens: Number(row.total_tokens), recordedAt: row.recorded_at, metadata: previous };
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('agent-attempt-usage-reconciled', now(), JSON.stringify({ jobId, attempt, previousUsage, inputTokens, outputTokens, usageSource, evidence, overReservation, fenced: fenceJob }));
     const runBudget = runBudgetSnapshot(database, job.stage);
-    database.exec('COMMIT'); return { status: 'reconciled', jobId, attempt, overReservation, runBudget };
+    database.exec('COMMIT'); return { status: 'reconciled', jobId, attempt, overReservation, fenced: fenceJob, runBudget };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 export function settleAgentJob(runDir, jobId, { status, result = null, error = null, retryDelayMs = null, leaseToken = null, usage = null, budgetExceeded = false, expectedStage = null, directCompletion = false } = {}) {

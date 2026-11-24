@@ -66,6 +66,13 @@ try {
   assert.throws(() => settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: oldLease }), /stale or missing/);
   settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: newLease, usage: { inputTokens: 2, outputTokens: 1, usageSource: 'provider-reported' } });
   assert.equal(agentRuntimeStatus(d2).tokenUsage.gate1, 104);
+  registerAgent(d2, { agentId: 'late-overrun-fixture', vocation: 'test', stage: 'gate1' });
+  const lateJob = enqueueAgentJob(d2, { agentId: 'late-overrun-fixture', stage: 'gate1', inputHash: 'late-overrun', payload: { tokenBudget: 100, stageTokenBudget: 1000 } });
+  const lateClaim = claimAgentJob(d2, lateJob.jobId); settleAgentJob(d2, lateJob.jobId, { status: 'succeeded', leaseToken: lateClaim.leaseToken });
+  const lateUsage = JSON.stringify({ inputTokens: 80, outputTokens: 21, usageSource: 'provider-reported', evidence: 'isolated late usage fixture' });
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'reconcile-attempt-usage', d2, 'gate1', lateJob.jobId, '1', lateUsage]); assert.equal(r.status, 0, r.stderr || r.stdout); assert.equal(JSON.parse(r.stdout).fenced, true);
+  r = run('apex-router.mjs', ['status', p2, 'budget', 'budget-session']); const lateStatus = JSON.parse(r.stdout);
+  assert.equal(lateStatus.nextRequiredAction, 'recover'); assert.ok(!lateStatus.allowedActions.includes('plan_visual'));
   const p3 = path.join(project, 'run-budget-project'); fs.mkdirSync(p3);
   r = run('apex-router.mjs', ['intake', p3, 'run-budget', 'greenfield', 'standard', 'interactive', 'run-budget-session', '确认调用 APEX']); assert.equal(r.status, 0, r.stderr);
   const d3 = path.join(p3, '.apex/runs/run-budget');
