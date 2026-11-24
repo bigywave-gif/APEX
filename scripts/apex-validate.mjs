@@ -19,6 +19,7 @@ import { implementationRegistrationCurrent } from './implementation-registration
 import { agentRuntimeStatus } from './run-ledger.mjs';
 import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
 import { validateRequirementReview } from './requirement-review.mjs';
+import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -89,23 +90,6 @@ function resolveArtifact(runDir, reference, fallback) {
 }
 function hashFile(file) {
   return 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-}
-function visualRevisionBindingCurrent(file, expectedHash) {
-  if (hashFile(file) === expectedHash) return true;
-  const chunks = fs.readFileSync(file, 'utf8').match(/[^\n]*\n|[^\n]+/g) || [];
-  let prefix = '';
-  for (let index = 0; index < chunks.length; index += 1) {
-    prefix += chunks[index];
-    const prefixHash = 'sha256:' + crypto.createHash('sha256').update(prefix).digest('hex');
-    if (prefixHash !== expectedHash) continue;
-    return chunks.slice(index + 1).every(chunk => {
-      try {
-        const revision = JSON.parse(chunk);
-        return revision.checkpoint === 'implementation' && revision.impact === 'implementation-only';
-      } catch { return false; }
-    });
-  }
-  return false;
 }
 function validateStructuralContract(runDir, parity, expectedSource, expectedImageHash) {
   const verification = parity.structuralVerification || {};

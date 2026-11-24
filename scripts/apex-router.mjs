@@ -28,6 +28,7 @@ import { implementationSealCurrent } from './implementation-seal.mjs';
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { validateRequirementReview } from './requirement-review.mjs';
+import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
@@ -67,22 +68,6 @@ function sha(value) { return crypto.createHash('sha256').update(value).digest('h
 function sha256Text(value) { return `sha256:${sha(value)}`; }
 function hashFile(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function sha256File(file) { return `sha256:${hashFile(file)}`; }
-function visualRevisionBindingCurrent(file, expectedHash) {
-  if (sha256File(file) === expectedHash) return true;
-  const chunks = fs.readFileSync(file, 'utf8').match(/[^\n]*\n|[^\n]+/g) || [];
-  let prefix = '';
-  for (let index = 0; index < chunks.length; index += 1) {
-    prefix += chunks[index];
-    if (sha256Text(prefix) !== expectedHash) continue;
-    return chunks.slice(index + 1).every(chunk => {
-      try {
-        const revision = JSON.parse(chunk);
-        return revision.checkpoint === 'implementation' && revision.impact === 'implementation-only';
-      } catch { return false; }
-    });
-  }
-  return false;
-}
 function fileFingerprint(file) { const stat = fs.statSync(file); return { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs }; }
 function sameFingerprint(expected, file) { if (!expected || !file || !fs.existsSync(file)) return false; const actual = fileFingerprint(file); return Object.entries(expected).every(([key, value]) => actual[key] === value); }
 function operationRecords(dir) {

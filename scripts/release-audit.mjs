@@ -140,6 +140,7 @@ for (const [name, script] of [
   ['existing-reference-resolution', 'existing-reference-resolution-test.mjs'],
   ['design-contract-evidence', 'design-contract-evidence-test.mjs'],
   ['visual-skill-decision', 'visual-skill-decision-test.mjs'],
+  ['visual-revision-binding', 'visual-revision-binding-test.mjs'],
   ['demo-design-handoff', 'demo-design-handoff-test.mjs'],
   ['role-summary-binding', 'role-summary-binding-test.mjs'],
   ['bridge-confirmation-contract', 'bridge-confirmation-contract-test.mjs'],

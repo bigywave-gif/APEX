@@ -57,9 +57,11 @@ try {
  assert.equal(registered.userInteraction?.confirmation,null);
  assert.ok(fs.existsSync(path.join(dir,registered.receipt)));
 
+ route(['revise',project,id,session,'visual-plan','visible','合成测试调整视觉方案的层级']);
  const visualSelection=invoke('plan_visual','role-advisory.mjs',['select',dir,'visual']);
  assert.ok(visualSelection.selectedRoles.includes('ui-designer'));
  const visual=JSON.parse(fs.readFileSync(path.join(dir,'advisories/visual/selection.json')));
+ assert.ok(visual.inputBindings.some(item=>item.artifact==='visualRevision'),'visual role must bind the initial visual revision');
  for(const roleId of visual.selectedRoles){
   const job=agentRuntimeStatus(dir,visual.agentJobs[roleId]).jobs[0];
   const claim=invoke('plan_visual','agent-runtime.mjs',['claim',dir,job.jobId,'visual']);
