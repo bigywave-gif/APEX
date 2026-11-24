@@ -38,6 +38,7 @@ try {
   const copiedRun=path.join(root,'before-copy');fs.cpSync(beforeDir,copiedRun,{recursive:true});const copyComparison=compareRuns(before,readRunMetrics(copiedRun));assert.equal(copyComparison.status,'not-comparable');assert.ok(copyComparison.reasons.includes('Runs may be copies of the same ledger'));
   assert.ok(compareRuns(before,{...after,ledgerOrigin:null}).reasons.includes('initial ledger identity is missing or invalid'));
   const copiedLedger=new DatabaseSync(path.join(copiedRun,'run-ledger.sqlite'));copiedLedger.prepare('UPDATE state_snapshots SET state_hash = ? WHERE id = (SELECT MIN(id) FROM state_snapshots)').run('sha256:invalid');copiedLedger.close();assert.equal(readRunMetrics(copiedRun).ledgerOrigin,null);
+  const corruptLatest = new DatabaseSync(path.join(copiedRun, 'run-ledger.sqlite')); corruptLatest.prepare('UPDATE state_snapshots SET state_json = ? WHERE id = (SELECT MAX(id) FROM state_snapshots)').run('{}'); corruptLatest.close(); assert.throws(() => readRunMetrics(copiedRun), /latest run ledger state snapshot is corrupt/);
   assert.ok(compareRuns(before, { ...after, runIdentity: null }).reasons.includes('Run identity is missing'));
   assert.equal(compared.changes.failedOperations, null); assert.equal(compared.operationAssessment.partialRecordedFailedDelta, 0);
   assert.equal(compared.tokenAssessment.status, 'not-comparable');

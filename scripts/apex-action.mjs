@@ -174,6 +174,14 @@ function roleEvidenceInputs() {
     return { jobId, attempt: job.attempt, status: job.status, required, optional };
   } catch { return { status: 'evidence-unavailable' }; }
 }
+function agentClaimBudgetInputs() {
+  if (script !== 'agent-runtime.mjs' || scriptArgs[0] !== 'claim') return undefined;
+  try {
+    const runtime = agentRuntimeStatus(runDirectory), jobId = scriptArgs[2], stage = scriptArgs[3];
+    const job = runtime.jobs.find(item => item.jobId === jobId);
+    return { job: job ? { jobId, stage: job.stage, status: job.status, attempt: job.attempt, tokenBudget: job.payload?.tokenBudget, stageTokenBudget: job.payload?.stageTokenBudget, budgetRecovery: job.payload?.budgetRecovery } : null, stageUsage: runtime.tokenUsage?.[stage] ?? 0, stageCoverage: runtime.tokenUsageCoverage?.[stage] || null, runBudget: runtime.runBudget, runningReservations: runtime.jobs.filter(item => item.status === 'running').map(item => ({ jobId: item.jobId, stage: item.stage, reservedTokens: item.reservedTokens })).sort((a, b) => a.jobId.localeCompare(b.jobId)) };
+  } catch { return { status: 'budget-state-unavailable' }; }
+}
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
@@ -216,7 +224,7 @@ fs.mkdirSync(operationDirectory, { recursive: true });
 if (fs.existsSync(receiptFile)) {
   const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
   if (receipt.fingerprint !== fingerprint) fail('authorization receipt was already used for a different operation');
-  if (receipt.status === 'succeeded') { if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim') fail('agent claim replay requires a fresh Router authorization and the same claim key so the current lease is revalidated'); if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'status') fail('agent status replay requires a fresh Router authorization to observe current jobs'); if (JSON.stringify(receipt.inputFileHashes || {}) !== JSON.stringify(currentInputHashes)) fail('authorized operation input files changed; obtain a new Router authorization before retrying'); process.stdout.write(receipt.stdout || ''); process.stderr.write(receipt.stderr || ''); process.exit(0); }
+  if (receipt.status === 'succeeded') { if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim') fail('agent claim replay requires a fresh Router authorization and the same claim key so the current lease is revalidated'); if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'status') fail('agent status replay requires a fresh Router authorization to observe current jobs'); if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'run-budget') fail('run budget replay requires a fresh Router authorization to observe the current configuration'); if (JSON.stringify(receipt.inputFileHashes || {}) !== JSON.stringify(currentInputHashes)) fail('authorized operation input files changed; obtain a new Router authorization before retrying'); process.stdout.write(receipt.stdout || ''); process.stderr.write(receipt.stderr || ''); process.exit(0); }
   fail(`operation receipt is ${receipt.status}; obtain a new Router authorization before retrying`);
 }
 const verification = spawnSync(process.execPath, [router, 'verify-authorization', projectRoot, runId, sessionId, authorizationRef, action], { encoding: 'utf8', timeout: 30_000, killSignal: 'SIGTERM' });
@@ -226,7 +234,8 @@ try { verificationResult = JSON.parse(verification.stdout); }
 catch { fail('Router authorization verification returned invalid JSON'); }
 const stateHash = verificationResult?.authorizationToken?.stateHash;
 if (!stateHash) fail('Router authorization verification did not return its bound state hash');
-const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs() });
+const claimBudgetInputs = agentClaimBudgetInputs();
+const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }) });
 // An authorization is deliberately single-use, but a fresh authorization is
 // not evidence that the failed action now has different inputs.  Without this
 // operation key, hosts can create an infinite retry loop by asking Router for

@@ -46,5 +46,18 @@ try {
   assert.throws(() => settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: oldLease }), /stale or missing/);
   settleAgentJob(d2, jobId, { status: 'succeeded', leaseToken: newLease, usage: { inputTokens: 2, outputTokens: 1, usageSource: 'provider-reported' } });
   assert.equal(agentRuntimeStatus(d2).tokenUsage.gate1, 104);
+  const p3 = path.join(project, 'run-budget-project'); fs.mkdirSync(p3);
+  r = run('apex-router.mjs', ['intake', p3, 'run-budget', 'greenfield', 'standard', 'interactive', 'run-budget-session', '确认调用 APEX']); assert.equal(r.status, 0, r.stderr);
+  const d3 = path.join(p3, '.apex/runs/run-budget');
+  const authorize3 = () => { const value = run('apex-router.mjs', ['authorize', p3, 'run-budget', 'run-budget-session', 'analyze_requirement']); assert.equal(value.status, 0, value.stderr || value.stdout); return JSON.parse(value.stdout).authorizationRef; };
+  const action3 = args => run('apex-action.mjs', ['run', p3, 'run-budget', 'run-budget-session', authorize3(), 'analyze_requirement', ...args]);
+  r = action3(['agent-runtime.mjs', 'run-budget', d3, 'gate1', '100', '0', '0']); assert.equal(r.status, 0, r.stderr || r.stdout);
+  r = action3(['role-advisory.mjs', 'select', d3, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout);
+  const selection3 = JSON.parse(fs.readFileSync(path.join(d3, 'advisories/gate1/selection.json'))), job3 = selection3.agentJobs[selection3.selectedRoles[0]];
+  const claim3 = () => action3(['agent-runtime.mjs', 'claim', d3, job3, 'gate1']);
+  r = claim3(); assert.notEqual(r.status, 0); assert.match(r.stderr, /run-token-budget-exhausted/);
+  r = claim3(); assert.notEqual(r.status, 0); assert.match(r.stderr, /identical controlled operation already failed/);
+  r = action3(['agent-runtime.mjs', 'run-budget', d3, 'gate1', '500000', '50000', '25000']); assert.equal(r.status, 0, r.stderr || r.stdout);
+  r = claim3(); assert.equal(r.status, 0, r.stderr || r.stdout); assert.equal(JSON.parse(r.stdout).status, 'running', 'a changed Run budget must permit a fresh claim');
   console.log(JSON.stringify({ status: 'passed', scope: 'Router-controlled role submission, simulated over-budget usage, policy rebudget, new lease and retained usage' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

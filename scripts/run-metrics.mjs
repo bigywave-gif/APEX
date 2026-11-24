@@ -16,6 +16,7 @@ export function readRunMetrics(runDirectory) {
     const snapshot = db.prepare('SELECT state_json, state_hash FROM state_snapshots ORDER BY id DESC LIMIT 1').get();
     if (!snapshot) throw new Error('run ledger has no durable state snapshot');
     const state = JSON.parse(snapshot.state_json);
+    if (`sha256:${crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex')}` !== snapshot.state_hash) throw new Error('latest run ledger state snapshot is corrupt');
     let projection = 'unreadable';
     try {
       const diskState = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
@@ -60,6 +61,28 @@ export function readRunMetrics(runDirectory) {
         entry.total = (entry.total ?? 0) + Number(row.total_tokens);
       }
     }
+    let runBudget = null;
+    const budgetRow = db.prepare("SELECT value FROM ledger_meta WHERE key = 'run_token_budget'").get();
+    if (budgetRow) {
+      const config = JSON.parse(budgetRow.value);
+      const recoveryReserve = config.recoveryReserve ?? 0;
+      if (!Number.isSafeInteger(config.limit) || config.limit < 1 || !Number.isSafeInteger(config.verificationReserve) || config.verificationReserve < 0 || !Number.isSafeInteger(recoveryReserve) || recoveryReserve < 0 || config.verificationReserve + recoveryReserve > config.limit) throw new Error('run token budget configuration is invalid');
+      const used = rows.reduce((sum, row) => sum + Number(row.total_tokens), 0);
+      const reserved = Number(db.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running'").get().total);
+      const verificationUsed = rows.filter(row => row.stage === 'verify').reduce((sum, row) => sum + Number(row.total_tokens), 0);
+      const verificationReserved = Number(db.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = 'verify'").get().total);
+      const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved);
+      const recoveryUsed = rows.reduce((sum, row) => { try { const meta = JSON.parse(row.metadata_json || '{}'); return sum + (row.stage !== 'verify' && (meta.budgetRecovery === true || Number(meta.attempt) > 1) ? Number(row.total_tokens) : 0); } catch { return sum; } }, 0);
+      const priorAttempt = db.prepare('SELECT 1 FROM agent_jobs WHERE agent_id = ? AND stage = ? AND job_id != ? AND attempt > 0 LIMIT 1');
+      const recoveryReserved = db.prepare("SELECT job_id, agent_id, stage, attempt, payload_json, reserved_tokens FROM agent_jobs WHERE status = 'running'").all().reduce((sum, row) => { const payload = JSON.parse(row.payload_json || '{}'); const recovery = Number(row.attempt) > 1 || (payload.budgetRecovery === true && Boolean(priorAttempt.get(row.agent_id, row.stage, row.job_id))); return sum + (row.stage !== 'verify' && recovery ? Number(row.reserved_tokens) : 0); }, 0);
+      const remainingRecoveryReserve = Math.max(0, recoveryReserve - recoveryUsed - recoveryReserved);
+      const incompleteUsage = coverage.unknown > 0 || coverage.unverified > 0;
+      const estimatedUsage = coverage.estimated > 0;
+      const reportedAvailable = Math.max(0, config.limit - used - reserved);
+      const reserveShortfall = Math.max(0, used + reserved + remainingVerificationReserve + remainingRecoveryReserve - config.limit);
+      const reportedOvercommitted = used + reserved > config.limit;
+      runBudget = { ...config, recoveryReserve, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
+    }
     const opsDir = path.join(root, 'operations'), receipts = [], unreadable = [];
     const operationsPresent = fs.existsSync(opsDir) && fs.statSync(opsDir).isDirectory();
     if (operationsPresent) for (const name of fs.readdirSync(opsDir).filter(name => name.endsWith('.json'))) {
@@ -92,7 +115,7 @@ export function readRunMetrics(runDirectory) {
       operations: { receiptDirectory: operationsPresent ? 'present' : 'missing', recorded: operationsPresent ? receipts.length : null, failed: operationsPresent ? receipts.filter(x => x.status === 'failed').length : null, interrupted: operationsPresent ? receipts.filter(x => x.status === 'interrupted').length : null, running: operationsPresent ? receipts.filter(x => x.status === 'running').length : null, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: operationsPresent ? receipts.length - durations.length : null, unreadable: operationsPresent ? unreadable.length : null, completeness: 'unverified' },
       manualInterventions: null, // No complete host/user-intervention counter is available.
       agents: { jobs: jobRows.length, retries: jobRows.reduce((n, x) => n + Math.max(0, Number(x.attempt) - 1), 0), running: jobRows.filter(x => x.status === 'running').length, deadLetters: jobRows.filter(x => x.status === 'dead-letter').length },
-      tokens: { recordedTotal: Object.values(sourceTotals).some(x => x !== null) ? Object.values(sourceTotals).reduce((n, x) => n + (x ?? 0), 0) : null, sourceTotals, attribution, byStage, byAgent: [...agentTotals.values()], attemptUsage, attemptAttribution: { attributedRecords: attemptUsage.length, unattributedRecords: rows.length - attemptUsage.length }, coverage, scope: 'recorded-agent-and-independent-host-usage', completeHostUsage: false, note: 'Recorded total combines sources and is not total actual usage. Unknown and unrecorded host calls are not represented by a zero.' }
+      tokens: { recordedTotal: Object.values(sourceTotals).some(x => x !== null) ? Object.values(sourceTotals).reduce((n, x) => n + (x ?? 0), 0) : null, sourceTotals, attribution, byStage, byAgent: [...agentTotals.values()], attemptUsage, attemptAttribution: { attributedRecords: attemptUsage.length, unattributedRecords: rows.length - attemptUsage.length }, coverage, runBudget, scope: 'recorded-agent-and-independent-host-usage', completeHostUsage: false, note: 'Recorded total combines sources and is not total actual usage. Unknown and unrecorded host calls are not represented by a zero.' }
     };
   } finally { db.close(); }
 }

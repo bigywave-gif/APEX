@@ -122,7 +122,7 @@ function failureCategory(receipt) {
     if (!Array.isArray(receipt.productionBoundary?.changedFiles)) return 'obsolete-boundary-snapshot';
     return 'production-boundary';
   }
-  if (/stage-token-budget-exhausted/i.test(evidence)) return 'token-budget-exhausted';
+  if (/(?:stage|run)-token-budget-exhausted/i.test(evidence)) return 'token-budget-exhausted';
   if (/PROJECT_DELETION_POLICY|deletion policy|delete(?:d|\s+operation)?\s+(?:is\s+)?forbidden/i.test(evidence)) return 'policy-denied';
   if (/EACCES|EPERM|permission denied|not permitted/i.test(evidence)) return 'permission-denied';
   if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network|browser.*unavailable/i.test(evidence)) return 'external-unavailable';

@@ -3,7 +3,7 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, enqueueAgentJob, endTraceSpan, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { availableAgentSkills, loadTasteSkill, loadAgentSkill } from './required-visual-skill.mjs';
 
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
@@ -29,7 +29,7 @@ try {
     const skillInstructions = pending?.payload?.tasteSkill ? loadTasteSkill(pending.payload.tasteSkill) : null;
     const optionalSkills = availableAgentSkills(stage, pending.payload?.roleId);
     const claimed = claimAgentJob(runDir, jobId, { claimKey });
-    if (claimed.status === 'budget-exhausted') fail(`stage-token-budget-exhausted: ${JSON.stringify(claimed)}`);
+    if (claimed.status === 'budget-exhausted') fail(`${claimed.reason?.startsWith('run-budget-') ? 'run' : 'stage'}-token-budget-exhausted: ${JSON.stringify(claimed)}`);
     if (claimed.status === 'running' && skillInstructions) appendLedgerEvent(runDir, { type: 'agent-required-skill-loaded', jobId, agentId: pending.agentId, stage, attempt: claimed.attempt, name: skillInstructions.name, sha256: skillInstructions.sha256, path: skillInstructions.path, operationReceipt: process.env.APEX_ROUTER_OPERATION_RECEIPT || null });
     console.log(JSON.stringify({ ...claimed, ...(claimed.status === 'running' && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(claimed.status === 'running' && optionalSkills.length ? { optionalSkills } : {}) }));
   } else if (command === 'skill') {
@@ -59,6 +59,10 @@ try {
     const [stage, observationKey, input, output, usageSource, limit = 'null'] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     if (input === undefined || output === undefined) fail('tokens-observed requires input and output counts');
     requireRouterAction(runDir, action); console.log(JSON.stringify(recordObservedTokenUsage(runDir, { stage, observationKey, inputTokens: Number(input), outputTokens: Number(output), usageSource, limit: limit === 'null' ? null : Number(limit) })));
+  } else if (command === 'run-budget') {
+    const [stage, limit, verificationReserve, recoveryReserve = '0'] = args, action = stageAction[stage];
+    if (!action || limit === undefined || verificationReserve === undefined) fail('run-budget requires stage, total limit, verification reserve and optional recovery reserve');
+    requireRouterAction(runDir, action); console.log(JSON.stringify(configureRunTokenBudget(runDir, { limit: Number(limit), verificationReserve: Number(verificationReserve), recoveryReserve: Number(recoveryReserve) })));
   } else if (command === 'trace-start') {
     const [stage, name, kind = 'agent', attributes = '{}'] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     requireRouterAction(runDir, action); console.log(JSON.stringify(startTraceSpan(runDir, { name, kind, attributes: readJson(attributes) })));

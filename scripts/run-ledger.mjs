@@ -523,6 +523,51 @@ function stageUsageIncomplete(database, stage) {
     try { return !['provider-reported', 'estimated'].includes(JSON.parse(row.metadata_json)?.usageSource); } catch { return true; }
   });
 }
+function runBudgetConfig(database) {
+  const row = database.prepare("SELECT value FROM ledger_meta WHERE key = 'run_token_budget'").get();
+  if (!row) return null;
+  const config = JSON.parse(row.value);
+  const recoveryReserve = config.recoveryReserve ?? 0;
+  if (!Number.isSafeInteger(config.limit) || config.limit < 1 || !Number.isSafeInteger(config.verificationReserve) || config.verificationReserve < 0 || !Number.isSafeInteger(recoveryReserve) || recoveryReserve < 0 || config.verificationReserve + recoveryReserve > config.limit) throw new Error('run token budget configuration is invalid');
+  return { limit: config.limit, verificationReserve: config.verificationReserve, recoveryReserve };
+}
+function isRecoveryJob(database, job) {
+  if (Number(job.attempt) > (job.status === 'running' ? 1 : 0)) return true;
+  if (parseJson(job.payload_json)?.budgetRecovery !== true) return false;
+  return Boolean(database.prepare('SELECT 1 FROM agent_jobs WHERE agent_id = ? AND stage = ? AND job_id != ? AND attempt > 0 LIMIT 1').get(job.agent_id, job.stage, job.job_id));
+}
+function runBudgetSnapshot(database, stage, recovery = false) {
+  const config = runBudgetConfig(database);
+  if (!config) return null;
+  const used = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage').get().total);
+  const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running'").get().total);
+  const verificationUsed = Number(database.prepare("SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = 'verify'").get().total);
+  const verificationReserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = 'verify'").get().total);
+  const usageRows = database.prepare('SELECT stage, total_tokens, metadata_json FROM token_usage').all();
+  const recoveryUsed = usageRows.reduce((sum, row) => { try { const meta = JSON.parse(row.metadata_json); return sum + (row.stage !== 'verify' && (meta?.budgetRecovery === true || Number(meta?.attempt) > 1) ? Number(row.total_tokens) : 0); } catch { return sum; } }, 0);
+  const recoveryReserved = database.prepare("SELECT job_id, agent_id, stage, attempt, status, payload_json, reserved_tokens FROM agent_jobs WHERE status = 'running'").all().reduce((sum, job) => sum + (job.stage !== 'verify' && isRecoveryJob(database, job) ? Number(job.reserved_tokens) : 0), 0);
+  const incompleteUsage = usageRows.some(row => { try { return !['provider-reported', 'estimated'].includes(JSON.parse(row.metadata_json)?.usageSource); } catch { return true; } });
+  const estimatedUsage = usageRows.some(row => { try { return JSON.parse(row.metadata_json)?.usageSource === 'estimated'; } catch { return false; } });
+  const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved);
+  const remainingRecoveryReserve = Math.max(0, config.recoveryReserve - recoveryUsed - recoveryReserved);
+  const effectiveLimit = stage === 'verify' ? config.limit : config.limit - remainingVerificationReserve - (recovery ? 0 : remainingRecoveryReserve);
+  const reportedAvailable = Math.max(0, effectiveLimit - used - reserved);
+  const reserveShortfall = Math.max(0, used + reserved + remainingVerificationReserve + remainingRecoveryReserve - config.limit);
+  const reportedOvercommitted = used + reserved > config.limit;
+  return { ...config, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, effectiveLimit, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
+}
+export function configureRunTokenBudget(runDir, { limit, verificationReserve, recoveryReserve = 0 }) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(verificationReserve) || verificationReserve < 0 || !Number.isSafeInteger(recoveryReserve) || recoveryReserve < 0 || verificationReserve + recoveryReserve > limit) throw new Error('run token budget requires a positive limit and reserves within it');
+  const database = open(runDir);
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    const previous = runBudgetConfig(database), config = { limit, verificationReserve, recoveryReserve };
+    database.prepare("INSERT INTO ledger_meta(key, value) VALUES ('run_token_budget', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(config));
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('run-token-budget-configured', now(), JSON.stringify({ previous, config }));
+    const snapshot = runBudgetSnapshot(database, 'verify'); database.exec('COMMIT');
+    return { status: 'configured', ...snapshot };
+  } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
+}
 function agentBudgetSnapshot(database, job) {
   const payload = parseJson(job.payload_json), limit = payload?.stageTokenBudget;
   const used = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
@@ -531,7 +576,7 @@ function agentBudgetSnapshot(database, job) {
   const ownReserved = Number(database.prepare('SELECT reserved_tokens FROM agent_jobs WHERE job_id = ?').get(job.job_id)?.reserved_tokens || 0);
   const validLimit = Number.isInteger(limit) && limit > 0;
   const reportedAvailable = validLimit ? Math.max(0, limit - used - reserved) : null;
-  return { used, reserved, stageBudget: validLimit ? limit : null, incompleteUsage, available: incompleteUsage ? null : reportedAvailable, reportedAvailable, overcommitted: !validLimit ? null : used + reserved > limit ? true : incompleteUsage ? null : false, budgetScope: validLimit && ownReserved > 0 ? 'reported-usage-only' : 'not-reserved' };
+  return { used, reserved, stageBudget: validLimit ? limit : null, incompleteUsage, available: incompleteUsage ? null : reportedAvailable, reportedAvailable, overcommitted: !validLimit ? null : used + reserved > limit ? true : incompleteUsage ? null : false, budgetScope: validLimit && ownReserved > 0 ? 'reported-usage-only' : 'not-reserved', runBudget: runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job)) };
 }
 export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
   requireNonEmpty(jobId, 'jobId');
@@ -564,6 +609,15 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
     }
     const payload = parseJson(job.payload_json);
     let reservedTokens = 0;
+    const runBudget = runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job));
+    if (runBudget) {
+      if (!Number.isSafeInteger(payload.tokenBudget) || payload.tokenBudget < 1) throw new Error('run budget requires an explicit positive attempt reservation');
+      if (runBudget.reportedAvailable < payload.tokenBudget) {
+        const waiting = runBudget.reserved > 0 && runBudget.effectiveLimit - runBudget.used >= payload.tokenBudget;
+        database.exec('COMMIT');
+        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'run-budget-reserved' : 'run-budget-insufficient', requested: payload.tokenBudget, runBudget };
+      }
+    }
     if (payload.stageTokenBudget !== undefined) {
       if (!Number.isInteger(payload.stageTokenBudget) || payload.stageTokenBudget < 1 || !Number.isInteger(payload.tokenBudget) || payload.tokenBudget < 1) throw new Error('agent job has invalid stage or attempt budget');
       const used = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
@@ -571,11 +625,13 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       const available = Math.max(0, payload.stageTokenBudget - used - reserved);
       if (available < payload.tokenBudget) {
         const incompleteUsage = stageUsageIncomplete(database, job.stage);
+        const waiting = reserved > 0 && payload.stageTokenBudget - used >= payload.tokenBudget;
         database.exec('COMMIT');
-        return { jobId, status: reserved ? 'waiting' : 'budget-exhausted', reason: reserved ? 'stage-budget-reserved' : 'stage-budget-insufficient', used, reserved, available: incompleteUsage ? null : available, reportedAvailable: available, incompleteUsage, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only' };
+        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'stage-budget-reserved' : 'stage-budget-insufficient', used, reserved, available: incompleteUsage ? null : available, reportedAvailable: available, incompleteUsage, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only', runBudget };
       }
       reservedTokens = payload.tokenBudget;
     }
+    if (runBudget && !reservedTokens) reservedTokens = payload.tokenBudget;
     if (claimKey) database.prepare('INSERT INTO agent_claim_keys(job_id, claim_key, attempt) VALUES (?, ?, ?)').run(jobId, claimKey, Number(job.attempt) + 1);
     const leaseToken = crypto.randomUUID();
     const leaseExpiresAt = new Date(Date.now() + AGENT_JOB_LEASE_MS).toISOString();
@@ -597,7 +653,7 @@ function recordSettledAttemptUsage(database, job, usage, outcome, timestamp) {
   const report = usage || { inputTokens: 0, outputTokens: 0, usageSource: 'unknown' };
   if (![report.inputTokens, report.outputTokens].every(value => Number.isInteger(value) && value >= 0) || !['provider-reported', 'estimated', 'unknown', 'legacy-unverified'].includes(report.usageSource)) throw new Error('invalid Agent attempt usage');
   if (report.usageSource === 'unknown' && (report.inputTokens !== 0 || report.outputTokens !== 0)) throw new Error('unknown Agent attempt usage requires zero placeholders');
-  database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, report.inputTokens, report.outputTokens, report.inputTokens + report.outputTokens, timestamp, JSON.stringify({ jobId: job.job_id, attempt: Number(job.attempt), outcome, usageSource: report.usageSource }));
+  database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, report.inputTokens, report.outputTokens, report.inputTokens + report.outputTokens, timestamp, JSON.stringify({ jobId: job.job_id, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome, usageSource: report.usageSource }));
 }
 export function settleAgentJob(runDir, jobId, { status, result = null, error = null, retryDelayMs = null, leaseToken = null, usage = null, budgetExceeded = false } = {}) {
   if (!['succeeded', 'failed'].includes(status)) throw new Error('agent job settlement status must be succeeded or failed');
@@ -608,7 +664,8 @@ export function settleAgentJob(runDir, jobId, { status, result = null, error = n
     if (budgetExceeded && (status !== 'failed' || !usage || !Number(job.reserved_tokens || 0) || !Number.isInteger(usage.inputTokens) || !Number.isInteger(usage.outputTokens) || usage.inputTokens + usage.outputTokens <= Number(job.reserved_tokens))) throw new Error('budget-exceeded settlement requires actual usage above the active reservation');
     const payload = parseJson(job.payload_json), reported = usage && Number.isInteger(usage.inputTokens) && Number.isInteger(usage.outputTokens) ? usage.inputTokens + usage.outputTokens : 0;
     const prior = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
-    const exceeded = budgetExceeded || (Number(job.reserved_tokens || 0) > 0 && reported > Number(job.reserved_tokens)) || (Number.isInteger(payload.stageTokenBudget) && prior + reported > payload.stageTokenBudget);
+    const runBudget = runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job));
+    const exceeded = budgetExceeded || (Number(job.reserved_tokens || 0) > 0 && reported > Number(job.reserved_tokens)) || (Number.isInteger(payload.stageTokenBudget) && prior + reported > payload.stageTokenBudget) || (runBudget && runBudget.used + reported > runBudget.effectiveLimit);
     const reason = exceeded ? 'agent attempt exceeded its recorded token budget' : String(error || 'agent job failed');
     recordSettledAttemptUsage(database, job, usage, exceeded ? 'budget-exceeded' : status, timestamp);
     if (status === 'succeeded' && !exceeded) database.prepare("UPDATE agent_jobs SET status = 'succeeded', result_json = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(JSON.stringify(result || {}), timestamp, jobId);
@@ -722,8 +779,9 @@ export function recordObservedTokenUsage(runDir, { stage, observationKey, inputT
     const used = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(stage).total);
     const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = ?").get(stage).total);
     const incomplete = stageUsageIncomplete(database, stage);
+    const runBudget = runBudgetSnapshot(database, stage);
     database.exec('COMMIT');
-    return { stage, used, reserved, limit, available: limit === null || incomplete ? null : Math.max(0, limit - used - reserved), overcommitted: limit === null ? null : used + reserved > limit ? true : incomplete ? null : false, incompleteUsage: incomplete, idempotent: Boolean(existing), budgetScope: 'reported-usage-only' };
+    return { stage, used, reserved, limit, available: limit === null || incomplete ? null : Math.max(0, limit - used - reserved), overcommitted: limit === null ? null : used + reserved > limit ? true : incomplete ? null : false, incompleteUsage: incomplete, idempotent: Boolean(existing), budgetScope: 'reported-usage-only', runBudget };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 // Hold the ledger write lock while checking the lease and publishing an advisory.
@@ -743,11 +801,13 @@ export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, conte
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) throw new Error('token budget limit must be a non-negative integer or null');
     const overAttempt = Number(job.reserved_tokens || 0) && used > Number(job.reserved_tokens);
     const overStage = limit !== null && prior + used > limit;
-    if (overAttempt || overStage) {
+    const runBudget = runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job));
+    const overRun = runBudget && runBudget.used + used > runBudget.effectiveLimit;
+    if (overAttempt || overStage || overRun) {
       // Usage has already occurred. Persist it atomically with a terminal job
       // outcome before rejecting the advisory; retries cannot charge it twice.
-      const reason = overAttempt ? `agent attempt exceeds its reserved token budget: ${jobId}` : `token budget exceeded for ${job.stage}: used=${prior}, requested=${used}, limit=${limit}`;
-      database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), outcome: 'budget-exceeded' }));
+      const reason = overAttempt ? `agent attempt exceeds its reserved token budget: ${jobId}` : overStage ? `token budget exceeded for ${job.stage}: used=${prior}, requested=${used}, limit=${limit}` : `run token budget exceeded for ${job.stage}: used=${runBudget.used}, requested=${used}, limit=${runBudget.effectiveLimit}`;
+      database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome: 'budget-exceeded' }));
       database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(reason, timestamp, jobId);
       database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, job.attempt, reason, job.payload_json, timestamp);
       database.prepare("UPDATE agent_sessions SET status = 'failed', updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(timestamp, jobId, job.agent_id);
@@ -755,7 +815,7 @@ export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, conte
       throw new Error(reason);
     }
     previous = fs.existsSync(destination) ? fs.readFileSync(destination) : null;
-    database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), outcome: 'succeeded' }));
+    database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome: 'succeeded' }));
     atomicWrite(destination, content); wrote = true;
     const result = { advisory: path.relative(runDir, destination), sha256: hash(content), tokenUsage: used };
     database.prepare("UPDATE agent_jobs SET status = 'succeeded', result_json = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(JSON.stringify(result), timestamp, jobId);
@@ -794,7 +854,7 @@ export function agentRuntimeStatus(runDir, jobId = null) {
     }
     const deadLetters = database.prepare('SELECT job_id, agent_id, stage, attempts, reason, created_at FROM dead_letters ORDER BY created_at DESC LIMIT 20').all();
     const sessions = database.prepare('SELECT s.session_id, s.agent_id, s.status, s.context_hash, s.skill_bindings_json, s.last_job_id, s.updated_at, a.stage AS registration_stage FROM agent_sessions s LEFT JOIN agents a ON a.agent_id = s.agent_id ORDER BY s.agent_id').all();
-    return { jobs: jobs.map(job => ({ jobId: job.job_id, agentId: job.agent_id, stage: job.stage, status: job.status, attempt: job.attempt, maxAttempts: job.max_attempts, reservedTokens: job.status === 'running' ? Number(job.reserved_tokens || 0) : 0, availableAt: job.available_at, leaseExpiresAt: job.status === 'running' ? job.lease_expires_at || null : null, error: job.last_error, payload: parseJson(job.payload_json), result: parseJson(job.result_json) })), counts: Object.fromEntries(counts.map(item => [item.status, item.count])), tokenUsage: Object.fromEntries(tokens.map(item => [item.stage, Number(item.total)])), tokenUsageCoverage, tokenUsageScope: 'recorded-agent-and-independent-host-usage; unknown-or-unrecorded-host-calls-are-not-included', traces: Object.fromEntries(traces.map(item => [item.status, item.count])), sessions: sessions.map(item => ({ sessionId: item.session_id, agentId: item.agent_id, registrationStage: item.registration_stage, status: item.status, contextHash: item.context_hash, skillBindings: parseJson(item.skill_bindings_json), lastJobId: item.last_job_id, updatedAt: item.updated_at })), deadLetters: deadLetters.map(item => ({ jobId: item.job_id, agentId: item.agent_id, stage: item.stage, attempts: item.attempts, reason: item.reason, createdAt: item.created_at })) };
+    return { jobs: jobs.map(job => ({ jobId: job.job_id, agentId: job.agent_id, stage: job.stage, status: job.status, attempt: job.attempt, maxAttempts: job.max_attempts, reservedTokens: job.status === 'running' ? Number(job.reserved_tokens || 0) : 0, availableAt: job.available_at, leaseExpiresAt: job.status === 'running' ? job.lease_expires_at || null : null, error: job.last_error, payload: parseJson(job.payload_json), result: parseJson(job.result_json) })), counts: Object.fromEntries(counts.map(item => [item.status, item.count])), tokenUsage: Object.fromEntries(tokens.map(item => [item.stage, Number(item.total)])), tokenUsageCoverage, runBudget: runBudgetSnapshot(database, 'verify'), tokenUsageScope: 'recorded-agent-and-independent-host-usage; unknown-or-unrecorded-host-calls-are-not-included', traces: Object.fromEntries(traces.map(item => [item.status, item.count])), sessions: sessions.map(item => ({ sessionId: item.session_id, agentId: item.agent_id, registrationStage: item.registration_stage, status: item.status, contextHash: item.context_hash, skillBindings: parseJson(item.skill_bindings_json), lastJobId: item.last_job_id, updatedAt: item.updated_at })), deadLetters: deadLetters.map(item => ({ jobId: item.job_id, agentId: item.agent_id, stage: item.stage, attempts: item.attempts, reason: item.reason, createdAt: item.created_at })) };
   } finally { database.close(); }
 }
 
