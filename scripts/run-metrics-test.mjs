@@ -72,6 +72,12 @@ try {
   assert.equal(compareRuns(before, staleContract).status, 'not-comparable');
   fs.writeFileSync(deliveryFile, deliveryBytes);
   assert.equal(after.stateSource, 'ledger-snapshot'); assert.equal(after.stateProjection, 'consistent');
+  const interruptedFile = path.join(afterDir, 'operations/interrupted.json');
+  fs.writeFileSync(interruptedFile, JSON.stringify({ status: 'interrupted' }));
+  const interrupted = readRunMetrics(afterDir);
+  assert.equal(interrupted.operations.interrupted, 1); assert.equal(interrupted.operations.unreadable, 0);
+  assert.ok(compareRuns(before, interrupted).reasons.includes('interrupted operation outcomes require review'));
+  fs.unlinkSync(interruptedFile);
   const stateFile = path.join(afterDir, 'state.json'), stateBytes = fs.readFileSync(stateFile);
   const staleState = JSON.parse(stateBytes); staleState.gates.gate3.status = 'pending';
   fs.writeFileSync(stateFile, JSON.stringify(staleState));

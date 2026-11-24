@@ -181,10 +181,10 @@ function stableJson(value) {
 }
 function digest(value) { return crypto.createHash('sha256').update(stableJson(value)).digest('hex'); }
 function failedOperationWithSameKey(operationKey) {
-  if (!fs.existsSync(operationIndexFile)) return null;
-  const index = JSON.parse(fs.readFileSync(operationIndexFile, 'utf8'));
-  for (const [relative, record] of Object.entries(index.receipts || {})) {
-    if (record.status === 'failed' && record.operationKey === operationKey) return relative;
+  if (!fs.existsSync(operationDirectory)) return null;
+  for (const name of fs.readdirSync(operationDirectory).filter(item => item.endsWith('.json'))) {
+    const record = JSON.parse(fs.readFileSync(path.join(operationDirectory, name), 'utf8'));
+    if (['failed', 'interrupted'].includes(record.status) && record.operationKey === operationKey) return path.join('operations', name);
   }
   return null;
 }
@@ -233,7 +233,7 @@ const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: curre
 // another token after the same deterministic failure.
 const operationKey = digest({ runId, action, script, fingerprint, stateHash, inputDigest });
 const priorFailure = failedOperationWithSameKey(operationKey);
-if (priorFailure) fail(`an identical controlled operation already failed (${priorFailure}); change the observed cause, state, or input before requesting another retry`);
+if (priorFailure) fail(`an identical controlled operation already failed or was interrupted (${priorFailure}); inspect its outcome and change the observed cause, state, or input before requesting another retry`);
 const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
 const execution = await runControlledSubprocess(process.execPath, [target, ...scriptArgs], {

@@ -37,6 +37,11 @@ try {
   reject(run(action, ['run', root, 'role-run', 'role-session', failedAuthorization.authorizationRef, 'analyze_requirement', roleScript, 'degrade', runDir, 'gate1', failedRole, 'simulated advisory failure']), /degrade is prohibited/, 'selected role failures must not be converted into an unverified ready advisory');
   const duplicateAuthorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'a new authorization can be obtained only to test duplicate failure protection');
   reject(run(action, ['run', root, 'role-run', 'role-session', duplicateAuthorization.authorizationRef, 'analyze_requirement', roleScript, 'degrade', runDir, 'gate1', failedRole, 'simulated advisory failure']), /identical controlled operation already failed/, 'a fresh authorization must not restart an identical failed controlled operation');
+  const interruptedRef = `operations/${path.basename(failedAuthorization.authorizationRef, '.json')}.json`, interruptedFile = path.join(runDir, interruptedRef);
+  const interruptedReceipt = JSON.parse(fs.readFileSync(interruptedFile, 'utf8')); interruptedReceipt.status = 'interrupted'; fs.writeFileSync(interruptedFile, JSON.stringify(interruptedReceipt));
+  const indexFile = path.join(runDir, 'operations-index.json'), operationIndex = JSON.parse(fs.readFileSync(indexFile, 'utf8')); delete operationIndex.receipts[interruptedRef]; fs.writeFileSync(indexFile, JSON.stringify(operationIndex));
+  const interruptedAuthorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'a new authorization can test interrupted replay protection');
+  reject(run(action, ['run', root, 'role-run', 'role-session', interruptedAuthorization.authorizationRef, 'analyze_requirement', roleScript, 'degrade', runDir, 'gate1', failedRole, 'simulated advisory failure']), /already failed or was interrupted/, 'an interrupted durable receipt must prevent identical replay even when absent from the cache index');
   const underreported = {
     schemaVersion: '1.0', roleId: failedRole, stage: 'gate1', adapterVersion: '1.0.0', inputBindings: selection.inputBindings,
     findings: [{ id: 'underreported-fact', classification: 'fact', statement: 'This advisory intentionally underreports its consumed context.', evidence: selection.inputBindings.map(item => item.path) }],

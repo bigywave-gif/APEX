@@ -48,6 +48,13 @@ try {
   reject(spawnSync(process.execPath, [router, 'intake', consentBoundary, 'host-plan-is-not-consent', 'auto', 'standard', 'interactive', 'consent-session', '我会使用 APEX 规划这次改造'], { encoding: 'utf8' }), 'explicit APEX consent', 'a host plan that says it will use APEX must never be accepted as user consent');
   const consented = expect(run(router, ['intake', consentBoundary, 'with-consent', 'auto', 'standard', 'interactive', 'consent-session', '确认调用 APEX']), 'an explicit user APEX consent must create a Run');
   if (consented.status !== 'created' || !fs.readFileSync(path.join(consentBoundary, '.apex', 'runs', 'with-consent', 'events.ndjson'), 'utf8').includes('确认调用 APEX')) throw new Error('Run creation must retain the original explicit user APEX consent for audit');
+  const interruptedDir = path.join(consentBoundary, '.apex', 'runs', 'with-consent', 'operations');
+  fs.mkdirSync(interruptedDir, { recursive: true });
+  const interruptedFile = path.join(interruptedDir, 'interrupted-fixture.json');
+  fs.writeFileSync(interruptedFile, JSON.stringify({ status: 'interrupted', action: 'analyze_requirement', script: 'contract-recorder.mjs', finishedAt: new Date().toISOString(), stderr: 'local gateway exited; external side effects remain unverified' }));
+  const interruptedStatus = expect(run(router, ['status', consentBoundary, 'with-consent', 'consent-session']), 'interrupted operation must remain observable');
+  if (interruptedStatus.executionDirective?.blockingOperation?.category !== 'operation-interrupted' || interruptedStatus.terminalResponseContract?.allowedKinds?.[0] !== 'blocking-report') throw new Error('Router must stop automatic continuation for the latest interrupted operation and require investigation');
+  fs.unlinkSync(interruptedFile);
   const apiOnly = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-api-only-')); roots.push(apiOnly);
   fs.writeFileSync(path.join(apiOnly, 'server.ts'), 'export const api = true;\n');
   fs.mkdirSync(path.join(apiOnly, '.apex', 'runs', 'old-demo', 'visual-sandbox', 'src'), { recursive: true });

@@ -144,21 +144,21 @@ function failureCategory(receipt) {
 function latestBlockingOperation(runDir, action) {
   if (!runDir || !action) return null;
   const receipts = operationRecords(runDir)
-    .filter(item => item.receipt?.action === action && ['succeeded', 'failed'].includes(item.receipt?.status))
+    .filter(item => item.receipt?.action === action && ['succeeded', 'failed', 'interrupted'].includes(item.receipt?.status))
     .sort((left, right) => String(right.receipt.finishedAt || right.receipt.startedAt || '').localeCompare(String(left.receipt.finishedAt || left.receipt.startedAt || '')));
   const latest = receipts[0];
-  if (!latest || latest.receipt.status !== 'failed') return null;
+  if (!latest || latest.receipt.status === 'succeeded') return null;
   const receipt = latest.receipt;
   const observedError = `${receipt.stderr || receipt.stdout || 'controlled operation failed without stderr'}`.trim().slice(0, 1200);
   return {
-    kind: 'operation-failed',
-    category: failureCategory(receipt),
+    kind: receipt.status === 'interrupted' ? 'operation-interrupted' : 'operation-failed',
+    category: receipt.status === 'interrupted' ? 'operation-interrupted' : failureCategory(receipt),
     action,
     script: receipt.script || null,
     operationReceipt: path.relative(runDir, latest.path),
     exitCode: receipt.exitCode ?? null,
     observedError,
-    retryPolicy: 'do-not-repeat-automatically; require an explicit remediation or a newly authorized retry after the observed cause changes'
+    retryPolicy: receipt.status === 'interrupted' ? 'do-not-repeat-automatically; inspect the original operation and any external side effects before a newly authorized retry' : 'do-not-repeat-automatically; require an explicit remediation or a newly authorized retry after the observed cause changes'
   };
 }
 function repeatedRemediableFailures(runDir, action, category) {

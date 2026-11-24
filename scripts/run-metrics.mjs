@@ -65,7 +65,7 @@ export function readRunMetrics(runDirectory) {
     if (operationsPresent) for (const name of fs.readdirSync(opsDir).filter(name => name.endsWith('.json'))) {
       try {
         const receipt = JSON.parse(fs.readFileSync(path.join(opsDir, name), 'utf8'));
-        if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || !['running', 'succeeded', 'failed'].includes(receipt.status)) throw new Error('invalid operation receipt');
+        if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || !['running', 'succeeded', 'failed', 'interrupted'].includes(receipt.status)) throw new Error('invalid operation receipt');
         receipts.push(receipt);
       } catch { unreadable.push(name); }
     }
@@ -89,7 +89,7 @@ export function readRunMetrics(runDirectory) {
       runId: state.runId, runIdentity: `sha256:${crypto.createHash('sha256').update(root).digest('hex')}`, ledgerOrigin, track: state.track, scope: state.scope, lifecycle: state.lifecycle, gate3: state.gates?.gate3?.status || 'unknown', stateSource: 'ledger-snapshot', stateProjection: projection,
       contractIntegrity, capabilities: Array.isArray(contract?.capabilities) ? [...new Set(contract.capabilities)].sort() : null,
       elapsedWallMs: elapsed, elapsedBasis: 'first-ledger-snapshot-to-passed-gate3-including-user-wait',
-      operations: { receiptDirectory: operationsPresent ? 'present' : 'missing', recorded: operationsPresent ? receipts.length : null, failed: operationsPresent ? receipts.filter(x => x.status === 'failed').length : null, running: operationsPresent ? receipts.filter(x => x.status === 'running').length : null, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: operationsPresent ? receipts.length - durations.length : null, unreadable: operationsPresent ? unreadable.length : null, completeness: 'unverified' },
+      operations: { receiptDirectory: operationsPresent ? 'present' : 'missing', recorded: operationsPresent ? receipts.length : null, failed: operationsPresent ? receipts.filter(x => x.status === 'failed').length : null, interrupted: operationsPresent ? receipts.filter(x => x.status === 'interrupted').length : null, running: operationsPresent ? receipts.filter(x => x.status === 'running').length : null, totalDurationMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null, durationMissing: operationsPresent ? receipts.length - durations.length : null, unreadable: operationsPresent ? unreadable.length : null, completeness: 'unverified' },
       manualInterventions: null, // No complete host/user-intervention counter is available.
       agents: { jobs: jobRows.length, retries: jobRows.reduce((n, x) => n + Math.max(0, Number(x.attempt) - 1), 0), running: jobRows.filter(x => x.status === 'running').length, deadLetters: jobRows.filter(x => x.status === 'dead-letter').length },
       tokens: { recordedTotal: Object.values(sourceTotals).some(x => x !== null) ? Object.values(sourceTotals).reduce((n, x) => n + (x ?? 0), 0) : null, sourceTotals, attribution, byStage, byAgent: [...agentTotals.values()], attemptUsage, attemptAttribution: { attributedRecords: attemptUsage.length, unattributedRecords: rows.length - attemptUsage.length }, coverage, scope: 'recorded-agent-and-independent-host-usage', completeHostUsage: false, note: 'Recorded total combines sources and is not total actual usage. Unknown and unrecorded host calls are not represented by a zero.' }
@@ -107,6 +107,7 @@ export function compareRuns(before, after) {
   if (!before.capabilities || !after.capabilities || JSON.stringify(before.capabilities) !== JSON.stringify(after.capabilities)) reasons.push('capability sets are missing or differ');
   if (before.contractIntegrity !== 'verified' || after.contractIntegrity !== 'verified') reasons.push('delivery contract is missing, unregistered, stale or unreadable');
   if (before.operations.unreadable || after.operations.unreadable) reasons.push('operation receipts are unreadable');
+  if (before.operations.interrupted || after.operations.interrupted) reasons.push('interrupted operation outcomes require review');
   if (before.stateProjection !== 'consistent' || after.stateProjection !== 'consistent') reasons.push('state projection is missing, unreadable or diverged from the durable ledger');
   const eligible = reasons.length === 0;
   const coverageKeys = ['providerReported', 'estimated', 'unknown', 'unverified'];
