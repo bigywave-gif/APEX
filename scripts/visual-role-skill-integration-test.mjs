@@ -44,6 +44,47 @@ try {
   const hostUsage = expect(invoke(authorize(), 'agent-runtime.mjs', ['tokens-observed', runDir, 'visual', 'independent_host_0001', '0', '0', 'unknown']), 'record independent host usage');
   assert.equal(hostUsage.budgetScope, 'reported-usage-only');
   assert.equal(hostUsage.idempotent, false);
+  if (process.env.APEX_TEST_SKILL_DRIFT === '1') {
+    // This destructive fixture may only change a disposable copied skill.
+    const skillFile = fs.realpathSync(queued.payload.tasteSkill.path);
+    const allowedRoots = [os.tmpdir(), '/private/tmp'].filter(fs.existsSync).map(base => fs.realpathSync(base));
+    assert.ok(allowedRoots.some(base => skillFile.startsWith(base + path.sep)), 'skill drift test requires an isolated temporary CODEX_HOME');
+    const originalSkill = fs.readFileSync(skillFile);
+    try {
+      fs.unlinkSync(skillFile);
+      const missingSkill = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect missing required skill');
+      assert.equal(missingSkill.executionDirective?.currentStep?.id, 'visual-role-select', 'missing required skill must fail before role work is scheduled');
+      const unavailable = invoke(authorize(), 'role-advisory.mjs', ['select', runDir, 'visual']);
+      assert.notEqual(unavailable.status, 0); assert.match(unavailable.stderr, /required taste-skill is not installed/);
+      const blocked = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect missing skill failure');
+      assert.equal(blocked.userInteraction?.mode, 'blocking-report');
+      fs.writeFileSync(skillFile, originalSkill);
+      const restored = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect restored required skill');
+      assert.equal(restored.executionDirective?.blockingOperation, null, 'restored skill must unblock the prior missing dependency');
+      expect(invoke(authorize(), 'role-advisory.mjs', ['select', runDir, 'visual']), 'retry selection after skill restoration');
+      fs.appendFileSync(skillFile, '\n# Isolated drift fixture\n');
+      const drift = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect changed required skill');
+      assert.equal(drift.executionDirective?.currentStep?.id, 'visual-role-repair');
+      const rejected = invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', 'skill_drift_claim']);
+      assert.notEqual(rejected.status, 0); assert.match(rejected.stderr, /required taste-skill changed after role selection/);
+      const recovery = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'recover changed required skill');
+      assert.equal(recovery.executionDirective?.currentStep?.id, 'visual-role-repair');
+      assert.equal(recovery.executionDirective?.blockingOperation, null, 'the observed changed input permits a deterministic repair');
+      expect(invoke(authorize(), 'role-advisory.mjs', ['repair', runDir, 'visual']), 'repair changed required skill');
+      expect(invoke(authorize(), 'role-advisory.mjs', ['select', runDir, 'visual']), 'select roles against updated skill');
+      const refreshed = JSON.parse(fs.readFileSync(selectionPath, 'utf8'));
+      assert.notEqual(refreshed.tasteSkill.sha256, savedSelection.tasteSkill.sha256);
+      assert.notEqual(refreshed.agentJobs['ui-designer'], jobId);
+      const replacementId = refreshed.agentJobs['ui-designer'];
+      expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, replacementId, 'visual', 'running_skill_drift']), 'claim updated designer');
+      fs.appendFileSync(skillFile, '\n# Changed while running\n');
+      const runningDrift = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect running designer after skill drift');
+      assert.equal(runningDrift.executionDirective?.currentStep?.id, 'visual-role-wait', 'a running attempt must not be archived or duplicated');
+      console.log(JSON.stringify({ status: 'passed', scope: 'changed taste-skill causes fenced repair and selection with updated hash' }));
+    } finally { fs.writeFileSync(skillFile, originalSkill); fs.rmSync(root, { recursive: true, force: true }); }
+    process.exit(0);
+  }
+
   const inconsistentDb = new DatabaseSync(runLedgerPaths(runDir).ledger);
   const originalPayload = inconsistentDb.prepare('SELECT payload_json FROM agent_jobs WHERE job_id = ?').get(jobId).payload_json;
   inconsistentDb.prepare('UPDATE agent_jobs SET payload_json = ? WHERE job_id = ?').run(JSON.stringify({ ...queued.payload, roleId: 'wrong-role' }), jobId); inconsistentDb.close();
@@ -66,6 +107,7 @@ try {
   assert.ok(savedSelection.tokenBudget.perRole['ui-designer'] >= savedSelection.tokenBudget.inputFloor + savedSelection.tokenBudget.requiredSkillFloor + 1000, 'designer budget must include the mandatory taste instructions');
   assert.equal(queued.payload.tokenBudget, savedSelection.tokenBudget.perRole['ui-designer']);
   assert.equal(savedSelection.tokenBudget.perRole['ux-architect'], savedSelection.tokenBudget.perAgent, 'unrelated roles must not inherit the full taste budget');
+
 
   // Simulate an older persisted job with a stale stage cap. Router must
   // direct the host to rebudget rather than verify or repeat a claim.

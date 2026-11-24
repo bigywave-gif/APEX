@@ -34,6 +34,7 @@ import { newlyAvailableResources, assertResourceCoverage } from './existing-reso
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
+import { loadTasteSkill, resolveTasteSkill } from './required-visual-skill.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, pendingRevisionTransactions, readRunState, reconcileRun, recordArtifact, revisionInvalidationEvents, archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -125,6 +126,8 @@ function failureCategory(receipt) {
     return 'production-boundary';
   }
   if (/(?:stage|run)-token-budget-exhausted/i.test(evidence)) return 'token-budget-exhausted';
+  if (/required taste-skill changed after role selection/i.test(evidence)) return 'required-skill-drift';
+  if (/required taste-skill (?:is not installed|is empty)/i.test(evidence)) return 'required-skill-unavailable';
   if (/PROJECT_DELETION_POLICY|deletion policy|delete(?:d|\s+operation)?\s+(?:is\s+)?forbidden/i.test(evidence)) return 'policy-denied';
   if (/EACCES|EPERM|permission denied|not permitted/i.test(evidence)) return 'permission-denied';
   if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network|browser.*unavailable/i.test(evidence)) return 'external-unavailable';
@@ -1560,6 +1563,17 @@ function roleStageState(state, runDir, stage) {
     try {
       const selection = read(selectionFile);
       if (!Array.isArray(selection.selectedRoles) || !selection.selectedRoles.length) return 'select';
+      if (usesCombinedPlan(state) && stage === 'visual' && selection.selectedRoles.includes('ui-designer')) {
+        if (!selection.tasteSkill) return repairState();
+        try { loadTasteSkill(selection.tasteSkill); }
+        catch (error) {
+          const recovery = repairState();
+          if (/changed after role selection/.test(error.message) || recovery === 'wait') return recovery;
+          // Selection is retained until the required skill becomes available;
+          // select will record the actual dependency error and stop retries.
+          return 'select';
+        }
+      }
       if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return repairState();
       if (usesCombinedPlan(state) && stage === 'verify' && formalReviewArtifacts.some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return repairState();
       if (usesCombinedPlan(state) && stage === 'verify' && fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) && !selection.inputBindings?.some(binding => binding.artifact === 'requirementRevisions' && binding.path === 'prompt-revisions.ndjson')) return repairState();
@@ -2186,7 +2200,11 @@ function executionDirective(state, runDir = null) {
   // with a new authorization. Any current, file-specific failure remains
   // terminal and inspectable.
   const sourceDriftRetries = latestFailure?.category === 'source-drift' ? repeatedRemediableFailures(runDir, action, 'source-drift') : 0;
-  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || latestFailure?.category === 'obsolete-boundary-snapshot');
+  let requiredSkillRestored = false;
+  if (latestFailure?.category === 'required-skill-unavailable' && ['visual-role-select', 'visual-role-record', 'visual-role-repair'].includes(currentStep.id)) {
+    try { resolveTasteSkill(); requiredSkillRestored = true; } catch {}
+  }
+  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || latestFailure?.category === 'obsolete-boundary-snapshot');
   const blockingOperation = continuationStall(runDir, action, currentStep.id) || (automaticallyRemediableFailure ? null : latestFailure);
   return {
     kind: 'must-complete-before-user-response',

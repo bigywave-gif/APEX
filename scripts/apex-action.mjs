@@ -8,7 +8,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readRunState, recordArtifact, agentRuntimeStatus, pendingRevisionTransactions, visualSkillLoads } from './run-ledger.mjs';
-import { requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
+import { requiredTasteLoadCurrent, optionalSkillLoadCurrent, resolveTasteSkill } from './required-visual-skill.mjs';
 import { recordLateCancelledOperation } from './cancelled-operation-finalizer.mjs';
 import { runControlledSubprocess } from './controlled-subprocess.mjs';
 
@@ -250,7 +250,12 @@ const stateHash = verificationResult?.authorizationToken?.stateHash;
 if (!stateHash) fail('Router authorization verification did not return its bound state hash');
 const claimBudgetInputs = agentClaimBudgetInputs();
 const revisionRetryInputs = revisionRecoveryRetryInputs();
-const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }) });
+let requiredVisualSkill;
+if (action === 'plan_visual' && ((script === 'role-advisory.mjs' && ['select', 'record'].includes(scriptArgs[0]) && scriptArgs[2] === 'visual') || (script === 'agent-runtime.mjs' && scriptArgs[0] === 'claim' && scriptArgs[3] === 'visual'))) {
+  try { const skill = resolveTasteSkill(); requiredVisualSkill = { status: 'available', path: skill.path, sha256: skill.sha256 }; }
+  catch { requiredVisualSkill = { status: 'unavailable' }; }
+}
+const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }), ...(requiredVisualSkill === undefined ? {} : { requiredVisualSkill }) });
 // An authorization is deliberately single-use, but a fresh authorization is
 // not evidence that the failed action now has different inputs.  Without this
 // operation key, hosts can create an infinite retry loop by asking Router for
