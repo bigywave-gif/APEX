@@ -3,7 +3,7 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { availableAgentSkills, loadTasteSkill, loadAgentSkill } from './required-visual-skill.mjs';
 
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
@@ -59,6 +59,10 @@ try {
     const [stage, observationKey, input, output, usageSource, limit = 'null'] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     if (input === undefined || output === undefined) fail('tokens-observed requires input and output counts');
     requireRouterAction(runDir, action); console.log(JSON.stringify(recordObservedTokenUsage(runDir, { stage, observationKey, inputTokens: Number(input), outputTokens: Number(output), usageSource, limit: limit === 'null' ? null : Number(limit) })));
+  } else if (command === 'reconcile-attempt-usage') {
+    const [stage, jobId, attempt, usageJson] = args, action = stageAction[stage];
+    if (!action || !jobId || !attempt || !usageJson) fail('reconcile-attempt-usage requires current stage, job ID, attempt and usage JSON');
+    requireRouterAction(runDir, action); console.log(JSON.stringify(reconcileAgentAttemptUsage(runDir, { ...readJson(usageJson), jobId, attempt: Number(attempt) })));
   } else if (command === 'run-budget') {
     const [stage, limit, verificationReserve, recoveryReserve = '0'] = args, action = stageAction[stage];
     if (!action || limit === undefined || verificationReserve === undefined) fail('run-budget requires stage, total limit, verification reserve and optional recovery reserve');

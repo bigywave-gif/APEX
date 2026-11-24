@@ -71,17 +71,32 @@ export function readRunMetrics(runDirectory) {
       const reserved = Number(db.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running'").get().total);
       const verificationUsed = rows.filter(row => row.stage === 'verify').reduce((sum, row) => sum + Number(row.total_tokens), 0);
       const verificationReserved = Number(db.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = 'verify'").get().total);
-      const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved);
       const recoveryUsed = rows.reduce((sum, row) => { try { const meta = JSON.parse(row.metadata_json || '{}'); return sum + (row.stage !== 'verify' && (meta.budgetRecovery === true || Number(meta.attempt) > 1) ? Number(row.total_tokens) : 0); } catch { return sum; } }, 0);
       const priorAttempt = db.prepare('SELECT 1 FROM agent_jobs WHERE agent_id = ? AND stage = ? AND job_id != ? AND attempt > 0 LIMIT 1');
       const recoveryReserved = db.prepare("SELECT job_id, agent_id, stage, attempt, payload_json, reserved_tokens FROM agent_jobs WHERE status = 'running'").all().reduce((sum, row) => { const payload = JSON.parse(row.payload_json || '{}'); const recovery = Number(row.attempt) > 1 || (payload.budgetRecovery === true && Boolean(priorAttempt.get(row.agent_id, row.stage, row.job_id))); return sum + (row.stage !== 'verify' && recovery ? Number(row.reserved_tokens) : 0); }, 0);
-      const remainingRecoveryReserve = Math.max(0, recoveryReserve - recoveryUsed - recoveryReserved);
       const incompleteUsage = coverage.unknown > 0 || coverage.unverified > 0;
       const estimatedUsage = coverage.estimated > 0;
       const reportedAvailable = Math.max(0, config.limit - used - reserved);
+      const unknownAttempts = { held: 0, unbounded: 0, attempts: 0, verificationHeld: 0, recoveryHeld: 0, identities: [] };
+      for (const row of rows) {
+        let meta; try { meta = JSON.parse(row.metadata_json || '{}'); } catch { continue; }
+        if (!row.agent_id || !meta?.jobId || !['unknown', 'legacy-unverified'].includes(meta.usageSource)) continue;
+        unknownAttempts.attempts += 1;
+        unknownAttempts.identities.push({ jobId: meta.jobId, attempt: meta.attempt, stage: row.stage });
+        const remainder = Math.max(0, Number(meta.reservedTokens) - Number(row.total_tokens));
+        if (Number.isSafeInteger(meta.reservedTokens) && meta.reservedTokens > 0 && Number.isSafeInteger(remainder) && Number.isSafeInteger(unknownAttempts.held + remainder)) {
+          unknownAttempts.held += remainder;
+          if (row.stage === 'verify') unknownAttempts.verificationHeld += remainder;
+          else if (meta.budgetRecovery === true || Number(meta.attempt) > 1) unknownAttempts.recoveryHeld += remainder;
+        }
+        else unknownAttempts.unbounded += 1;
+      }
+      const admissionAvailable = unknownAttempts.unbounded ? 0 : Math.max(0, reportedAvailable - unknownAttempts.held);
+      const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved - unknownAttempts.verificationHeld);
+      const remainingRecoveryReserve = Math.max(0, recoveryReserve - recoveryUsed - recoveryReserved - unknownAttempts.recoveryHeld);
       const reserveShortfall = Math.max(0, used + reserved + remainingVerificationReserve + remainingRecoveryReserve - config.limit);
       const reportedOvercommitted = used + reserved > config.limit;
-      runBudget = { ...config, recoveryReserve, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
+      runBudget = { ...config, recoveryReserve, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, unknownAttempts, admissionAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
     }
     const opsDir = path.join(root, 'operations'), receipts = [], unreadable = [];
     const operationsPresent = fs.existsSync(opsDir) && fs.statSync(opsDir).isDirectory();

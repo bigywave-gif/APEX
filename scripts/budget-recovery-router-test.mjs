@@ -45,6 +45,9 @@ try {
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'succeed', d2, generic.jobId, 'gate1', '{}', genericClaim.leaseToken]);
   assert.equal(r.status, 0, r.stderr || r.stdout); assert.equal(agentRuntimeStatus(d2, generic.jobId).jobs[0].status, 'succeeded');
   rebudgetAgentJobs(d2, { stage: 'gate1', jobIds: [jobId], perAgentBudget: 100, stageBudget: selection.tokenBudget.stage });
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1', 'recovery_claim_attempt_1']); assert.notEqual(r.status, 0); assert.match(r.stderr, /stage-budget-unknown-usage/);
+  const usage = JSON.stringify({ inputTokens: 0, outputTokens: 0, usageSource: 'estimated', evidence: 'isolated generic fixture' });
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'reconcile-attempt-usage', d2, 'gate1', generic.jobId, '1', usage]); assert.equal(r.status, 0, r.stderr || r.stdout);
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1', 'recovery_claim_attempt_1']); assert.equal(r.status, 0, r.stderr || r.stdout); const oldLease = JSON.parse(r.stdout).leaseToken;
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'succeed', d2, jobId, 'gate1', '{}', oldLease]);
   assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /must complete through role-advisory record/);

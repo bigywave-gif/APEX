@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readRunState, commitRunState, agentRuntimeStatus, archiveArtifacts, recoverAgentJobs, recordTokenUsage, runLedgerPaths } from './run-ledger.mjs';
+import { readRunState, commitRunState, agentRuntimeStatus, archiveArtifacts, recoverAgentJobs, reconcileAgentAttemptUsage, recordTokenUsage, runLedgerPaths } from './run-ledger.mjs';
 import { assertVisualCapabilityEvidence } from './design-capability-contract.mjs';
 import { requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
 
@@ -221,6 +221,9 @@ try {
   const attemptsDb = new DatabaseSync(runLedgerPaths(runDir).ledger);
   attemptsDb.prepare('UPDATE agent_jobs SET max_attempts = 8 WHERE job_id = ?').run(jobId); attemptsDb.close();
   const retryDesigner = () => {
+    const usageDb = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
+    const rows = usageDb.prepare('SELECT input_tokens, output_tokens, metadata_json FROM token_usage WHERE agent_id IS NOT NULL').all(); usageDb.close();
+    for (const row of rows) { const meta = JSON.parse(row.metadata_json); if (meta.jobId && ['unknown', 'legacy-unverified'].includes(meta.usageSource)) reconcileAgentAttemptUsage(runDir, { jobId: meta.jobId, attempt: meta.attempt, inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens), usageSource: 'estimated', evidence: 'isolated visual fixture' }); }
     const db = new DatabaseSync(runLedgerPaths(runDir).ledger);
     db.prepare("UPDATE agent_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE job_id = ? AND status = 'queued'").run(jobId); db.close();
     const authorization = authorize();
@@ -299,11 +302,12 @@ try {
   const ux = { ...advisory, roleId: 'ux-architect', execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'unmetered-fixture', sessionId: uxJob.payload.agentSessionId, skillBindings: uxJob.payload.skillBindings, leaseToken: uxClaim.leaseToken } };
   const uxInput = path.join(runDir, 'ux-advisory.json'); fs.writeFileSync(uxInput, JSON.stringify(ux));
   expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', uxInput]), 'record explicitly unmetered UX advisory');
-  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 3); // independent host, invalid attempt usage, and unmetered UX
+  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 2); // independent host and unmetered UX
+  reconcileAgentAttemptUsage(runDir, { jobId: uxId, attempt: uxClaim.attempt, inputTokens: 0, outputTokens: 0, usageSource: 'estimated', evidence: 'isolated UX fixture' });
   for (const roleId of savedSelection.selectedRoles.filter(id => !['ui-designer', 'ux-architect'].includes(id))) {
     const selectedJob = agentRuntimeStatus(runDir, savedSelection.agentJobs[roleId]).jobs[0];
     const claim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, selectedJob.jobId, 'visual', crypto.randomUUID()]), `claim ${roleId}`);
-    const review = { ...ux, roleId, execution: { ...ux.execution, sessionId: selectedJob.payload.agentSessionId, skillBindings: selectedJob.payload.skillBindings, leaseToken: claim.leaseToken } };
+    const review = { ...ux, roleId, execution: { ...ux.execution, usageSource: 'estimated', sessionId: selectedJob.payload.agentSessionId, skillBindings: selectedJob.payload.skillBindings, leaseToken: claim.leaseToken } };
     const file = path.join(runDir, `fixture-${roleId}.json`); fs.writeFileSync(file, JSON.stringify(review));
     expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', file]), `record ${roleId}`);
   }

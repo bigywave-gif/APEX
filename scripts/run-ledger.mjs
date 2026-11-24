@@ -653,6 +653,25 @@ function isRecoveryJob(database, job) {
   if (parseJson(job.payload_json)?.budgetRecovery !== true) return false;
   return Boolean(database.prepare('SELECT 1 FROM agent_jobs WHERE agent_id = ? AND stage = ? AND job_id != ? AND attempt > 0 LIMIT 1').get(job.agent_id, job.stage, job.job_id));
 }
+function unknownAttemptReservations(database, stage = null) {
+  const rows = stage ? database.prepare('SELECT stage, total_tokens, metadata_json FROM token_usage WHERE agent_id IS NOT NULL AND stage = ?').all(stage) : database.prepare('SELECT stage, total_tokens, metadata_json FROM token_usage WHERE agent_id IS NOT NULL').all();
+  let held = 0, unbounded = 0, attempts = 0, verificationHeld = 0, recoveryHeld = 0;
+  const identities = [];
+  for (const row of rows) {
+    const meta = parseJson(row.metadata_json);
+    if (!meta?.jobId || !['unknown', 'legacy-unverified'].includes(meta.usageSource)) continue;
+    attempts += 1;
+    identities.push({ jobId: meta.jobId, attempt: meta.attempt, stage: row.stage });
+    const remainder = Math.max(0, Number(meta.reservedTokens) - Number(row.total_tokens));
+    if (Number.isSafeInteger(meta.reservedTokens) && meta.reservedTokens > 0 && Number.isSafeInteger(remainder) && Number.isSafeInteger(held + remainder)) {
+      held += remainder;
+      if (row.stage === 'verify') verificationHeld += remainder;
+      else if (meta.budgetRecovery === true || Number(meta.attempt) > 1) recoveryHeld += remainder;
+    }
+    else unbounded += 1;
+  }
+  return { held, unbounded, attempts, verificationHeld, recoveryHeld, identities };
+}
 function runBudgetSnapshot(database, stage, recovery = false) {
   const config = runBudgetConfig(database);
   if (!config) return null;
@@ -665,13 +684,15 @@ function runBudgetSnapshot(database, stage, recovery = false) {
   const recoveryReserved = database.prepare("SELECT job_id, agent_id, stage, attempt, status, payload_json, reserved_tokens FROM agent_jobs WHERE status = 'running'").all().reduce((sum, job) => sum + (job.stage !== 'verify' && isRecoveryJob(database, job) ? Number(job.reserved_tokens) : 0), 0);
   const incompleteUsage = usageRows.some(row => { try { return !['provider-reported', 'estimated'].includes(JSON.parse(row.metadata_json)?.usageSource); } catch { return true; } });
   const estimatedUsage = usageRows.some(row => { try { return JSON.parse(row.metadata_json)?.usageSource === 'estimated'; } catch { return false; } });
-  const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved);
-  const remainingRecoveryReserve = Math.max(0, config.recoveryReserve - recoveryUsed - recoveryReserved);
+  const unknownAttempts = unknownAttemptReservations(database);
+  const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved - unknownAttempts.verificationHeld);
+  const remainingRecoveryReserve = Math.max(0, config.recoveryReserve - recoveryUsed - recoveryReserved - unknownAttempts.recoveryHeld);
   const effectiveLimit = stage === 'verify' ? config.limit : config.limit - remainingVerificationReserve - (recovery ? 0 : remainingRecoveryReserve);
   const reportedAvailable = Math.max(0, effectiveLimit - used - reserved);
+  const admissionAvailable = unknownAttempts.unbounded ? 0 : Math.max(0, reportedAvailable - unknownAttempts.held);
   const reserveShortfall = Math.max(0, used + reserved + remainingVerificationReserve + remainingRecoveryReserve - config.limit);
   const reportedOvercommitted = used + reserved > config.limit;
-  return { ...config, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, effectiveLimit, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
+  return { ...config, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, effectiveLimit, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, unknownAttempts, admissionAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
 }
 export function configureRunTokenBudget(runDir, { limit, verificationReserve, recoveryReserve = 0 }) {
   if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(verificationReserve) || verificationReserve < 0 || !Number.isSafeInteger(recoveryReserve) || recoveryReserve < 0 || verificationReserve + recoveryReserve > limit) throw new Error('run token budget requires a positive limit and reserves within it');
@@ -731,10 +752,10 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
     const runBudget = runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job));
     if (runBudget) {
       if (!Number.isSafeInteger(payload.tokenBudget) || payload.tokenBudget < 1) throw new Error('run budget requires an explicit positive attempt reservation');
-      if (runBudget.reportedAvailable < payload.tokenBudget) {
-        const waiting = runBudget.reserved > 0 && runBudget.effectiveLimit - runBudget.used >= payload.tokenBudget;
+      if (runBudget.admissionAvailable < payload.tokenBudget) {
+        const waiting = runBudget.reserved > 0 && !runBudget.unknownAttempts.unbounded && runBudget.effectiveLimit - runBudget.used - runBudget.unknownAttempts.held >= payload.tokenBudget;
         database.exec('COMMIT');
-        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'run-budget-reserved' : 'run-budget-insufficient', requested: payload.tokenBudget, runBudget };
+        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'run-budget-reserved' : runBudget.unknownAttempts.attempts && runBudget.reportedAvailable >= payload.tokenBudget ? 'run-budget-unknown-usage' : 'run-budget-insufficient', requested: payload.tokenBudget, runBudget };
       }
     }
     if (payload.stageTokenBudget !== undefined) {
@@ -742,11 +763,13 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       const used = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
       const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = ?").get(job.stage).total);
       const available = Math.max(0, payload.stageTokenBudget - used - reserved);
-      if (available < payload.tokenBudget) {
+      const unknownAttempts = unknownAttemptReservations(database, job.stage);
+      const admissionAvailable = unknownAttempts.unbounded ? 0 : Math.max(0, available - unknownAttempts.held);
+      if (admissionAvailable < payload.tokenBudget) {
         const incompleteUsage = stageUsageIncomplete(database, job.stage);
-        const waiting = reserved > 0 && payload.stageTokenBudget - used >= payload.tokenBudget;
+        const waiting = reserved > 0 && !unknownAttempts.unbounded && payload.stageTokenBudget - used - unknownAttempts.held >= payload.tokenBudget;
         database.exec('COMMIT');
-        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'stage-budget-reserved' : 'stage-budget-insufficient', used, reserved, available: incompleteUsage ? null : available, reportedAvailable: available, incompleteUsage, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only', runBudget };
+        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'stage-budget-reserved' : unknownAttempts.attempts && available >= payload.tokenBudget ? 'stage-budget-unknown-usage' : 'stage-budget-insufficient', used, reserved, available: incompleteUsage ? null : available, reportedAvailable: available, admissionAvailable, unknownAttempts, incompleteUsage, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only', runBudget };
       }
       reservedTokens = payload.tokenBudget;
     }
@@ -775,7 +798,30 @@ function recordSettledAttemptUsage(database, job, usage, outcome, timestamp) {
   const report = usage || { inputTokens: 0, outputTokens: 0, usageSource: 'unknown' };
   if (![report.inputTokens, report.outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(report.inputTokens + report.outputTokens) || !['provider-reported', 'estimated', 'unknown', 'legacy-unverified'].includes(report.usageSource)) throw new Error('invalid Agent attempt usage');
   if (report.usageSource === 'unknown' && (report.inputTokens !== 0 || report.outputTokens !== 0)) throw new Error('unknown Agent attempt usage requires zero placeholders');
-  database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, report.inputTokens, report.outputTokens, report.inputTokens + report.outputTokens, timestamp, JSON.stringify({ jobId: job.job_id, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome, usageSource: report.usageSource }));
+  database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, report.inputTokens, report.outputTokens, report.inputTokens + report.outputTokens, timestamp, JSON.stringify({ jobId: job.job_id, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome, usageSource: report.usageSource, reservedTokens: Number(job.reserved_tokens || 0) }));
+}
+export function reconcileAgentAttemptUsage(runDir, { jobId, attempt, inputTokens, outputTokens, usageSource, evidence }) {
+  requireNonEmpty(jobId, 'jobId');
+  if (!Number.isSafeInteger(attempt) || attempt < 1 || ![inputTokens, outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(inputTokens + outputTokens) || !['provider-reported', 'estimated'].includes(usageSource) || typeof evidence !== 'string' || !evidence.trim() || evidence.length > 1024) throw new Error('attempt usage reconciliation requires a valid attempt, usage source, counts and evidence');
+  const database = open(runDir);
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    const job = database.prepare('SELECT stage, agent_id, reserved_tokens, payload_json FROM agent_jobs WHERE job_id = ?').get(jobId);
+    if (!job) throw new Error('attempt job does not exist');
+    const matches = database.prepare('SELECT * FROM token_usage WHERE stage = ? AND agent_id = ?').all(job.stage, job.agent_id).filter(row => { const meta = parseJson(row.metadata_json); return meta?.jobId === jobId && Number(meta.attempt) === attempt; });
+    if (matches.length !== 1) throw new Error('attempt usage record is missing or ambiguous');
+    const row = matches[0], previous = parseJson(row.metadata_json);
+    if (!['unknown', 'legacy-unverified'].includes(previous.usageSource)) {
+      if (previous.reconciled && previous.usageSource === usageSource && Number(row.input_tokens) === inputTokens && Number(row.output_tokens) === outputTokens && previous.reconciliationEvidence === evidence) { database.exec('COMMIT'); return { status: 'already-reconciled', jobId, attempt }; }
+      throw new Error('attempt usage has already been recorded with different values');
+    }
+    const overReservation = Number(previous.reservedTokens || 0) > 0 && inputTokens + outputTokens > Number(previous.reservedTokens);
+    const metadata = { ...previous, usageSource, reconciled: true, previousUsageSource: previous.usageSource, reconciliationEvidence: evidence, reconciledAt: now(), overReservation };
+    database.prepare('UPDATE token_usage SET input_tokens = ?, output_tokens = ?, total_tokens = ?, metadata_json = ? WHERE id = ?').run(inputTokens, outputTokens, inputTokens + outputTokens, JSON.stringify(metadata), row.id);
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('agent-attempt-usage-reconciled', now(), JSON.stringify({ jobId, attempt, previous, inputTokens, outputTokens, usageSource, evidence }));
+    const runBudget = runBudgetSnapshot(database, job.stage);
+    database.exec('COMMIT'); return { status: 'reconciled', jobId, attempt, overReservation, runBudget };
+  } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 export function settleAgentJob(runDir, jobId, { status, result = null, error = null, retryDelayMs = null, leaseToken = null, usage = null, budgetExceeded = false, expectedStage = null, directCompletion = false } = {}) {
   if (!['succeeded', 'failed'].includes(status)) throw new Error('agent job settlement status must be succeeded or failed');

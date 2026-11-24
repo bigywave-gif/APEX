@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
+import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, reconcileAgentAttemptUsage, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
 import { readRunMetrics } from './run-metrics.mjs';
 
 const run = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-run-token-budget-'));
@@ -104,5 +104,60 @@ try {
     assert.equal(claimAgentJob(stage, running.jobId).status, 'running');
     assert.equal(claimAgentJob(stage, large.jobId).status, 'budget-exhausted', 'waiting cannot resolve an already impossible stage budget');
   } finally { fs.rmSync(stage, { recursive: true, force: true }); }
+  const unknownAttempt = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-unknown-attempt-budget-'));
+  try {
+    const unknownState = { runId: 'unknown-budget-test', revision: 1, track: 'greenfield', scope: 'standard', gates: { gate3: { status: 'pending' } }, artifacts: {} };
+    fs.writeFileSync(path.join(unknownAttempt, 'state.json'), JSON.stringify(unknownState)); initializeLedger(unknownAttempt, unknownState, 'budget-test');
+    configureRunTokenBudget(unknownAttempt, { limit: 100, verificationReserve: 0 });
+    for (const id of ['unknown-first', 'unknown-next']) registerAgent(unknownAttempt, { agentId: id, vocation: 'review', stage: 'visual' });
+    const first = enqueueAgentJob(unknownAttempt, { agentId: 'unknown-first', stage: 'visual', inputHash: 'first', payload: { tokenBudget: 70, stageTokenBudget: 100 } });
+    const next = enqueueAgentJob(unknownAttempt, { agentId: 'unknown-next', stage: 'visual', inputHash: 'next', payload: { tokenBudget: 50, stageTokenBudget: 100 } });
+    const lease = claimAgentJob(unknownAttempt, first.jobId);
+    settleAgentJob(unknownAttempt, first.jobId, { status: 'succeeded', leaseToken: lease.leaseToken });
+    const blocked = claimAgentJob(unknownAttempt, next.jobId);
+    assert.equal(blocked.reason, 'run-budget-unknown-usage'); assert.equal(blocked.runBudget.unknownAttempts.held, 70);
+    assert.equal(blocked.runBudget.used, 0, 'held uncertainty must not be recorded as actual usage');
+    assert.equal(readRunMetrics(unknownAttempt).tokens.runBudget.unknownAttempts.held, 70);
+    const observation = { jobId: first.jobId, attempt: 1, inputTokens: 10, outputTokens: 10, usageSource: 'provider-reported', evidence: 'provider usage record fixture' };
+    assert.equal(reconcileAgentAttemptUsage(unknownAttempt, observation).status, 'reconciled');
+    assert.equal(reconcileAgentAttemptUsage(unknownAttempt, observation).status, 'already-reconciled');
+    assert.throws(() => reconcileAgentAttemptUsage(unknownAttempt, { ...observation, inputTokens: 11 }), /different values/);
+    assert.equal(claimAgentJob(unknownAttempt, next.jobId).status, 'running');
+  } finally { fs.rmSync(unknownAttempt, { recursive: true, force: true }); }
+  const unknownVerification = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-unknown-verification-budget-'));
+  try {
+    configureRunTokenBudget(unknownVerification, { limit: 100, verificationReserve: 40 });
+    registerAgent(unknownVerification, { agentId: 'verify-unknown', vocation: 'review', stage: 'verify' });
+    registerAgent(unknownVerification, { agentId: 'normal-after-verify', vocation: 'review', stage: 'visual' });
+    const verifyJob = enqueueAgentJob(unknownVerification, { agentId: 'verify-unknown', stage: 'verify', inputHash: 'verify', payload: { tokenBudget: 40 } });
+    const lease = claimAgentJob(unknownVerification, verifyJob.jobId);
+    settleAgentJob(unknownVerification, verifyJob.jobId, { status: 'succeeded', leaseToken: lease.leaseToken });
+    const normal = enqueueAgentJob(unknownVerification, { agentId: 'normal-after-verify', stage: 'visual', inputHash: 'normal', payload: { tokenBudget: 60 } });
+    const admitted = claimAgentJob(unknownVerification, normal.jobId);
+    assert.equal(admitted.status, 'running', 'unknown verification reservation must not be protected twice');
+    assert.equal(admitted.runBudget.unknownAttempts.verificationHeld, 40);
+  } finally { fs.rmSync(unknownVerification, { recursive: true, force: true }); }
+  const unverified = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-unverified-attempt-budget-'));
+  try {
+    configureRunTokenBudget(unverified, { limit: 100, verificationReserve: 0 });
+    registerAgent(unverified, { agentId: 'legacy-values', vocation: 'review', stage: 'visual' });
+    const job = enqueueAgentJob(unverified, { agentId: 'legacy-values', stage: 'visual', inputHash: 'unverified', payload: { tokenBudget: 70 } });
+    const lease = claimAgentJob(unverified, job.jobId);
+    settleAgentJob(unverified, job.jobId, { status: 'succeeded', leaseToken: lease.leaseToken, usage: { inputTokens: 10, outputTokens: 20, usageSource: 'legacy-unverified' } });
+    const budget = agentRuntimeStatus(unverified).runBudget;
+    assert.equal(budget.used, 30); assert.equal(budget.unknownAttempts.held, 40); assert.equal(budget.admissionAvailable, 30, 'unverified recorded usage must not consume the original reservation twice');
+  } finally { fs.rmSync(unverified, { recursive: true, force: true }); }
+  const historical = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-unknown-historical-budget-'));
+  try {
+    registerAgent(historical, { agentId: 'historical', vocation: 'review', stage: 'visual' });
+    const old = enqueueAgentJob(historical, { agentId: 'historical', stage: 'visual', inputHash: 'old' });
+    const lease = claimAgentJob(historical, old.jobId); settleAgentJob(historical, old.jobId, { status: 'succeeded', leaseToken: lease.leaseToken });
+    configureRunTokenBudget(historical, { limit: 100, verificationReserve: 0 });
+    const next = enqueueAgentJob(historical, { agentId: 'historical', stage: 'visual', inputHash: 'next', payload: { tokenBudget: 10 } });
+    const blocked = claimAgentJob(historical, next.jobId);
+    assert.equal(blocked.reason, 'run-budget-unknown-usage'); assert.equal(blocked.runBudget.unknownAttempts.unbounded, 1);
+    reconcileAgentAttemptUsage(historical, { jobId: old.jobId, attempt: 1, inputTokens: 2, outputTokens: 3, usageSource: 'estimated', evidence: 'historical fixture estimate' });
+    assert.equal(claimAgentJob(historical, next.jobId).status, 'running');
+  } finally { fs.rmSync(historical, { recursive: true, force: true }); }
   console.log(JSON.stringify({ status: 'passed', scope: 'cross-stage reservations, protected verification, settlement, metrics and unknown usage' }));
 } finally { fs.rmSync(run, { recursive: true, force: true }); }

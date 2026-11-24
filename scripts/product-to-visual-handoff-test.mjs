@@ -56,7 +56,7 @@ try {
  for(const roleId of visual.selectedRoles){
   const job=agentRuntimeStatus(dir,visual.agentJobs[roleId]).jobs[0];
   const claim=invoke('plan_visual','agent-runtime.mjs',['claim',dir,job.jobId,'visual']);
-  const execution={inputTokens:0,outputTokens:0,usageSource:'unknown',model:'test-fixture',sessionId:job.payload.agentSessionId,skillBindings:job.payload.skillBindings,leaseToken:claim.leaseToken};
+  const execution={inputTokens:0,outputTokens:0,usageSource:'estimated',model:'test-fixture',sessionId:job.payload.agentSessionId,skillBindings:job.payload.skillBindings,leaseToken:claim.leaseToken};
   if(roleId==='ui-designer'){
    assert.ok(claim.requiredSkill?.content && claim.requiredSkill.sha256);
    execution.tasteSkillUsage={sha256:claim.requiredSkill.sha256,appliedRules:['Use task-specific hierarchy.'],notApplicableRules:['Avoid unrelated landing-page effects.']};

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { agentRuntimeStatus } from './run-ledger.mjs';
+import { agentRuntimeStatus, reconcileAgentAttemptUsage } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
@@ -17,6 +17,11 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-role-advisory-'));
 function run(script, args) { return spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' }); }
 function expect(result, message) { if (result.status !== 0) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); return JSON.parse(result.stdout); }
 function reject(result, pattern, message) { if (result.status === 0 || !pattern.test(`${result.stderr || ''}\n${result.stdout || ''}`)) throw new Error(`${message}: ${(result.stderr || result.stdout).trim()}`); }
+function reconcileFixtureAttempts(dir) {
+  const db = new DatabaseSync(path.join(dir, 'run-ledger.sqlite'), { readOnly: true });
+  const rows = db.prepare('SELECT input_tokens, output_tokens, metadata_json FROM token_usage WHERE agent_id IS NOT NULL').all(); db.close();
+  for (const row of rows) { const meta = JSON.parse(row.metadata_json); if (meta.jobId && ['unknown', 'legacy-unverified'].includes(meta.usageSource)) reconcileAgentAttemptUsage(dir, { jobId: meta.jobId, attempt: meta.attempt, inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens), usageSource: 'estimated', evidence: 'isolated role fixture' }); }
+}
 try {
   const intake = expect(run(router, ['intake', root, 'role-run', 'greenfield', 'full', 'interactive', 'role-session', '确认调用 APEX']), 'new role-chain run intake must succeed');
   if (intake.nextRequiredAction !== 'analyze_requirement') throw new Error('new role-chain run must retain the normal Gate 1 automatic action');
@@ -58,6 +63,7 @@ try {
   const fabricatedAuthorization = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'a fabricated evidence advisory must receive a controlled authorization before rejection');
   reject(run(action, ['run', root, 'role-run', 'role-session', fabricatedAuthorization.authorizationRef, 'analyze_requirement', roleScript, 'record', runDir, 'gate1', fabricatedInput]), /not a current frozen stage binding/, 'an advisory cannot cite fabricated evidence outside the current frozen bindings');
   for (const roleId of selection.selectedRoles) {
+    reconcileFixtureAttempts(runDir);
     const job = agentRuntimeStatus(runDir).jobs.find(item => item.jobId === selection.agentJobs[roleId]);
     const advisory = {
       schemaVersion: '1.0', roleId, stage: 'gate1', adapterVersion: '1.0.0', inputBindings: selection.inputBindings,
@@ -81,6 +87,7 @@ try {
       if (fs.existsSync(path.join(runDir, 'advisories', 'gate1', `${roleId}.json`))) throw new Error('stale advisory must not be published');
       if (agentRuntimeStatus(runDir, job.jobId).jobs[0].status !== 'queued') throw new Error('stale attempt must be settled before retry');
       if (agentRuntimeStatus(runDir).tokenUsage.gate1 !== 2000) throw new Error('stale attempt usage must remain accounted for');
+      reconcileFixtureAttempts(runDir);
       const db = new DatabaseSync(path.join(runDir, 'run-ledger.sqlite'));
       db.prepare("UPDATE agent_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE job_id = ?").run(job.jobId); db.close();
       const next = expect(run(router, ['authorize', root, 'role-run', 'role-session', 'analyze_requirement']), 'authorize retry');

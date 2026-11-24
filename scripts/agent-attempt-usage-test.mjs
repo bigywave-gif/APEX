@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, agentRuntimeStatus, rebudgetAgentJobs, recordObservedTokenUsage } from './run-ledger.mjs';
+import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, agentRuntimeStatus, rebudgetAgentJobs, reconcileAgentAttemptUsage, recordObservedTokenUsage } from './run-ledger.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-attempt-usage-'));
 try {
   registerAgent(root, { agentId: 'reviewer', vocation: 'review', stage: 'visual' });
@@ -31,6 +31,7 @@ try {
   assert.deepEqual(attempts.map(value => [value.attempt, value.outcome, value.usageSource]), [[1, 'failed', 'provider-reported'], [2, 'interrupted', 'unknown'], [3, 'budget-exceeded', 'provider-reported']]);
   assert.throws(() => settleAgentJob(root, job.jobId, { status: 'failed', leaseToken: claim.leaseToken }), /not running/);
   assert.equal(agentRuntimeStatus(root).tokenUsage.visual, 71);
+  reconcileAgentAttemptUsage(root, { jobId: job.jobId, attempt: 2, inputTokens: 0, outputTokens: 0, usageSource: 'estimated', evidence: 'isolated test fixture' });
   registerAgent(root, { agentId: 'designer', vocation: 'design', stage: 'visual' });
   const limited = enqueueAgentJob(root, { agentId: 'designer', stage: 'visual', inputHash: 'reserved-fixture', payload: { tokenBudget: 10, stageTokenBudget: 100 } });
   const reserved = claimAgentJob(root, limited.jobId);
