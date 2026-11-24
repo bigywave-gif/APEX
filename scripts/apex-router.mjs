@@ -416,25 +416,34 @@ function processIsLive(pid) {
   const status = processInfo(pid, 'stat');
   return Boolean(status) && !status.includes('Z');
 }
-function runtimeRecordCandidates(runDir) {
+function runtimeRecordCandidates(runDir, runId) {
   const candidates = [path.join(runDir, 'visual-sandbox-runtime.json')];
   const registry = path.join(runDir, 'runtime-services.json');
-  if (fs.existsSync(registry)) {
+  if (fs.existsSync(registry) || fs.lstatSync(registry, { throwIfNoEntry: false })) {
     try {
-      const services = read(registry).services;
-      if (Array.isArray(services)) for (const service of services) {
-        if (typeof service?.record === 'string' && isCurrentRunChild(runDir, path.join(runDir, service.record))) candidates.push(path.join(runDir, service.record));
+      const realRun = fs.realpathSync(runDir), realRegistry = fs.realpathSync(registry);
+      if (!realRegistry.startsWith(`${realRun}${path.sep}`) || !fs.statSync(realRegistry).isFile()) throw new Error('registry-outside-run');
+      const contents = read(realRegistry), services = contents.services;
+      if (!Array.isArray(services) || (contents.runId && contents.runId !== runId)) throw new Error('invalid-service-registry');
+      for (const service of services) {
+        if (typeof service?.record !== 'string' || path.isAbsolute(service.record) || !isCurrentRunChild(runDir, path.resolve(runDir, service.record))) throw new Error('invalid-service-record-reference');
+        const file = path.resolve(runDir, service.record);
+        if (!fs.existsSync(file)) throw new Error('registered-service-record-missing');
+        if (!fs.realpathSync(file).startsWith(`${realRun}${path.sep}`) || !fs.statSync(file).isFile()) throw new Error('service-record-outside-run');
+        candidates.push(file);
       }
-    } catch {}
+    } catch (error) { return { candidates: [], error: error.message }; }
   }
-  return [...new Set(candidates)];
+  return { candidates: [...new Set(candidates)], error: null };
 }
 function stopRunLocalServices(runDir, runId) {
   const stopped = [], alreadyStopped = [], refused = [];
-  for (const recordFile of runtimeRecordCandidates(runDir)) {
+  const records = runtimeRecordCandidates(runDir, runId);
+  if (records.error) return { stopped, alreadyStopped, refused: [{ record: 'runtime-services.json', reason: records.error }] };
+  for (const recordFile of records.candidates) {
     if (!fs.existsSync(recordFile)) continue;
     let record;
-    try { record = read(recordFile); } catch { refused.push({ record: path.basename(recordFile), reason: 'invalid-runtime-record' }); continue; }
+    try { if (!fs.realpathSync(recordFile).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)) throw new Error('outside run'); record = read(recordFile); } catch { refused.push({ record: path.basename(recordFile), reason: 'invalid-runtime-record' }); continue; }
     const pid = Number(record?.pid);
     const runtimeRoot = typeof record?.runtimeRoot === 'string' ? path.resolve(runDir, record.runtimeRoot) : null;
     const expectedRoot = path.resolve(runDir, 'visual-sandbox');

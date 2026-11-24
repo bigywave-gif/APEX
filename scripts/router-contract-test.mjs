@@ -136,6 +136,12 @@ try {
   fs.writeFileSync(path.join(cancelRunDir, 'ledger-integrity-incident.json'), JSON.stringify({ status: 'requires-ledger-investigation' }));
   reject(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '修改当前方案并重新分析']), 'cancel requires an unambiguous user instruction', 'revision language must never be misclassified as a destructive run cancellation');
   if (!fs.existsSync(path.join(cancelRunDir, 'visual-sandbox')) || !fs.existsSync(path.join(cancelRunDir, 'evidence', 'browser', 'screen.png'))) throw new Error('a rejected cancellation intent must not reclaim any current-run artifact');
+  const registryFile = path.join(cancelRunDir, 'runtime-services.json'), registryBytes = fs.readFileSync(registryFile);
+  fs.writeFileSync(registryFile, '{');
+  reject(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行']), 'runtime process cannot be proven run-local', 'corrupt registry must prevent service cleanup');
+  if (!fs.existsSync(path.join(cancelRunDir, 'visual-sandbox')) || !fs.existsSync(registryFile)) throw new Error('failed cleanup must preserve the sandbox and registry');
+  try { process.kill(child.pid, 0); } catch { throw new Error('invalid registry must not stop a live service'); }
+  fs.writeFileSync(registryFile, registryBytes);
   const cancelled = expect(run(router, ['cancel', root, 'run-cancel', 'session-cancel', '取消当前执行', 'user-terminated-current-run']), 'current-run cancellation must reclaim temporary artifacts');
   cancellationRuntimePid = null;
   if (cancelled.idempotent || cancelled.cancellation?.receipt !== 'cancellation-receipt.json' || !cancelled.cancellation?.removedEntries?.includes('visual-sandbox') || !cancelled.cancellation?.services?.stopped?.some(item => item.pid === child.pid)) throw new Error('cancellation must report both run-local artifact reclamation and the stopped Demo service');
@@ -181,6 +187,15 @@ try {
   const recoveryDir = path.join(root, '.apex', 'runs', 'run-cancel-recovery');
   registerAgent(recoveryDir, { agentId: 'recovery-agent', vocation: 'design', stage: 'visual' });
   const recoveryJob = enqueueAgentJob(recoveryDir, { agentId: 'recovery-agent', stage: 'visual', inputHash: 'recovery' });
+  const serviceRegistryPath = path.join(recoveryDir, 'runtime-services.json');
+  fs.writeFileSync(serviceRegistryPath, '{');
+  reject(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'runtime process cannot be proven run-local', 'malformed service registry must prevent cleanup');
+  if (!fs.existsSync(serviceRegistryPath) || readRunState(recoveryDir).lifecycle !== 'cancelled') throw new Error('malformed registry must be preserved with the cancellation fence');
+  fs.writeFileSync(serviceRegistryPath, JSON.stringify({ runId: 'other-run', services: [] }));
+  reject(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'invalid-service-registry', 'foreign registry must prevent cleanup');
+  fs.writeFileSync(serviceRegistryPath, JSON.stringify({ runId: 'run-cancel-recovery', services: [{ record: 'missing-runtime.json' }] }));
+  reject(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'registered-service-record-missing', 'missing registered service must prevent cleanup');
+  fs.unlinkSync(serviceRegistryPath);
   fs.writeFileSync(path.join(recoveryDir, 'visual-sandbox-runtime.json'), JSON.stringify({ pid: 1, runtimeRoot: 'missing' }));
   reject(run(router, ['cancel', root, 'run-cancel-recovery', 'session-cancel-recovery', '取消当前执行']), 'runtime process cannot be proven run-local', 'unsafe runtime cleanup must fail closed');
   if (readRunState(recoveryDir).lifecycle !== 'cancelled' || agentRuntimeStatus(recoveryDir).jobs.find(job => job.jobId === recoveryJob.jobId)?.status !== 'cancelled') throw new Error('cleanup failure must retain the cancellation fence');
