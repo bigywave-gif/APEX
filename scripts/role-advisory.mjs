@@ -112,6 +112,10 @@ function currentSelectionInputs(runDir, stage) {
   // the user having changed the visual direction.
   const revisionFile = path.join(runDir, 'prompt-revisions.ndjson');
   if (stage === 'visual' && fs.existsSync(revisionFile)) bindings.push({ artifact: 'visualRevision', path: 'prompt-revisions.ndjson', sha256: hash(revisionFile) });
+  if (stage === 'verify' && state.roleChain?.confirmationModel === 'two-confirmations' && fs.existsSync(revisionFile)) {
+    if (!fs.realpathSync(revisionFile).startsWith(`${fs.realpathSync(runDir)}${path.sep}`) || !fs.statSync(revisionFile).isFile()) die('verification revision log must be a Run-local file');
+    bindings.push({ artifact: 'requirementRevisions', path: 'prompt-revisions.ndjson', sha256: hash(revisionFile) });
+  }
   const configuredStageBudget = { lite: 6000, standard: 12000, full: 24000 }[state.scope] || 12000;
   const inputFloor = bindings.reduce((total, binding) => total + tokenFloor(fs.readFileSync(path.resolve(runDir, binding.path))), 0);
   const perAgentBudget = Math.max(1000, Math.floor(configuredStageBudget / selectedRoles.length), inputFloor + 1000);
@@ -165,7 +169,7 @@ function select(runDir, stage) {
     const role = registry.roles.find(item => item.id === roleId);
     const productVerification = stage === 'verify' && roleId === 'product-manager' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations';
     const skillBindings = [...(stageSkillBindings[stage] || []), ...(roleId === 'ui-designer' && tasteSkill ? ['taste-skill'] : [])];
-    const agent = registerAgent(runDir, { agentId: roleId, vocation: roleId, stage, capabilityVersion: registry.upstream.commit, metadata: { standards: role?.standards || [], inputs: productVerification ? ['intentBrief', 'experienceStrategy', 'visualSandboxFiles', 'implementationMap', 'runtimeStateMatrix', 'evidenceProvenance'] : role?.inputs || [], outputs: productVerification ? ['productReview', 'requirementReview', 'requestCoverage'] : role?.outputs || [], skillBindings } });
+    const agent = registerAgent(runDir, { agentId: roleId, vocation: roleId, stage, capabilityVersion: registry.upstream.commit, metadata: { standards: role?.standards || [], inputs: productVerification ? ['intentBrief', 'experienceStrategy', 'visualSandboxFiles', 'implementationMap', 'runtimeStateMatrix', 'evidenceProvenance', ...(fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) ? ['requirementRevisions'] : [])] : role?.inputs || [], outputs: productVerification ? ['productReview', 'requirementReview', 'requestCoverage'] : role?.outputs || [], skillBindings } });
     const payload = { roleId, stage, agentSessionId: agent.sessionId, skillBindings, ...(roleId === 'ui-designer' && tasteSkill ? { tasteSkill } : {}), inputBindings: bindings, registrySha256: selection.registry.sha256, tokenBudget: selection.tokenBudget.perRole[roleId], stageTokenBudget: selection.tokenBudget.stage };
     // A deterministic identity lets a replay reconstruct a selection after a
     // crash between durable job creation and the compatibility-file write.
@@ -202,6 +206,10 @@ function rebudget(runDir, stage) {
 }
 function record(runDir, stage, input) {
   const selection = loadSelection(runDir, stage); const advisory = read(path.resolve(input));
+  if (stage === 'verify' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') {
+    const file = path.join(runDir, 'prompt-revisions.ndjson'), binding = selection.inputBindings?.find(item => item.artifact === 'requirementRevisions');
+    if (fs.existsSync(file) ? !binding || binding.path !== 'prompt-revisions.ndjson' || binding.sha256 !== hash(file) : Boolean(binding)) die('verification role revision input changed; repair the selection before recording');
+  }
   if (advisory.stage !== stage) die(`advisory stage ${advisory.stage} does not match ${stage}`);
   if (!selection.selectedRoles.includes(advisory.roleId)) die(`${advisory.roleId} was not selected for ${stage}`);
   const expected = new Map(selection.inputBindings.map(item => [item.artifact, item]));
@@ -340,7 +348,8 @@ function summarize(runDir, stage) {
   const requirementReview = entries.find(entry => entry.roleId === 'product-manager' && stage === 'verify')?.advisory.requirementReview || [];
   const requestCoverage = entries.find(entry => entry.roleId === 'product-manager' && stage === 'verify')?.advisory.requestCoverage;
   const productSection = productReview.length ? `\n\n## 产品任务复核\n${productReview.map(item => `- ${item.task}：预期 ${item.expectedOutcome}；观察 ${item.observedOutcome}；依据 ${item.evidence}；理由 ${item.rationale}。`).join('\n')}` : '';
-  const requirementSection = requirementReview.length ? `\n\n## 需求与验收逐项复核\n需求记录覆盖判断：${requestCoverage?.rationale || '无'}。\n${requirementReview.map(item => `- ${item.criterion}：${item.verdict}；任务 ${item.productTasks.join('、') || '无'}；实施 ${item.implementationTargets.join('、') || '无'}；证据 ${item.evidenceIds.join('、')}；${item.rationale}；${item.implementationRationale}。`).join('\n')}` : '';
+  const revisionSection = (requestCoverage?.revisionReviews || []).map(item => `- 调整 ${item.index + 1}：${item.reason}；${item.verdict}；依据 ${item.evidenceIds.join('、')}；${item.rationale}。`).join('\n');
+  const requirementSection = requirementReview.length ? `\n\n## 需求与验收逐项复核\n需求记录覆盖判断：${requestCoverage?.rationale || '无'}。\n${requirementReview.map(item => `- ${item.criterion}：${item.verdict}；任务 ${item.productTasks.join('、') || '无'}；实施 ${item.implementationTargets.join('、') || '无'}；证据 ${item.evidenceIds.join('、')}；${item.rationale}；${item.implementationRationale}。`).join('\n')}${revisionSection ? `\n\n### 用户调整复核\n${revisionSection}` : ''}` : '';
   const summary = `# ${stage} 角色决策摘要\n\n## 角色标注的事实与依据\n${facts.length ? facts.join('\n') : '- 无新增事实。'}\n\n这些标注关联当前输入证据，不代表独立事实核验。\n\n## 推断\n${inferences.length ? inferences.join('\n') : '- 无新增推断。'}\n\n## 选择与理由\n${recommendations.length ? recommendations.join('\n') : '- 无新增建议。'}${skillSection}${productSection}${requirementSection}\n\n## 角色边界\n这些结论仅作为 APEX 内部 advisory；Router 仍是唯一状态、Gate 与实施授权方，用户只在当前 Gate 汇总确认。\n`;
   const summaryFile = path.join(stageDirectory(runDir, stage), 'role-decision-summary.md');
   fs.mkdirSync(path.dirname(summaryFile), { recursive: true });

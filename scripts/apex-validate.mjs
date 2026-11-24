@@ -192,6 +192,7 @@ function validateRoleStage(runDir, state, stage) {
   if (!fs.existsSync(selectionFile)) throw new Error(`controlled role selection is missing or stale: ${stage}`);
   const selection = readJson(selectionFile);
   if (state.roleChain?.confirmationModel === 'two-confirmations' && stage === 'verify' && formalReviewArtifacts.some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) throw new Error('verify role inputs must bind the current requirements, implementation and evidence');
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && stage === 'verify' && fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) && !selection.inputBindings?.some(binding => binding.artifact === 'requirementRevisions' && binding.path === 'prompt-revisions.ndjson')) throw new Error('verify role inputs must bind current user revisions');
   if (state.roleChain?.confirmationModel === 'two-confirmations' && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) throw new Error('implementation role inputs must bind the current source, dependency lock, visual bundle, and implementation map');
   if (!Array.isArray(selection.inputBindings) || selection.inputBindings.some(binding => {
     // The append-only visual-revision log is intentionally a role input
@@ -199,12 +200,13 @@ function validateRoleStage(runDir, state, stage) {
     // aligned with Router roleStageReady so an audited visual revision cannot
     // make a completed stage falsely stale at Gate 2.
     const current = state.artifacts?.[binding.artifact];
-    const file = binding.artifact === 'visualRevision'
+    const file = ['visualRevision', 'requirementRevisions'].includes(binding.artifact)
       ? path.resolve(runDir, binding.path)
       : current && resolveArtifact(runDir, current, '');
-    return (binding.artifact !== 'visualRevision' && current !== binding.path)
+    return (!['visualRevision', 'requirementRevisions'].includes(binding.artifact) && current !== binding.path)
       || !file.startsWith(`${path.resolve(runDir)}${path.sep}`)
       || !fs.existsSync(file)
+      || !fs.realpathSync(file).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)
       || (binding.artifact === 'visualRevision'
         ? !visualRevisionBindingCurrent(file, binding.sha256)
         : hashFile(file) !== binding.sha256);

@@ -26,6 +26,25 @@ export function validateRequirementReview(runDir, state, review, requestCoverage
     if (!entry.id || evidence.has(entry.id)) throw new Error('provenance evidence IDs are missing or duplicated');
     evidence.set(entry.id, entry);
   }
+  const revisionFile = path.join(root, 'prompt-revisions.ndjson');
+  let revisions = [];
+  if (fs.existsSync(revisionFile)) {
+    if (!fs.realpathSync(revisionFile).startsWith(`${root}${path.sep}`) || !fs.statSync(revisionFile).isFile()) throw new Error('requirement revisions are outside the Run');
+    try { revisions = fs.readFileSync(revisionFile, 'utf8').split('\n').filter(line => line.trim()).map(line => JSON.parse(line)); } catch { throw new Error('requirement revision log is invalid'); }
+    if (revisions.some(item => typeof item?.reason !== 'string' || !item.reason.trim() || !item.checkpoint || !item.impact)) throw new Error('requirement revision is incomplete');
+  }
+  const revisionReviews = requestCoverage.revisionReviews;
+  if (revisions.length && (!Array.isArray(revisionReviews) || revisionReviews.length !== revisions.length)) throw new Error('product review must cover every recorded user revision');
+  if (revisionReviews !== undefined && (!Array.isArray(revisionReviews) || revisionReviews.length !== revisions.length)) throw new Error('product revision review does not match the revision log');
+  const reviewedRevisions = new Set();
+  for (const item of revisionReviews || []) {
+    if (!Number.isInteger(item?.index) || item.index < 0 || item.index >= revisions.length || reviewedRevisions.has(item.index) || item.reason !== revisions[item.index].reason) throw new Error('revision review has a duplicate, unknown or changed revision');
+    reviewedRevisions.add(item.index);
+    if (!['addressed', 'superseded', 'not-applicable', 'failed', 'unverified'].includes(item.verdict) || typeof item.rationale !== 'string' || item.rationale.trim().length < 12) throw new Error(`revision review needs a justified decision: ${item.index}`);
+    if (['failed', 'unverified'].includes(item.verdict)) throw new Error(`revision ${item.index} is ${item.verdict}: ${item.rationale}`);
+    if (!Array.isArray(item.evidenceIds) || !item.evidenceIds.length || new Set(item.evidenceIds).size !== item.evidenceIds.length || item.evidenceIds.some(id => evidence.get(id)?.result !== 'passed')) throw new Error(`revision review needs passed evidence: ${item.index}`);
+    if (!Array.isArray(item.criterionRefs) || item.criterionRefs.some(ref => !expected.has(ref))) throw new Error(`revision review references an unknown criterion: ${item.index}`);
+  }
   if (!Array.isArray(review) || review.length !== expected.size) throw new Error('product requirement review must cover every success criterion and acceptance item exactly once');
   const seen = new Set();
   for (const item of review) {

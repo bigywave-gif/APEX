@@ -1509,6 +1509,7 @@ function roleStageReady(state, runDir, stage) {
     const selection = read(selectionFile);
     if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return false;
     if (usesCombinedPlan(state) && stage === 'verify' && formalReviewArtifacts.some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return false;
+    if (usesCombinedPlan(state) && stage === 'verify' && fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) && !selection.inputBindings?.some(binding => binding.artifact === 'requirementRevisions' && binding.path === 'prompt-revisions.ndjson')) return false;
     if (usesCombinedPlan(state) && stage === 'verify') {
       const productEntry = entry.advisories.find(item => item.roleId === 'product-manager');
       if (!selection.selectedRoles.includes('product-manager') || !productEntry) return false;
@@ -1520,12 +1521,13 @@ function roleStageReady(state, runDir, stage) {
     const bindingsCurrent = (selection.inputBindings || []).every(binding => {
       // visualRevision is intentionally a first-class role input without
       // becoming a state.artifacts entry; it is the append-only prompt log.
-      const file = binding.artifact === 'visualRevision'
+      const file = ['visualRevision', 'requirementRevisions'].includes(binding.artifact)
         ? path.resolve(runDir, binding.path)
         : artifactFile(runDir, state.artifacts?.[binding.artifact]);
       return file && file.startsWith(`${path.resolve(runDir)}${path.sep}`)
         && fs.existsSync(file)
-        && (binding.artifact === 'visualRevision' || state.artifacts?.[binding.artifact] === binding.path)
+        && fs.realpathSync(file).startsWith(`${fs.realpathSync(runDir)}${path.sep}`)
+        && (['visualRevision', 'requirementRevisions'].includes(binding.artifact) || state.artifacts?.[binding.artifact] === binding.path)
         && (binding.artifact === 'visualRevision'
           ? visualRevisionBindingCurrent(file, binding.sha256)
           : sha256File(file) === binding.sha256);
@@ -1563,6 +1565,8 @@ function roleStageState(state, runDir, stage) {
       if (!Array.isArray(selection.selectedRoles) || !selection.selectedRoles.length) return 'select';
       if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return repairState();
       if (usesCombinedPlan(state) && stage === 'verify' && formalReviewArtifacts.some(artifact => state.artifacts?.[artifact] && !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return repairState();
+      if (usesCombinedPlan(state) && stage === 'verify' && fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) && !selection.inputBindings?.some(binding => binding.artifact === 'requirementRevisions' && binding.path === 'prompt-revisions.ndjson')) return repairState();
+      if (usesCombinedPlan(state) && stage === 'verify' && selection.inputBindings?.some(binding => binding.artifact === 'requirementRevisions' && (!fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) || binding.sha256 !== sha256File(path.join(runDir, 'prompt-revisions.ndjson'))))) return repairState();
       if (usesCombinedPlan(state) && stage === 'verify' && !selection.selectedRoles.includes('product-manager')) return repairState();
       // Legacy selections used a fixed split that could be smaller than the
       // deterministic context they froze. Route that state to a guarded
@@ -1885,7 +1889,7 @@ function automaticWorkStep(state, runDir, action) {
       return step('compile-evidence-bound-industry-review', '生成并执行证据绑定的行业基准复核', ['industry-benchmark-review.json', 'industry-benchmark-evidence.json'], `基于本次正式页浏览器证据、冻结来源选择与视觉方案，为每项行业准则生成独立观察、评分和证据 ID，再以 verify 调用 industry-benchmark.mjs verify。不得复制视觉方案的计划分数，也不得把该内部复核变成用户确认。${repair}`);
     }
     const roles = roleStageState(state, runDir, 'verify');
-    if (roles !== 'ready' && roles !== 'not-required') return step(`verify-role-${roles}`, '完成验证阶段专业角色汇总', ['advisories/verify/selection.json', 'advisories/verify/*.json', 'advisories/verify/role-decision-summary.md'], roles === 'wait' ? roleWait : `通过 verify 调用 role-advisory.mjs ${roles}；产品角色对照需求记录、产品方案、已确认 Demo、实施映射和正式证据，填写 productReview。requirementReview 对每条 successCriteria 与 acceptance 填写 source、从 0 开始的 index、criterion、verdict、productTasks、implementationTargets、evidenceIds、rationale、implementationRationale；无对应任务或代码目标时以空数组及理由说明。requestCoverage 填写 verdict、rationale、unmappedRequirements。证据不足或结果不符时如实记录 failed 或 unverified，修复后重新验证。不新增用户交互。`);
+    if (roles !== 'ready' && roles !== 'not-required') return step(`verify-role-${roles}`, '完成验证阶段专业角色汇总', ['advisories/verify/selection.json', 'advisories/verify/*.json', 'advisories/verify/role-decision-summary.md'], roles === 'wait' ? roleWait : `通过 verify 调用 role-advisory.mjs ${roles}；产品角色对照需求记录、用户调整记录、产品方案、已确认 Demo、实施映射和正式证据，填写 productReview。requirementReview 对每条 successCriteria 与 acceptance 填写 source、从 0 开始的 index、criterion、verdict、productTasks、implementationTargets、evidenceIds、rationale、implementationRationale；无对应任务或代码目标时以空数组及理由说明。requestCoverage 填写 verdict、rationale、unmappedRequirements；存在调整记录时，revisionReviews 逐条填写 index、原记录 reason、verdict、rationale、criterionRefs 和 evidenceIds。证据不足或结果不符时如实记录 failed 或 unverified，修复后重新验证。不新增用户交互。`);
   }
   if (action === 'register_runtime_demo') return step('register-runtime-demo', '登记已验证的运行时 Demo', ['registrations/runtime-demo-*.json'], usesCombinedPlan(state) ? '核验当前 Run 的 Demo、来源锁、运行时基线、视觉引用与候选证据均来自成功受控动作，再调用 Router register-runtime-demo；随后展示 Demo 并等待用户明确确认，确认后才提供路线选择。' : '核验当前 Run 的 Demo、来源锁、运行时基线、视觉引用与候选证据均来自成功受控动作，再登记、展示并按旧模型提供路线选择。');
   if (action === 'present_runtime_demo') return step('present-run-local-runtime-demo', '展示当前 Run 的运行时 Demo 并登记展示回执', ['presentations/runtime-demo-*.json'], '默认聊天内展示：读取 runtime-demo.json.chatPreview，与同 Run 的 visual-sandbox-files.json 核对哈希；以 chat-inline 登记 present-runtime-demo，在本轮 final 原样输出返回的 presentation.contentReference，随后按当前确认模型展示 Router 返回的 Demo 确认或路线选择。片段由同源 HTTP Demo 验收，不能用 URL iframe 或另画原型代替。此回执证明已准备输出，不伪称宿主已渲染或用户已点击。缺少片段或宿主不支持时，实际打开当前 Run 的 HTTP URL，以 browser-panel 及具体 fallback-reason 登记并说明原因。只有截图、源码或链接不算展示；禁止正式服务和其他 Run。');

@@ -27,7 +27,21 @@ try {
   assert.throws(() => validate([review[0], { ...review[1], verdict: 'not-applicable', rationale: '' }]), /justified outcome/);
   assert.throws(() => validateRequirementReview(run, state, review, { ...requestCoverage, unmappedRequirements: ['遗漏事项'] }), /unmapped requirements/);
   assert.throws(() => validateRequirementReview(run, state, review, { ...requestCoverage, verdict: 'unverified' }), /coverage is unverified/);
+  const revision = { checkpoint: 'gate1', impact: 'visible', reason: '用户补充键盘操作要求' };
+  fs.writeFileSync(path.join(run, 'prompt-revisions.ndjson'), `${JSON.stringify(revision)}\n`);
+  assert.throws(() => validate(review), /cover every recorded user revision/);
+  const revisionReview = { index: 0, reason: revision.reason, verdict: 'addressed', rationale: '已核对键盘要求与对应的验收证据。', criterionRefs: ['acceptance:0'], evidenceIds: ['accessibility'] };
+  const withRevision = { ...requestCoverage, revisionReviews: [revisionReview] };
+  assert.equal(validateRequirementReview(run, state, review, withRevision).reviewed, 2);
+  assert.throws(() => validateRequirementReview(run, state, review, { ...withRevision, revisionReviews: [{ ...revisionReview, reason: '不同内容' }] }), /changed revision/);
+  assert.throws(() => validateRequirementReview(run, state, review, { ...withRevision, revisionReviews: [{ ...revisionReview, criterionRefs: ['acceptance:9'] }] }), /unknown criterion/);
+  assert.throws(() => validateRequirementReview(run, state, review, { ...withRevision, revisionReviews: [{ ...revisionReview, verdict: 'unverified' }] }), /is unverified/);
+  fs.appendFileSync(path.join(run, 'prompt-revisions.ndjson'), `${JSON.stringify({ ...revision, reason: '用户再次补充一个要求' })}\n`);
+  assert.throws(() => validateRequirementReview(run, state, review, withRevision), /cover every recorded user revision/);
+  fs.appendFileSync(path.join(run, 'prompt-revisions.ndjson'), 'not-json\n');
+  assert.throws(() => validateRequirementReview(run, state, review, withRevision), /revision log is invalid/);
+  fs.rmSync(path.join(run, 'prompt-revisions.ndjson'));
   write('provenance.json', { status: 'passed', entries: [{ id: 'browser', result: 'passed' }, { id: 'accessibility', result: 'unverified' }] });
   assert.throws(() => validate(review), /passed evidence/);
-  console.log(JSON.stringify({ status: 'passed', checks: 11, scope: 'criterion coverage and evidence linkage; semantic assessment remains a product role judgment' }));
+  console.log(JSON.stringify({ status: 'passed', checks: 18, scope: 'criterion and revision coverage with evidence linkage; semantic assessment remains a product role judgment' }));
 } finally { fs.rmSync(run, { recursive: true, force: true }); }
