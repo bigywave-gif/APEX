@@ -10,13 +10,14 @@ const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const assert = (value, message) => { if (!value) throw new Error(`Interactive Demo: ${message}`); };
 
 export function observedControlCoverageStatus(coverage, { requireScreens = false } = {}) {
-  if (!['observed-journey-states-only', 'observed-screens-and-journeys'].includes(coverage?.scope) || (requireScreens && coverage.scope !== 'observed-screens-and-journeys') || !Array.isArray(coverage.untestedControls) || typeof coverage.truncated !== 'boolean') return { ready: false, reason: 'browser control inventory is missing', controls: [] };
+  if (!['observed-journey-states-only', 'observed-screens-and-journeys'].includes(coverage?.scope) || (requireScreens && coverage.scope !== 'observed-screens-and-journeys') || !Array.isArray(coverage.observedControls) || !Array.isArray(coverage.exercisedControls) || !Array.isArray(coverage.untestedControls) || typeof coverage.truncated !== 'boolean') return { ready: false, reason: 'browser control inventory is missing', controls: [] };
   if (coverage.truncated) return { ready: false, reason: 'browser control inventory was truncated', controls: [] };
   if (coverage.identityConflicts?.length) return { ready: false, reason: 'browser control identity is ambiguous', controls: coverage.identityConflicts };
   const exemptions = coverage.sharedControlReviews || [];
   if (!Array.isArray(exemptions)) return { ready: false, reason: 'shared control review is invalid', controls: [] };
-  const observed = new Map((coverage.observedControls || []).map(item => [item.key, item]));
+  const observed = new Map(coverage.observedControls.map(item => [item?.key, item]));
   const untested = new Set(coverage.untestedControls.map(item => item?.key)), exercised = new Set(coverage.exercisedControls || []), reviewed = new Set();
+  if (observed.size !== coverage.observedControls.length || [...observed.keys()].some(key => !nonempty(key)) || [...exercised].some(key => !nonempty(key)) || untested.size !== coverage.untestedControls.length || [...untested].some(key => !nonempty(key)) || [...observed.keys()].some(key => untested.has(key) !== !exercised.has(key)) || [...untested].some(key => !observed.has(key))) return { ready: false, reason: 'browser control inventory is inconsistent', controls: [] };
   for (const item of exemptions) {
     const source = observed.get(item?.key), target = observed.get(item?.equivalentTo);
     const sameIdentity = typeof item?.key === 'string' && typeof item?.equivalentTo === 'string' && item.key.includes('|') && item.equivalentTo.includes('|') && item.key.split('|').slice(1).join('|') === item.equivalentTo.split('|').slice(1).join('|');

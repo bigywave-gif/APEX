@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T16:56:01.204Z",
+  "generatedAt": "2026-11-24T17:05:44.539Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -149,9 +149,9 @@
     "scripts/install-codex-stop-hook.mjs": "f0cd80304e2cefa1c5360c4b451dc3db04c6072c747d491f29893a24caf7a4e8",
     "scripts/install.mjs": "21e83f1258c5c66c8e50f78a52292ba61665230e89b096359eb4ff303a3685d0",
     "scripts/interactive-demo-browser-test.mjs": "c8d996cd94ceda8f716fe96a16af1f793c34f66a682ca2523acb4642f3f4dccd",
-    "scripts/interactive-demo-contract-test.mjs": "9dc245e459e59ff8ad3b912fa9ab0405cde6c45582576490a56c30a1592b1666",
+    "scripts/interactive-demo-contract-test.mjs": "dff00a070db0fb450927d45be7c3cfb7b07fc009dd96edb51f70980d3cf55b1d",
     "scripts/interactive-demo-test-fixture.mjs": "5e23800e5c8800b6f8ef0574c0513bc5ff4b079464d446d9fbab0eb0b72b180c",
-    "scripts/interactive-demo.mjs": "37a1143fdaa16ca4be29c33c59b79e3243cbf49c9701649fb0fc3a479486294c",
+    "scripts/interactive-demo.mjs": "79be6b28645f8167768730e7e484b61d1e19644a76be36c3cceff7036950f320",
     "scripts/ledger-marker-test.mjs": "cebfdf18a47002b689bd8ab087a69d0385c19fd23dd04af6589bf372b7778c87",
     "scripts/materialization-current.mjs": "9deb907f7edab687cf4de2a29d6cff77cd8a4fc255058809ad6f9cb57bfbd485",
     "scripts/motion-capability.mjs": "fa7859ee77018cc023703654e16ee04d76e0f535b5162b738277e81712882902",

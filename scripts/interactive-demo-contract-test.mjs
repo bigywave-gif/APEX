@@ -33,7 +33,10 @@ try {
   assert.deepEqual(coverage.untestedControls.map(item => item.key), ['id:settings']); checks++;
   assert.equal(observedControlCoverageStatus(coverage).ready, false); checks++;
   assert.deepEqual(observedControlCoverageStatus(coverage).controls, ['id:settings']); checks++;
-  assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }).ready, true); checks++;
+  assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }).reason, 'browser control inventory is inconsistent'); checks++;
+  assert.equal(observedControlCoverageStatus({ ...coverage, exercisedControls: ['id:increment', 'id:settings'], untestedControls: [] }).ready, true); checks++;
+  assert.equal(observedControlCoverageStatus({ ...coverage, observedControls: [...coverage.observedControls, coverage.observedControls[0]] }).reason, 'browser control inventory is inconsistent'); checks++;
+  assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [...coverage.untestedControls, { key: 'id:unobserved' }] }).reason, 'browser control inventory is inconsistent'); checks++;
   assert.equal(observedControlCoverageStatus(verified.controlCoverage).ready, false); checks++;
   assert.equal(observedControlCoverageStatus({ ...coverage, untestedControls: [] }, { requireScreens: true }).ready, false); checks++;
   const screenCapture = structuredClone(inventoried);
