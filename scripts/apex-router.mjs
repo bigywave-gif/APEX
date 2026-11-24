@@ -34,7 +34,7 @@ import { newlyAvailableResources, assertResourceCoverage } from './existing-reso
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
-import { loadTasteSkill, resolveTasteSkill } from './required-visual-skill.mjs';
+import { loadTasteSkill, resolveTasteSkill, availableAgentSkills } from './required-visual-skill.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, pendingRevisionTransactions, readRunState, reconcileRun, recordArtifact, revisionInvalidationEvents, archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -128,6 +128,7 @@ function failureCategory(receipt) {
   if (/(?:stage|run)-token-budget-exhausted/i.test(evidence)) return 'token-budget-exhausted';
   if (/required taste-skill changed after role selection/i.test(evidence)) return 'required-skill-drift';
   if (/required taste-skill (?:is not installed|is empty)/i.test(evidence)) return 'required-skill-unavailable';
+  if (/optional agent skill is missing or changed/i.test(evidence)) return 'optional-skill-unavailable';
   if (/PROJECT_DELETION_POLICY|deletion policy|delete(?:d|\s+operation)?\s+(?:is\s+)?forbidden/i.test(evidence)) return 'policy-denied';
   if (/EACCES|EPERM|permission denied|not permitted/i.test(evidence)) return 'permission-denied';
   if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network|browser.*unavailable/i.test(evidence)) return 'external-unavailable';
@@ -158,6 +159,7 @@ function latestBlockingOperation(runDir, action) {
     category: receipt.status === 'interrupted' ? 'operation-interrupted' : failureCategory(receipt),
     action,
     script: receipt.script || null,
+    ...(receipt.optionalSkillContext ? { optionalSkillContext: receipt.optionalSkillContext } : {}),
     operationReceipt: path.relative(runDir, latest.path),
     exitCode: receipt.exitCode ?? null,
     observedError,
@@ -2204,7 +2206,20 @@ function executionDirective(state, runDir = null) {
   if (latestFailure?.category === 'required-skill-unavailable' && ['visual-role-select', 'visual-role-record', 'visual-role-repair'].includes(currentStep.id)) {
     try { resolveTasteSkill(); requiredSkillRestored = true; } catch {}
   }
-  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || latestFailure?.category === 'obsolete-boundary-snapshot');
+  let optionalSkillHandled = false;
+  if (latestFailure?.category === 'optional-skill-unavailable' && latestFailure.script === 'agent-runtime.mjs') {
+    try {
+      const context = latestFailure.optionalSkillContext, job = agentRuntimeStatus(runDir, context.jobId).jobs[0];
+      const expectedAction = { gate1: 'analyze_requirement', visual: 'plan_visual', implementation: 'compile_visual_bundle' }[context.stage];
+      const live = expectedAction === action && currentStep.id === `${context.stage}-role-record` && /^[a-z0-9][a-z0-9-]{0,127}$/.test(context.name || '') && /^sha256:[a-f0-9]{64}$/.test(context.expectedSha256 || '') && job && job.stage === context.stage && job.status === 'running' && job.attempt === context.attempt && Number.isFinite(Date.parse(job.leaseExpiresAt)) && Date.parse(job.leaseExpiresAt) > Date.now();
+      if (live) {
+        const restored = availableAgentSkills(job.stage, job.payload?.roleId).some(skill => skill.name === context.name && skill.sha256 === context.expectedSha256);
+        optionalSkillHandled = true;
+        currentStep.details += restored ? ` 已恢复可选 Skill ${context.name}；让该运行中角色使用原租约重试加载，不得启动重复角色。` : ` 可选 Skill ${context.name} 当前不可用；保留失败回执，由该运行中角色记录原因并选择不使用或其他适用能力，不得重复相同失败或启动重复角色。`;
+      }
+    } catch {}
+  }
+  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || latestFailure?.category === 'obsolete-boundary-snapshot');
   const blockingOperation = continuationStall(runDir, action, currentStep.id) || (automaticallyRemediableFailure ? null : latestFailure);
   return {
     kind: 'must-complete-before-user-response',

@@ -153,7 +153,43 @@ try {
   const optionalName = process.env.APEX_TEST_EXTRA_VISUAL_SKILL === '1' ? 'brandkit' : 'impeccable';
   const optional = claimed.optionalSkills.find(item => item.name === optionalName);
   assert.ok(optional && optional.sha256, 'designer must discover installed optional visual skills without loading all instructions');
-  const loaded = expect(invoke(authorize(), 'agent-runtime.mjs', ['skill', runDir, jobId, 'visual', claimed.leaseToken, optional.name, optional.sha256]), 'load applicable visual skill');
+  let loaded;
+  if (process.env.APEX_TEST_OPTIONAL_SKILL_RESTORE === '1' || process.env.APEX_TEST_OPTIONAL_SKIP === '1') {
+    const skillFile = fs.realpathSync(optional.path), temporaryRoots = [os.tmpdir(), '/private/tmp'].filter(fs.existsSync).map(base => fs.realpathSync(base));
+    assert.ok(temporaryRoots.some(base => skillFile.startsWith(base + path.sep)), 'optional skill restoration test requires an isolated temporary CODEX_HOME');
+    const skillBytes = fs.readFileSync(skillFile), args = ['skill', runDir, jobId, 'visual', claimed.leaseToken, optional.name, optional.sha256];
+    try {
+      fs.unlinkSync(skillFile);
+      const missing = invoke(authorize(), 'agent-runtime.mjs', args);
+      assert.notEqual(missing.status, 0); assert.match(missing.stderr, /optional agent skill is missing or changed/);
+      const blocked = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect missing optional skill');
+      assert.equal(blocked.executionDirective?.blockingOperation, null);
+      assert.match(blocked.executionDirective?.currentStep?.details || '', /当前不可用/);
+      if (process.env.APEX_TEST_OPTIONAL_SKIP === '1') {
+        const advisory = { schemaVersion: '1.0', roleId: 'ui-designer', stage: 'visual', adapterVersion: '1.0.0', inputBindings: savedSelection.inputBindings, findings: [{ id: 'fixture', classification: 'fact', statement: 'The optional skill was unavailable.', evidence: savedSelection.inputBindings.map(item => item.path) }], recommendations: [{ id: 'choice', choice: 'Continue without the optional skill.', rationale: 'The product task remains supported.', acceptance: ['Task hierarchy is clear.'] }], execution: { inputTokens: 1, outputTokens: 1, usageSource: 'provider-reported', model: 'fixture', sessionId: queued.payload.agentSessionId, skillBindings: queued.payload.skillBindings, leaseToken: claimed.leaseToken, tasteSkillUsage: { sha256: queued.payload.tasteSkill.sha256, appliedRules: ['Use task-oriented hierarchy.'], notApplicableRules: [] }, optionalSkillUsage: [] }, status: 'ready' };
+        const input = path.join(runDir, 'skip-optional-skill.json'); fs.writeFileSync(input, JSON.stringify(advisory));
+        expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', input]), 'complete designer without unavailable optional skill');
+        assert.equal(agentRuntimeStatus(runDir, jobId).jobs[0].status, 'succeeded');
+        assert.deepEqual(JSON.parse(fs.readFileSync(path.join(runDir, 'advisories/visual/ui-designer.json'))).execution.optionalSkillUsage, []);
+        console.log(JSON.stringify({ status: 'passed', scope: 'optional skill failure can be recorded and safely skipped' }));
+        fs.writeFileSync(skillFile, skillBytes); fs.rmSync(root, { recursive: true, force: true }); process.exit(0);
+      }
+      const repeated = invoke(authorize(), 'agent-runtime.mjs', args);
+      assert.notEqual(repeated.status, 0); assert.match(repeated.stderr, /identical controlled operation already failed/);
+      fs.writeFileSync(skillFile, skillBytes);
+      const leaseDb = new DatabaseSync(runLedgerPaths(runDir).ledger);
+      const leaseExpiry = leaseDb.prepare('SELECT lease_expires_at FROM agent_jobs WHERE job_id = ?').get(jobId).lease_expires_at;
+      leaseDb.prepare("UPDATE agent_jobs SET lease_expires_at = '2000-01-01T00:00:00.000Z' WHERE job_id = ?").run(jobId); leaseDb.close();
+      const expired = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect expired optional skill lease');
+      assert.equal(expired.nextRequiredAction, 'recover', 'restored skill must not bypass an expired lease');
+      const leaseRestore = new DatabaseSync(runLedgerPaths(runDir).ledger);
+      leaseRestore.prepare('UPDATE agent_jobs SET lease_expires_at = ? WHERE job_id = ?').run(leaseExpiry, jobId); leaseRestore.close();
+      const restored = expect(run(router, ['status', root, 'visual-skill-run', 'visual-skill-session']), 'inspect restored optional skill');
+      assert.equal(restored.executionDirective?.blockingOperation, null);
+      assert.match(restored.executionDirective?.currentStep?.details || '', /原租约重试加载/);
+      loaded = expect(invoke(authorize(), 'agent-runtime.mjs', args), 'load optional skill after restoration');
+    } finally { fs.writeFileSync(skillFile, skillBytes); }
+  } else loaded = expect(invoke(authorize(), 'agent-runtime.mjs', ['skill', runDir, jobId, 'visual', claimed.leaseToken, optional.name, optional.sha256]), 'load applicable visual skill');
   assert.equal(loaded.skill.sha256, optional.sha256);
   assert.match(loaded.skill.content, new RegExp(optionalName, 'i'));
   const ledger = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
