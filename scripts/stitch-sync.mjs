@@ -27,6 +27,19 @@ function stable(value) {
   return value;
 }
 function hash(value) { return 'sha256:' + crypto.createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(stable(value))).digest('hex'); }
+function saveDownload(artifactDir, name, extension, bytes) {
+  const digest = hash(bytes);
+  const file = path.join(artifactDir, `${name}-${digest.slice(7)}${extension}`);
+  const temporary = path.join(artifactDir, `.download-${crypto.randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, bytes, { flag: 'wx' });
+    try { fs.linkSync(temporary, file); }
+    catch (error) {
+      if (error.code !== 'EEXIST' || !fs.readFileSync(file).equals(bytes)) throw error;
+    }
+  } finally { fs.rmSync(temporary, { force: true }); }
+  return { file, digest };
+}
 function captureInputs(runDir, references) {
   const root = fs.realpathSync(runDir), logicalRoot = path.resolve(runDir);
   const normalize = ref => {
@@ -123,8 +136,8 @@ async function materializeDownloads(metadata, artifactDir) {
   if (resources) {
     const downloaded = await downloadNamedScreen(resources);
     for (const [kind, bytes, extension] of [['html', downloaded.html, '.html'], ['screenshot', downloaded.screenshot, downloaded.extension]]) {
-      const file = path.join(artifactDir, `${kind}${extension}`); fs.writeFileSync(file, bytes);
-      values.push({ field: kind, resource: resources[kind], hash: hash(bytes), kind, path: file });
+      const { file, digest } = saveDownload(artifactDir, kind, extension, bytes);
+      values.push({ field: kind, resource: resources[kind], hash: digest, kind, path: file });
     }
     return { urls: [], values, combined: hash(values) };
   }
@@ -140,9 +153,8 @@ async function materializeDownloads(metadata, artifactDir) {
     const pathname = new URL(url).pathname;
     const extension = path.extname(pathname).toLowerCase() || '.bin';
     const kind = /\.html?$/i.test(extension) ? 'html' : /\.(png|jpe?g|webp|gif)$/i.test(extension) ? (/screenshot|preview|render/i.test(entry.field + ' ' + pathname) ? 'screenshot' : 'image') : 'asset';
-    const file = path.join(artifactDir, String(index).padStart(2, '0') + '-' + kind + extension);
-    fs.writeFileSync(file, bytes);
-    values.push({ url: pathname, field: entry.field, hash: hash(bytes), kind, path: file });
+    const { file, digest } = saveDownload(artifactDir, String(index).padStart(2, '0') + '-' + kind, extension, bytes);
+    values.push({ url: pathname, field: entry.field, hash: digest, kind, path: file });
   }
   return { urls: downloads.map(item => item.url), values, combined: hash(values) };
 }
@@ -330,7 +342,11 @@ if (command === 'list-projects') {
   const freeze = read(path.join(runDir, 'stitch-freeze.json'));
   const selection = { schemaVersion: '3.0', projectId: freeze.projectId, canvasUrl: freeze.canvasUrl, approval: freeze.approval, approvedScreens: freeze.approvedScreens.map(({ htmlHash, imageHash, htmlPath, imagePath, ...item }) => item), excludedScreens: freeze.excludedScreens };
   const snap = await snapshot(selection, runDir);
-  const currentHash = hash({ listed: snap.listedHash, approved: snap.approvedScreens });
+  const approved = snap.approvedScreens.map(screen => {
+    const frozen = freeze.approvedScreens.find(item => item.screenId === screen.screenId);
+    return frozen ? { ...screen, htmlPath: frozen.htmlPath, imagePath: frozen.imagePath } : screen;
+  });
+  const currentHash = hash({ listed: snap.listedHash, approved });
   const changed = currentHash !== freeze.fingerprints.screenSetHash || snap.designSystemHash !== freeze.fingerprints.designSystemHash;
   if (changed) {
     const result = spawnSync(process.execPath, [path.join(apexRoot, 'scripts/apex-router.mjs'), 'transition', process.env.APEX_ROUTER_PROJECT_ROOT, process.env.APEX_ROUTER_RUN_ID, process.env.APEX_ROUTER_SESSION_ID, process.env.APEX_ROUTER_AUTHORIZATION_REF, 'revoke-stitch', 'remote-canvas-changed'], { encoding: 'utf8' });

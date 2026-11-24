@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T13:07:28.146Z",
+  "generatedAt": "2026-11-24T13:18:18.068Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -148,7 +148,7 @@
     "scripts/install-codex-session-refresh-hook.mjs": "233ba5661387498fda4185179593201a4724e1970117d8e648f8aeddfa073faf",
     "scripts/install-codex-stop-hook.mjs": "f0cd80304e2cefa1c5360c4b451dc3db04c6072c747d491f29893a24caf7a4e8",
     "scripts/install.mjs": "21e83f1258c5c66c8e50f78a52292ba61665230e89b096359eb4ff303a3685d0",
-    "scripts/interactive-demo-browser-test.mjs": "67f225c7567af656a675ed42993b7857e4fb102036509947a99a0fb730b04fc9",
+    "scripts/interactive-demo-browser-test.mjs": "3b91b946c986dd0790482f68e6f41279fb5cdd34387e0c6b7110ecd4caa887e3",
     "scripts/interactive-demo-contract-test.mjs": "9dc245e459e59ff8ad3b912fa9ab0405cde6c45582576490a56c30a1592b1666",
     "scripts/interactive-demo-test-fixture.mjs": "5e23800e5c8800b6f8ef0574c0513bc5ff4b079464d446d9fbab0eb0b72b180c",
     "scripts/interactive-demo.mjs": "37a1143fdaa16ca4be29c33c59b79e3243cbf49c9701649fb0fc3a479486294c",
@@ -222,7 +222,7 @@
     "scripts/stitch-screen-binding.mjs": "a2a1f6204cc72d4a2017d6974faf4b1bd8f75907a0100b0c7395cb99ec2cdcb4",
     "scripts/stitch-screen-progress.mjs": "4a29fe69aa164574d9979493a184e5203ccbacfe60b5901fa0896b8018e9603c",
     "scripts/stitch-submission-contract-test.mjs": "2f1a07c46cfebabb8699733787de9f213ed1acacad4e64518653a35a197da5a9",
-    "scripts/stitch-sync.mjs": "00d5f99757e605f2e823bdb148fe82c4017b9b9dd515057887ae1be2931ed17d",
+    "scripts/stitch-sync.mjs": "6ac0149517cce2f28ea0a222384a4f37b8b27b01f28fd01e8525938cabe5c260",
     "scripts/stitch-ui-importer.mjs": "4247109483a04b63d9c4b73d37885f089ef03d65a44ca76d0472872008236252",
     "scripts/stitch-upload-contract-test.mjs": "53c166cfaef3d987a11a10caf69c31e471d6577e586e9e5ca19a0eb432ad3600",
     "scripts/strict-replica.mjs": "aaa9b5f1140a2edac26ce197fdc98b6da7dff683190f0159bcc97366dcc34d5b",

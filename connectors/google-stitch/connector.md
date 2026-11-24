@@ -51,7 +51,7 @@ Stitch 是 APEX Visual 阶段的可编辑高保真协作画布。用户可以打
 4. APEX 对候选执行中文与结构保真审查；通过后才请求用户确认。
 5. 用户确认效果图后运行 stitch-sync.mjs freeze 读取远端 Screen、HTML、截图和设计系统，形成暂存快照；随后 strict-replica.mjs stitch 完成零差异与结构合同校验，生成待确认的 Stitch 证据。用户确认 Stitch 后才执行 stitch-sync.mjs seal；只有 seal 成功才赋予实现权威。
 6. 对 Screen 集合、HTML、截图和设计系统计算内容指纹。
-7. 将每个确认 Screen 的实际 HTML 与截图下载到 evidence/stitch/screens/<screen-id>/，并将其路径与 SHA-256 写入冻结记录；随后运行 structure-contract.mjs stitch 自动抽取并验证结构合同。
+7. 将每个确认 Screen 的实际 HTML 与截图按内容哈希保存到 evidence/stitch/screens/<screen-id>/，不覆盖已有证据，并将其路径与 SHA-256 写入冻结记录；随后运行 structure-contract.mjs stitch 自动抽取并验证结构合同。
 8. 写入符合 stitch-freeze schema 的 stitch-freeze.json。
 8. 将冻结结果编译进 Visual Bundle，而不是把 Stitch HTML 直接覆盖生产代码。
 

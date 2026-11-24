@@ -315,6 +315,11 @@ try {
     write('stitch-job.json', { status: 'ready', screenId: screens[0].screenId, promptHash: selection.generationInput.promptHash, skillAdaptation: expectedAdaptation });
   }
   const selectionFile = write('stitch-selection.json', selection);
+  const legacyDownloads = screens.flatMap(screen => ['html.html', 'screenshot.png'].map(name => {
+    const file = path.join(runDir, 'evidence', 'stitch', 'screens', screen.screenId, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'previous frozen evidence');
+    return file;
+  }));
   if (process.env.APEX_TEST_STITCH_STATE_RACE === '1') {
     const freezeFile = path.join(runDir, 'stitch-freeze.json'), previous = fs.existsSync(freezeFile) ? fs.readFileSync(freezeFile) : null;
     fs.writeFileSync(raceFlag, 'inject concurrent state update');
@@ -335,6 +340,8 @@ try {
   const freezeAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']);
   run('apex-action.mjs', ['run', project, runId, session, freezeAuth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'freeze', runDir, selectionFile]);
   const frozenStitch = JSON.parse(fs.readFileSync(path.join(runDir, 'stitch-freeze.json')));
+  if (legacyDownloads.some(file => fs.readFileSync(file, 'utf8') !== 'previous frozen evidence')) throw new Error('Stitch downloads must not overwrite prior frozen evidence');
+  if (!invokeStitch('check', runDir).current) throw new Error('unchanged Stitch snapshot must remain current');
   if (expectedAdaptation && JSON.stringify(frozenStitch.skillAdaptation) !== JSON.stringify(expectedAdaptation)) throw new Error('Stitch freeze must preserve the loaded skill adaptation bound to the confirmed Demo and submitted prompt');
   if (frozenStitch.approvedScreens.length !== 2 || !frozenStitch.approvedScreens.every(item => item.demoCapture?.id === item.screenId.replace('-stitch', ''))) throw new Error('Stitch freeze must auto-bind both real Demo captures');
   for (const screen of screens) {
