@@ -10,6 +10,7 @@ import { archiveArtifacts, commitRunState, readRunState, visualSkillLoads } from
 import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, rebudgetAgentJobs, registerAgent, settleAgentJob, startTraceSpan, supersedeQueuedAgentJobs } from './run-ledger.mjs';
 import { resolveTasteSkill, loadTasteSkill, requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
 import { formalReviewBindings, validateProductTaskReview } from './formal-interaction-evidence.mjs';
+import { validateRequirementReview } from './requirement-review.mjs';
 import { validateResourceReviews } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -105,7 +106,7 @@ function currentSelectionInputs(runDir, stage) {
     const reference = state.artifacts?.[artifact]; const file = reference && path.resolve(runDir, reference);
     return file && file.startsWith(`${path.resolve(runDir)}${path.sep}`) && fs.existsSync(file) ? [{ artifact, path: reference, sha256: hash(file) }] : [];
   });
-  if (stage === 'verify' && state.roleChain?.confirmationModel === 'two-confirmations') bindings.push(...formalReviewBindings(runDir, state));
+  if (stage === 'verify' && state.roleChain?.confirmationModel === 'two-confirmations') for (const binding of formalReviewBindings(runDir, state)) if (!bindings.some(item => item.artifact === binding.artifact)) bindings.push(binding);
   // A material visual revision is a first-class Agent input.  Without this
   // binding, a re-selected visual stage can reuse old completed jobs despite
   // the user having changed the visual direction.
@@ -164,7 +165,7 @@ function select(runDir, stage) {
     const role = registry.roles.find(item => item.id === roleId);
     const productVerification = stage === 'verify' && roleId === 'product-manager' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations';
     const skillBindings = [...(stageSkillBindings[stage] || []), ...(roleId === 'ui-designer' && tasteSkill ? ['taste-skill'] : [])];
-    const agent = registerAgent(runDir, { agentId: roleId, vocation: roleId, stage, capabilityVersion: registry.upstream.commit, metadata: { standards: role?.standards || [], inputs: productVerification ? ['experienceStrategy', 'visualSandboxFiles', 'runtimeStateMatrix'] : role?.inputs || [], outputs: productVerification ? ['productReview'] : role?.outputs || [], skillBindings } });
+    const agent = registerAgent(runDir, { agentId: roleId, vocation: roleId, stage, capabilityVersion: registry.upstream.commit, metadata: { standards: role?.standards || [], inputs: productVerification ? ['intentBrief', 'experienceStrategy', 'visualSandboxFiles', 'implementationMap', 'runtimeStateMatrix', 'evidenceProvenance'] : role?.inputs || [], outputs: productVerification ? ['productReview', 'requirementReview', 'requestCoverage'] : role?.outputs || [], skillBindings } });
     const payload = { roleId, stage, agentSessionId: agent.sessionId, skillBindings, ...(roleId === 'ui-designer' && tasteSkill ? { tasteSkill } : {}), inputBindings: bindings, registrySha256: selection.registry.sha256, tokenBudget: selection.tokenBudget.perRole[roleId], stageTokenBudget: selection.tokenBudget.stage };
     // A deterministic identity lets a replay reconstruct a selection after a
     // crash between durable job creation and the compatibility-file write.
@@ -214,7 +215,7 @@ function record(runDir, stage, input) {
     const state = stateFor(runDir), baseline = read(path.join(runDir, state.artifacts.existingBaseline));
     if (baseline.codeReference?.resourceReviewProtocol === '1.0') validateResourceReviews(read(path.join(runDir, state.artifacts.codeReference)), advisory.resourceReviews);
   }
-  if (stage === 'verify' && advisory.roleId === 'product-manager' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') validateProductTaskReview(runDir, stateFor(runDir), advisory.productReview);
+  if (stage === 'verify' && advisory.roleId === 'product-manager' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') { validateProductTaskReview(runDir, stateFor(runDir), advisory.productReview); validateRequirementReview(runDir, stateFor(runDir), advisory.requirementReview, advisory.requestCoverage); }
   const floors = advisoryTokenFloors(runDir, selection.inputBindings, advisory);
   const usageSource = advisory.execution.usageSource || 'legacy-unverified';
   if (usageSource === 'unknown' && (advisory.execution.inputTokens !== 0 || advisory.execution.outputTokens !== 0)) die('unknown token usage must use zero placeholders and remain explicitly unmetered');
@@ -336,8 +337,11 @@ function summarize(runDir, stage) {
   });
   const skillSection = skillDecisions.length ? `\n\n## 技能采用与场景取舍\n${skillDecisions.join('\n')}` : '';
   const productReview = entries.find(entry => entry.roleId === 'product-manager' && stage === 'verify')?.advisory.productReview || [];
+  const requirementReview = entries.find(entry => entry.roleId === 'product-manager' && stage === 'verify')?.advisory.requirementReview || [];
+  const requestCoverage = entries.find(entry => entry.roleId === 'product-manager' && stage === 'verify')?.advisory.requestCoverage;
   const productSection = productReview.length ? `\n\n## 产品任务复核\n${productReview.map(item => `- ${item.task}：预期 ${item.expectedOutcome}；观察 ${item.observedOutcome}；依据 ${item.evidence}；理由 ${item.rationale}。`).join('\n')}` : '';
-  const summary = `# ${stage} 角色决策摘要\n\n## 角色标注的事实与依据\n${facts.length ? facts.join('\n') : '- 无新增事实。'}\n\n这些标注关联当前输入证据，不代表独立事实核验。\n\n## 推断\n${inferences.length ? inferences.join('\n') : '- 无新增推断。'}\n\n## 选择与理由\n${recommendations.length ? recommendations.join('\n') : '- 无新增建议。'}${skillSection}${productSection}\n\n## 角色边界\n这些结论仅作为 APEX 内部 advisory；Router 仍是唯一状态、Gate 与实施授权方，用户只在当前 Gate 汇总确认。\n`;
+  const requirementSection = requirementReview.length ? `\n\n## 需求与验收逐项复核\n需求记录覆盖判断：${requestCoverage?.rationale || '无'}。\n${requirementReview.map(item => `- ${item.criterion}：${item.verdict}；任务 ${item.productTasks.join('、') || '无'}；实施 ${item.implementationTargets.join('、') || '无'}；证据 ${item.evidenceIds.join('、')}；${item.rationale}；${item.implementationRationale}。`).join('\n')}` : '';
+  const summary = `# ${stage} 角色决策摘要\n\n## 角色标注的事实与依据\n${facts.length ? facts.join('\n') : '- 无新增事实。'}\n\n这些标注关联当前输入证据，不代表独立事实核验。\n\n## 推断\n${inferences.length ? inferences.join('\n') : '- 无新增推断。'}\n\n## 选择与理由\n${recommendations.length ? recommendations.join('\n') : '- 无新增建议。'}${skillSection}${productSection}${requirementSection}\n\n## 角色边界\n这些结论仅作为 APEX 内部 advisory；Router 仍是唯一状态、Gate 与实施授权方，用户只在当前 Gate 汇总确认。\n`;
   const summaryFile = path.join(stageDirectory(runDir, stage), 'role-decision-summary.md');
   fs.mkdirSync(path.dirname(summaryFile), { recursive: true });
   fs.writeFileSync(summaryFile, summary);

@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ledgerBoundOutput } from './verification-policy.mjs';
 const hash = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
-export const formalReviewArtifacts = ['experienceStrategy', 'visualSandboxFiles', 'runtimeStateMatrix'];
+export const formalReviewArtifacts = ['experienceStrategy', 'visualSandboxFiles', 'runtimeStateMatrix', 'intentBrief', 'implementationMap', 'evidenceProvenance'];
 export function formalReviewBindings(runDir, state) {
   const root = fs.realpathSync(runDir);
   return formalReviewArtifacts.map(artifact => {

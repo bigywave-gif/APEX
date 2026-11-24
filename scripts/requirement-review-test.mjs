@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { validateRequirementReview } from './requirement-review.mjs';
+
+const run = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-requirement-review-'));
+try {
+  const state = { artifacts: { intentBrief: 'intent.json', experienceStrategy: 'strategy.json', implementationMap: 'implementation.json', evidenceProvenance: 'provenance.json' } };
+  const write = (ref, value) => fs.writeFileSync(path.join(run, ref), JSON.stringify(value));
+  write('intent.json', { sourceRequest: '可添加项目并保持无障碍', successCriteria: ['能够添加项目'], acceptance: ['键盘可操作'] });
+  write('strategy.json', { functionalPlan: [{ task: '添加项目' }] });
+  write('implementation.json', { entries: [{ runtimeTarget: ['src/app.js'] }] });
+  write('provenance.json', { status: 'passed', entries: [{ id: 'browser', result: 'passed' }, { id: 'accessibility', result: 'passed' }] });
+  const item = (source, criterion, evidenceId) => ({ source, index: 0, criterion, verdict: 'passed', productTasks: ['添加项目'], implementationTargets: ['src/app.js'], evidenceIds: [evidenceId], rationale: '已结合正式运行证据复核该项要求。', implementationRationale: '对应入口已映射到正式实施文件。' });
+  const requestCoverage = { verdict: 'covered', rationale: '产品角色核对原始需求和产品方案，确认该夹具中的要求均有对应条目。', unmappedRequirements: [] };
+  const validate = review => validateRequirementReview(run, state, review, requestCoverage);
+  const review = [item('successCriteria', '能够添加项目', 'browser'), item('acceptance', '键盘可操作', 'accessibility')];
+  assert.equal(validate(review).reviewed, 2);
+  assert.throws(() => validate(review.slice(0, 1)), /cover every/);
+  assert.throws(() => validate([review[0], review[0]]), /duplicate/);
+  assert.throws(() => validate([review[0], { ...review[1], criterion: '不同要求' }]), /changed criterion/);
+  assert.throws(() => validate([review[0], { ...review[1], evidenceIds: ['invented'] }]), /passed evidence/);
+  assert.throws(() => validate([review[0], { ...review[1], implementationTargets: ['other.js'] }]), /unknown task or implementation/);
+  assert.throws(() => validate([review[0], { ...review[1], verdict: 'failed' }]), /is failed/);
+  assert.throws(() => validate([review[0], { ...review[1], verdict: 'unverified' }]), /is unverified/);
+  assert.throws(() => validate([review[0], { ...review[1], verdict: 'not-applicable', rationale: '' }]), /justified outcome/);
+  assert.throws(() => validateRequirementReview(run, state, review, { ...requestCoverage, unmappedRequirements: ['遗漏事项'] }), /unmapped requirements/);
+  assert.throws(() => validateRequirementReview(run, state, review, { ...requestCoverage, verdict: 'unverified' }), /coverage is unverified/);
+  write('provenance.json', { status: 'passed', entries: [{ id: 'browser', result: 'passed' }, { id: 'accessibility', result: 'unverified' }] });
+  assert.throws(() => validate(review), /passed evidence/);
+  console.log(JSON.stringify({ status: 'passed', checks: 11, scope: 'criterion coverage and evidence linkage; semantic assessment remains a product role judgment' }));
+} finally { fs.rmSync(run, { recursive: true, force: true }); }

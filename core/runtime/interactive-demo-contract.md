@@ -114,5 +114,7 @@ present-runtime-demo <project-root> <run-id> <session-id> <authorization-ref> <p
 
 两次确认模型在验证阶段还须选择并实际运行 `product-manager`。产品角色在 advisory 的 `productReview` 中逐项填写 `task`、正式交互 `interactionId`、`evidence`、`expectedOutcome`、`observedOutcome`、`rationale` 和 `verdict`。每条已确认的正式交互路径必须且只能复核一次，同一任务的多条路径分别复核；所有产品与 Demo 任务也必须覆盖。证据须属于同一任务的当前受控浏览器记录；未通过或无法判断时保留真实失败，修复并重新验证，不能填写通过占位。Router 在验收时重新核对角色任务、复核覆盖和当前证据。内容由产品角色作专业判断；结构和哈希检查不能证明判断本身正确，用户此前对 Demo 的审美确认也不会因此被替代。
 
+产品角色还须读取当前需求记录、产品方案、实施映射和证据封存，对 `intentBrief.successCriteria` 和 `intentBrief.acceptance` 的每项填写唯一 `requirementReview`：原始条目及索引、适用性结论、相关产品任务、实施目标、已封存证据 ID 和判断理由。非代码或不适用条目须解释实施判断与适用性；证据不足或无法判断时不得记为通过。`requestCoverage` 记录产品角色对需求记录与方案是否存在遗漏的判断；发现遗漏须先补充和重新验证，不能以空清单掩盖。Router 和 Gate 3 重验条目覆盖、当前输入及证据关联；这些结构检查不证明角色的语义判断正确，也不能保证需求记录完整还原了用户所有原始表述。
+
 
 正式页面验收逐项覆盖已确认 Demo 的每个路由与实际视口组合。同一路由的桌面端和移动端是独立证据，分别关联截图、DOM 和页面级还原结果；缺失或变更的证据不能视为通过。

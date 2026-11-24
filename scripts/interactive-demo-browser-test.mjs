@@ -251,6 +251,8 @@ try {
     // their receipts above came from the real browser capture.
     const roleState = JSON.parse(fs.readFileSync(stateFile));
     roleState.artifacts.runtimeStateMatrix = 'fixture-formal-matrix.json';
+    roleState.artifacts.intentBrief = 'fixture-intent.json'; write('fixture-intent.json', { sourceRequest: '测试示例任务和可观察状态变化', successCriteria: ['示例任务可执行'], acceptance: ['状态发生变化'] });
+    roleState.artifacts.evidenceProvenance = 'fixture-provenance.json'; write('fixture-provenance.json', { status: 'passed', entries: [{ id: 'fixture-browser', result: 'passed' }] });
     write('fixture-formal-matrix.json', { interactions: repeated.formalInteractions.journeys.map(item => ({ id: item.id, result: 'passed', evidence: item.evidence })) });
     commitRunState(runDir, roleState, { reason: 'test-formal-product-review' });
     const roleAuth = () => run('apex-router.mjs', ['authorize', project, runId, session, 'verify']);
@@ -261,14 +263,17 @@ try {
     const claim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, job.jobId, 'verify']);
     if (claim.status !== 'running') throw new Error('product reviewer must claim a running job');
     const productReview = repeated.formalInteractions.journeys.map(item => ({ task: item.task, interactionId: item.id, evidence: item.evidence, expectedOutcome: `示例任务“${item.task}”按合同改变状态`, observedOutcome: item.steps.map(step => `${JSON.stringify(step.before)} → ${JSON.stringify(step.after)}`).join('；'), rationale: '测试夹具中的动作与观察结果对应该示例任务', verdict: 'passed' }));
-    const advisory = { schemaVersion: '1.0', roleId: 'product-manager', stage: 'verify', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'product-observation', classification: 'fact', statement: '正式浏览器执行示例任务并观察到状态变化。', evidence: [roleState.artifacts.runtimeStateMatrix] }], recommendations: [{ id: 'product-result', choice: '确认示例任务的可观察结果。', rationale: '真实交互结果与演示任务一致。', acceptance: ['示例任务状态变化可见。'] }], execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'browser-fixture', sessionId: job.payload.agentSessionId, skillBindings: job.payload.skillBindings, leaseToken: claim.leaseToken }, status: 'ready', productReview };
+    const intent = JSON.parse(fs.readFileSync(path.join(runDir, roleState.artifacts.intentBrief)));
+    const requirementReview = ['successCriteria','acceptance'].flatMap(source => intent[source].map((criterion,index) => ({ source, index, criterion, verdict:'passed', productTasks:[], implementationTargets:[], evidenceIds:['fixture-browser'], rationale:'合成测试模拟逐项核对浏览器观察结果。', implementationRationale:'合成测试仅检查任务映射与校验流程。' })));
+    const requestCoverage = { verdict:'covered', rationale:'合成夹具模拟核对需求记录与产品方案的完整性。', unmappedRequirements:[] };
+    const advisory = { schemaVersion: '1.0', roleId: 'product-manager', stage: 'verify', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'product-observation', classification: 'fact', statement: '正式浏览器执行示例任务并观察到状态变化。', evidence: [roleState.artifacts.runtimeStateMatrix] }], recommendations: [{ id: 'product-result', choice: '确认示例任务的可观察结果。', rationale: '真实交互结果与演示任务一致。', acceptance: ['示例任务状态变化可见。'] }], execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'browser-fixture', sessionId: job.payload.agentSessionId, skillBindings: job.payload.skillBindings, leaseToken: claim.leaseToken }, status: 'ready', productReview, requirementReview, requestCoverage };
     const reviewInput = write('fixture-product-review.json', advisory);
     run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'record', runDir, 'verify', reviewInput]);
     if (agentRuntimeStatus(runDir, job.jobId).jobs[0].status !== 'succeeded') throw new Error('product review must settle its own durable job');
     for (const roleId of selection.selectedRoles.filter(id => id !== 'product-manager')) {
       const otherJob = agentRuntimeStatus(runDir).jobs.find(item => item.jobId === selection.agentJobs[roleId]);
       const otherClaim = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'agent-runtime.mjs', 'claim', runDir, otherJob.jobId, 'verify']);
-      const otherInput = write(`fixture-${roleId}-review.json`, { ...advisory, roleId, productReview: undefined, execution: { ...advisory.execution, sessionId: otherJob.payload.agentSessionId, skillBindings: otherJob.payload.skillBindings, leaseToken: otherClaim.leaseToken } });
+      const otherInput = write(`fixture-${roleId}-review.json`, { ...advisory, roleId, productReview: undefined, requirementReview: undefined, requestCoverage: undefined, execution: { ...advisory.execution, sessionId: otherJob.payload.agentSessionId, skillBindings: otherJob.payload.skillBindings, leaseToken: otherClaim.leaseToken } });
       run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'record', runDir, 'verify', otherInput]);
     }
     const summary = run('apex-action.mjs', ['run', project, runId, session, roleAuth().authorizationRef, 'verify', 'role-advisory.mjs', 'summarize', runDir, 'verify']);

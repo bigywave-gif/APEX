@@ -13,11 +13,12 @@ import { validateImplementationCoverage } from './implementation-coverage.mjs';
 import { formalRouteCoverage } from './formal-route-coverage.mjs';
 import { formalStitchProgress } from './formal-stitch-progress.mjs';
 import { formalDirectProgress } from './formal-direct-progress.mjs';
-import { validateFormalInteractionEvidence } from './formal-interaction-evidence.mjs';
+import { formalReviewArtifacts, validateFormalInteractionEvidence, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
 import { agentRuntimeStatus } from './run-ledger.mjs';
 import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
+import { validateRequirementReview } from './requirement-review.mjs';
 import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -183,12 +184,14 @@ function validateRoleStage(runDir, state, stage) {
   const registryFile = path.join(root, 'registry', 'agency-role-registry.json');
   const entry = manifest.stages?.[stage];
   if (manifest.registry?.sha256 !== hashFile(registryFile) || !entry || entry.status !== 'ready' || entry.selectedRoles.length !== entry.advisories.length) throw new Error(`controlled role advisory stage is incomplete or stale: ${stage}`);
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && stage === 'verify' && !entry.selectedRoles.includes('product-manager')) throw new Error('verification requires the product manager review');
   const summary = resolveArtifact(runDir, entry.summary, '');
   if (!summary.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(summary) || entry.summarySha256 !== hashFile(summary)) throw new Error(`controlled role decision summary is missing or stale: ${stage}`);
   if (state.artifacts?.roleDecisionSummaries?.[stage] !== entry.summary) throw new Error(`controlled role decision summary reference is stale: ${stage}`);
   const selectionFile = path.join(runDir, 'advisories', stage, 'selection.json');
   if (!fs.existsSync(selectionFile)) throw new Error(`controlled role selection is missing or stale: ${stage}`);
   const selection = readJson(selectionFile);
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && stage === 'verify' && formalReviewArtifacts.some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) throw new Error('verify role inputs must bind the current requirements, implementation and evidence');
   if (state.roleChain?.confirmationModel === 'two-confirmations' && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) throw new Error('implementation role inputs must bind the current source, dependency lock, visual bundle, and implementation map');
   if (!Array.isArray(selection.inputBindings) || selection.inputBindings.some(binding => {
     // The append-only visual-revision log is intentionally a role input
@@ -221,6 +224,7 @@ function validateRoleStage(runDir, state, stage) {
     const receipt = item.operationReceipt && operationIndex[item.operationReceipt];
     if (!file.startsWith(`${path.resolve(runDir)}${path.sep}`) || !fs.existsSync(file) || hashFile(file) !== item.sha256 || receipt?.status !== 'succeeded' || receipt.script !== 'role-advisory.mjs' || receipt.outputFileHashes?.[item.path] !== item.sha256) throw new Error(`controlled role advisory is missing, stale, or not a controlled output: ${item.roleId}`);
     const advisory = validateFile('role-advisory.schema.json', file);
+    if (stage === 'verify' && item.roleId === 'product-manager' && state.roleChain?.confirmationModel === 'two-confirmations') { validateProductTaskReview(runDir, state, advisory.productReview); validateRequirementReview(runDir, state, advisory.requirementReview, advisory.requestCoverage); }
     if (stage === 'baseline' && item.roleId === 'existing-baseline-analyst' && state.roleChain?.confirmationModel === 'two-confirmations') {
       const baseline = readJson(requireArtifact(runDir, state, 'existingBaseline', 'existing-baseline.json'));
       if (baseline.codeReference?.resourceReviewProtocol === '1.0') validateResourceReviews(readJson(requireArtifact(runDir, state, 'codeReference', 'code-reference.json')), advisory.resourceReviews);

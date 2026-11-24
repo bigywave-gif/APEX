@@ -159,6 +159,7 @@ for (const [name, script] of [
   ['implementation-coverage-contract', 'implementation-coverage-test.mjs'],
   ['formal-route-coverage-contract', 'formal-route-coverage-test.mjs'],
   ['formal-task-coverage-contract', 'formal-task-coverage-test.mjs'],
+  ['requirement-review-contract', 'requirement-review-test.mjs'],
   ['runtime-baseline-contract', 'runtime-baseline-contract-test.mjs'],
   ['stitch-screen-binding-contract', 'stitch-screen-binding-test.mjs'],
   ['external-submission-intent', 'external-submission-intent-test.mjs'],

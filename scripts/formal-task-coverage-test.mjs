@@ -50,8 +50,11 @@ try {
   const interactions = [{ id: 'add', result: 'passed', evidence: 'trace.json' }];
   assert.throws(() => formalReviewBindings(dir, state), /runtimeStateMatrix/);
   write('matrix.json', { interactions }); state.artifacts.runtimeStateMatrix = 'matrix.json';
+  write('intent.json', { successCriteria: ['添加项目'], acceptance: ['数量增加'] }); state.artifacts.intentBrief = 'intent.json';
+  write('implementation.json', { entries: [{ runtimeTarget: ['app.js'] }] }); state.artifacts.implementationMap = 'implementation.json';
+  write('provenance.json', { status: 'passed', entries: [{ id: 'browser', result: 'passed' }] }); state.artifacts.evidenceProvenance = 'provenance.json';
   const bound = formalReviewBindings(dir, state);
-  assert.deepEqual(bound.map(item => item.artifact), ['experienceStrategy', 'visualSandboxFiles', 'runtimeStateMatrix']);
+  assert.deepEqual(bound.map(item => item.artifact), ['experienceStrategy', 'visualSandboxFiles', 'runtimeStateMatrix', 'intentBrief', 'implementationMap', 'evidenceProvenance']);
   assert.equal(bound[2].sha256, digest('matrix.json'));
   fs.symlinkSync(os.tmpdir(), path.join(dir, 'outside'));
   state.artifacts.runtimeStateMatrix = 'outside';
