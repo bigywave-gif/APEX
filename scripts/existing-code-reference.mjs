@@ -11,7 +11,7 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '3';
+const CAPTURE_VERSION = '4';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -19,7 +19,54 @@ function fingerprint(file) { const stat = fs.statSync(file); return { dev: Strin
 function sameFingerprint(expected, file) { if (!expected || !fs.existsSync(file)) return false; const actual = fingerprint(file); return Object.entries(expected).every(([key, value]) => actual[key] === value); }
 function rel(root, file) { return path.relative(root, file).split(path.sep).join('/'); }
 function inside(root, file) { const resolved = path.resolve(file); return resolved === root || resolved.startsWith(`${root}${path.sep}`); }
-function resolveImport(projectRoot, from, specifier) { if (!specifier.startsWith('.')) return null; const base = path.resolve(path.dirname(from), specifier); const candidates = [base, ...extensions.map(ext => `${base}${ext}`), ...extensions.map(ext => path.join(base, `index${ext}`))]; return candidates.find(candidate => inside(projectRoot, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) || null; }
+function parseJsonComments(text) {
+  let out = '', quoted = false, escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i], next = text[i + 1];
+    if (quoted) { out += ch; if (escaped) escaped = false; else if (ch === '\\') escaped = true; else if (ch === '"') quoted = false; continue; }
+    if (ch === '"') { quoted = true; out += ch; continue; }
+    if (ch === '/' && next === '/') { i += 2; while (i < text.length && text[i] !== '\n') i++; out += '\n'; continue; }
+    if (ch === '/' && next === '*') { i += 2; while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++; if (i >= text.length) throw new Error('unterminated JSON comment'); i++; out += ' '; continue; }
+    if (ch === ',' && /^\s*[}\]]/.test(text.slice(i + 1))) continue;
+    out += ch;
+  }
+  return JSON.parse(out);
+}
+let compilerOptions = {}, tsconfigFile = null, configHash = null, configFiles = [], workspaces = new Map();
+function workspaceTarget(specifier) {
+  const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
+  const item = workspaces.get(name); if (!item) return null;
+  const suffix = specifier.slice(name.length), key = suffix ? `.${suffix}` : '.';
+  let target = item.manifest.exports?.[key];
+  if (key === '.' && typeof item.manifest.exports === 'string') target = item.manifest.exports;
+  if (key === '.' && !target) target = item.manifest.source || item.manifest.module || item.manifest.main;
+  while (target && typeof target === 'object' && !Array.isArray(target)) target = target.source || target.import || target.default || target.types;
+  if (typeof target !== 'string') return null;
+  const generated = path.resolve(item.dir, target), outDir = item.options.outDir && path.resolve(item.dir, item.options.outDir), rootDir = item.options.rootDir && path.resolve(item.dir, item.options.rootDir);
+  if (outDir && rootDir && inside(outDir, generated)) return path.join(rootDir, path.relative(outDir, generated));
+  return generated;
+}
+function resolveImport(projectRoot, from, specifier) {
+  const bases = [];
+  if (specifier.startsWith('.')) bases.push(path.resolve(path.dirname(from), specifier));
+  else {
+  const workspace = workspaceTarget(specifier); if (workspace) bases.push(workspace);
+  for (const [pattern, targets] of Object.entries(compilerOptions.paths || {})) {
+    if (!Array.isArray(targets)) continue;
+    const parts = pattern.split('*'); if (parts.length > 2 || !specifier.startsWith(parts[0]) || (parts.length === 2 && !specifier.endsWith(parts[1]))) continue;
+    if (parts.length === 1 && specifier !== pattern) continue;
+    const match = parts.length === 2 ? specifier.slice(parts[0].length, specifier.length - parts[1].length) : '';
+    for (const target of targets) if (typeof target === 'string') bases.push(path.resolve(projectRoot, compilerOptions.baseUrl || '.', target.replace('*', match)));
+  }
+  }
+  for (const base of bases) {
+    const stem = /\.(?:mjs|cjs|js|jsx)$/.test(base) ? base.replace(/\.(?:mjs|cjs|js|jsx)$/, '') : null;
+    const candidates = [base, ...(stem ? ['.ts', '.tsx', '.mts', '.cts'].map(ext => `${stem}${ext}`) : []), ...extensions.map(ext => `${base}${ext}`), ...extensions.map(ext => path.join(base, `index${ext}`))];
+    const found = candidates.find(candidate => inside(projectRoot, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+    if (found) return found;
+  }
+  return null;
+}
 function imports(projectRoot, file, content) {
   const found = new Set();
   // Keep the static forms separate from require()/dynamic import().  The old
@@ -41,10 +88,11 @@ function imports(projectRoot, file, content) {
   const localReference = value => {
     const clean = value.split(/[?#]/, 1)[0];
     if (!clean || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(clean)) return;
-    const target = clean.startsWith('/') ? path.resolve(projectRoot, `.${clean}`) : path.resolve(path.dirname(file), clean);
-    if (inside(projectRoot, target) && fs.existsSync(target) && fs.statSync(target).isFile()) found.add(target);
+    const targets = clean.startsWith('/') ? [path.resolve(projectRoot, `.${clean}`), path.resolve(projectRoot, 'public', `.${clean}`)] : [path.resolve(path.dirname(file), clean)];
+    const target = targets.find(candidate => inside(projectRoot, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) || (!clean.startsWith('.') && !clean.startsWith('/') ? resolveImport(projectRoot, file, clean) : null);
+    if (target) found.add(target);
   };
-  if (/\.html?$/i.test(file)) {
+  if (/\.(?:html?|vue|svelte)$/i.test(file)) {
     for (const match of content.matchAll(/<(link|script)\b[^>]*>/gi)) {
       const tag = match[0], attribute = match[1].toLowerCase() === 'link' ? 'href' : 'src';
       if (attribute === 'href' && !/\brel\s*=\s*["'][^"']*\bstylesheet\b/i.test(tag)) continue;
@@ -52,7 +100,7 @@ function imports(projectRoot, file, content) {
       if (source) localReference(source[1]);
     }
   }
-  if (/\.(?:css|scss|sass|less)$/i.test(file)) for (const match of content.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/gi)) localReference(match[1]);
+  if (/\.(?:css|scss|sass|less|vue|svelte)$/i.test(file)) for (const match of content.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/gi)) localReference(match[1]);
   return [...found];
 }
 function markers(content) { const text = content.toString('utf8'); const result = []; const tags = [...text.matchAll(/<([A-Za-z][\w.-]*)\b[^>]*>/g)].map(match => match[1]); const tests = [...text.matchAll(/data-testid=["']([^"']+)["']/g)].map(match => `testid:${match[1]}`); [...tags, ...tests].forEach((marker, index) => result.push({ marker: `${marker}#${index + 1}`, kind: marker.startsWith('testid:') ? 'test-anchor' : 'dom-element' })); return result; }
@@ -66,6 +114,31 @@ const entries = [...new Set(scope.codeEntrypoints || [])].map(item => path.resol
 if (!entries.length) die('baseline input must declare target codeEntrypoints');
 const realProjectRoot = fs.realpathSync(projectRoot);
 if (realProjectRoot !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('code reference must use the Router-authorized project');
+tsconfigFile = path.join(projectRoot, 'tsconfig.json');
+function projectConfig(file) { const real = fs.realpathSync(file); if (!inside(realProjectRoot, real)) throw new Error(`project configuration is outside the project: ${rel(projectRoot, file)}`); return fs.readFileSync(file, 'utf8'); }
+try {
+  if (fs.existsSync(tsconfigFile)) { compilerOptions = parseJsonComments(projectConfig(tsconfigFile)).compilerOptions || {}; configFiles.push(tsconfigFile); }
+  const manifestFile = path.join(projectRoot, 'package.json');
+  if (fs.existsSync(manifestFile)) {
+    const manifest = JSON.parse(projectConfig(manifestFile)); configFiles.push(manifestFile);
+    const patterns = Array.isArray(manifest.workspaces) ? manifest.workspaces : manifest.workspaces?.packages || [];
+    for (const pattern of patterns) {
+      if (typeof pattern !== 'string' || !/^[\w./-]+(?:\/\*)?$/.test(pattern)) continue;
+      const wildcard = pattern.endsWith('/*'), parent = path.resolve(projectRoot, wildcard ? pattern.slice(0, -2) : pattern);
+      if (!inside(projectRoot, parent) || !fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) continue;
+      const dirs = wildcard ? fs.readdirSync(parent, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => path.join(parent, entry.name)) : [parent];
+      for (const dir of dirs) {
+        const packageFile = path.join(dir, 'package.json'); if (!fs.existsSync(packageFile)) continue;
+        const workspaceManifest = JSON.parse(projectConfig(packageFile)); configFiles.push(packageFile);
+        const configFile = path.join(dir, 'tsconfig.json'); let options = {};
+        if (fs.existsSync(configFile)) { options = parseJsonComments(projectConfig(configFile)).compilerOptions || {}; configFiles.push(configFile); }
+        if (workspaceManifest.name) { if (workspaces.has(workspaceManifest.name)) throw new Error(`duplicate workspace name: ${workspaceManifest.name}`); workspaces.set(workspaceManifest.name, { dir, manifest: workspaceManifest, options }); }
+      }
+    }
+  }
+  configFiles = [...new Set(configFiles)].sort();
+  configHash = sha(JSON.stringify(configFiles.map(file => [rel(projectRoot, file), sha(projectConfig(file))])));
+} catch (error) { die(`cannot inspect project configuration: ${error.message}`); }
 function requireProjectSource(file) {
   try {
     const realFile = fs.realpathSync(file);
@@ -84,7 +157,7 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
   try {
     const prior = JSON.parse(fs.readFileSync(priorReferenceFile, 'utf8')); const index = JSON.parse(fs.readFileSync(integrityIndexFile, 'utf8'));
     const requestedEntries = entries.map(entry => rel(projectRoot, entry)).sort(); const indexedEntries = (index.entrypoints || []).slice().sort();
-    const scopeHash = sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: requestedEntries })));
+    const scopeHash = sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: requestedEntries, configHash })));
     const unchanged = prior.complete === true && index.captureVersion === CAPTURE_VERSION && index.scopeHash === scopeHash && JSON.stringify(requestedEntries) === JSON.stringify(indexedEntries) && (index.files || []).length === (prior.files || []).length && (index.files || []).every(item => sameFingerprint(item.sourceFingerprint, path.join(projectRoot, item.path)) && sameFingerprint(item.copyFingerprint, path.join(runDir, item.copyPath)));
     if (unchanged) {
       state.artifacts.codeReference = 'code-reference.json'; state.artifacts.pageSkeleton = 'page-skeleton.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
@@ -93,7 +166,7 @@ if (fs.existsSync(priorReferenceFile) && fs.existsSync(integrityIndexFile)) {
     }
   } catch { /* A malformed cache is never trusted; rebuild it below. */ }
 }
-const pending = [...entries]; const selected = new Set();
+const pending = [...entries, ...configFiles]; const selected = new Set();
 while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); const content = fs.readFileSync(file, 'utf8'); for (const dependency of imports(projectRoot, file, content)) if (!selected.has(dependency)) pending.push(dependency); }
 fs.mkdirSync(copies, { recursive: true });
 const aggregate = crypto.createHash('sha256'); let totalBytes = 0; const nodes = [];
@@ -115,7 +188,7 @@ const sourceTreeHash = `sha256:${aggregate.digest('hex')}`; const skeletonPayloa
 const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, excludedDirectories: [...ignored].sort() };
 if (!reference.scope.routes.length) die('baseline input must declare target routes');
 const output = path.join(runDir, 'code-reference.json'); const skeletonOutput = path.join(runDir, 'page-skeleton.json'); write(output, reference); write(skeletonOutput, { schemaVersion: '3.0', ...skeletonPayload, skeletonHash });
-write(integrityIndexFile, { schemaVersion: '3.0', captureVersion: CAPTURE_VERSION, capturedAt: new Date().toISOString(), purpose: 'fast-path-only; Gate validation recomputes all SHA-256 values', sourceTreeHash, scopeHash: sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints.slice().sort() }))), entrypoints: skeletonPayload.entrypoints, files: integrityFiles });
+write(integrityIndexFile, { schemaVersion: '3.0', captureVersion: CAPTURE_VERSION, capturedAt: new Date().toISOString(), purpose: 'fast-path-only; Gate validation recomputes all SHA-256 values', sourceTreeHash, scopeHash: sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints.slice().sort(), configHash }))), entrypoints: skeletonPayload.entrypoints, files: integrityFiles });
 for (const [schema, file] of [['code-reference.schema.json', output], ['page-skeleton.schema.json', skeletonOutput]]) { const result = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'validate', schema, file], { encoding: 'utf8' }); if (result.status !== 0) die((result.stderr || result.stdout).trim()); }
 state.artifacts.codeReference = 'code-reference.json'; state.artifacts.pageSkeleton = 'page-skeleton.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
 console.log(JSON.stringify({ codeReference: output, pageSkeleton: skeletonOutput, complete: true, sourceFileCount: files.length, totalBytes, sourceTreeHash, skeletonHash }));

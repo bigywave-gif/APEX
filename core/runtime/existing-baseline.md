@@ -6,6 +6,8 @@ Existing 基线必须同时读取“目标范围完整代码”和“真实前�
 
 发现阶段排除 `.worktrees` 和具有 `pyvenv.cfg` 标记的 Python 虚拟环境，并在清单的 `ignoredPaths` 中记录；`complete` 仅表示这些排除规则以内的扫描没有截断，不证明被排除内容已纳入项目。明确位于其他 worktree 的任务应以该 worktree 自身作为项目根目录。
 
+目标代码引用解析相对静态导入、根 `tsconfig.json` 中声明的简单路径别名、常见 `.js` 到 TypeScript 源文件的映射、根 package 声明的单层 workspace 导出，以及根目录或 `public` 中的 HTML 脚本和样式；相关配置文件纳入冻结，变更时重建缓存。该静态解析不证明任意动态导入、嵌套配置继承、所有构建器别名或非常规 workspace 导出已覆盖；产品和前端角色须结合实际构建配置及运行页面核对，发现缺口时扩大目标引用并重采，不能仅凭 `complete` 宣称所有依赖均已验证。
+
 这两个脚本均只能使用 `collect_existing_baseline` 授权，经 Action Gateway 运行：
 
 ```text
