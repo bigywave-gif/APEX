@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -129,6 +130,33 @@ try {
     completeAgentAdvisory(unfencedRoot, item.jobId, { ...args, leaseToken: current.leaseToken });
     assert.equal(agentRuntimeStatus(unfencedRoot, item.jobId).jobs[0].status, 'succeeded');
   } finally { fs.rmSync(unfencedRoot, { recursive: true, force: true }); }
+  const inputRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-agent-stale-input-'));
+  try {
+    const input = path.join(inputRoot, 'contract.json'); fs.writeFileSync(input, 'original');
+    const digest = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+    const bindings = [{ artifact: 'deliveryContract', path: 'contract.json', sha256: digest('original') }];
+    registerAgent(inputRoot, { agentId: 'reviewer', vocation: 'review', stage: 'gate1' });
+    const item = enqueueAgentJob(inputRoot, { agentId: 'reviewer', stage: 'gate1', inputHash: digest(JSON.stringify(bindings)), payload: { inputBindings: bindings } });
+    const lease = claimAgentJob(inputRoot, item.jobId);
+    const output = path.join(inputRoot, 'advisories', 'gate1', 'reviewer.json');
+    fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, 'prior');
+    const args = { leaseToken: lease.leaseToken, output, content: 'new', inputTokens: 1, outputTokens: 1, limit: 100 };
+    fs.writeFileSync(input, 'changed');
+    assert.throws(() => completeAgentAdvisory(inputRoot, item.jobId, args), /input changed before advisory completion/);
+    assert.equal(fs.readFileSync(output, 'utf8'), 'prior');
+    assert.equal(agentRuntimeStatus(inputRoot, item.jobId).jobs[0].status, 'running');
+    fs.writeFileSync(input, 'original');
+    completeAgentAdvisory(inputRoot, item.jobId, args);
+    assert.equal(fs.readFileSync(output, 'utf8'), 'new');
+    registerAgent(inputRoot, { agentId: 'designer', vocation: 'design', stage: 'visual' });
+    const visual = enqueueAgentJob(inputRoot, { agentId: 'designer', stage: 'visual', inputHash: digest('[]'), payload: { inputBindings: [] } });
+    const visualLease = claimAgentJob(inputRoot, visual.jobId);
+    const visualOutput = path.join(inputRoot, 'advisories', 'visual', 'designer.json'); fs.mkdirSync(path.dirname(visualOutput), { recursive: true });
+    const visualArgs = { ...args, leaseToken: visualLease.leaseToken, output: visualOutput };
+    const revision = path.join(inputRoot, 'prompt-revisions.ndjson'); fs.writeFileSync(revision, '{}\n');
+    assert.throws(() => completeAgentAdvisory(inputRoot, visual.jobId, visualArgs), /input appeared before advisory completion/);
+    fs.rmSync(revision); completeAgentAdvisory(inputRoot, visual.jobId, visualArgs);
+  } finally { fs.rmSync(inputRoot, { recursive: true, force: true }); }
   const status = agentRuntimeStatus(root); assert.equal(status.counts['dead-letter'], 1); assert.equal(status.counts.succeeded, 3); assert.equal(status.tokenUsage.gate1, 30); assert.equal(status.sessions.length, 1); assert.equal(status.sessions[0].agentId, 'backend-engineer'); assert.equal(status.jobs.find(job => job.jobId === second.jobId).payload.agentSessionId, status.sessions[0].sessionId);
   // Real processes race the same ledger; no pair may both consume the last allowance.
   const moduleUrl = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-ledger.mjs')).href;

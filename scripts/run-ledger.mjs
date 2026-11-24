@@ -10,8 +10,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { reserveProjectExternalIntent, releaseUnsubmittedProjectIntent, updateProjectExternalObservation } from './project-external-registry.mjs';
+import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 
 const STATE_FILE = 'state.json';
 const LEDGER_FILE = 'run-ledger.sqlite';
@@ -795,6 +797,21 @@ export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, conte
     database.exec('BEGIN IMMEDIATE');
     const job = database.prepare('SELECT * FROM agent_jobs WHERE job_id = ?').get(jobId);
     assertCurrentAgentLease(job, jobId, leaseToken);
+    const jobPayload = parseJson(job.payload_json), bindings = jobPayload?.inputBindings;
+    if (bindings !== undefined) {
+      if (!Array.isArray(bindings) || hash(JSON.stringify(bindings)) !== job.input_hash) throw new Error('agent job frozen input identity is invalid');
+      const root = fs.realpathSync(runDir), state = JSON.parse(latestSnapshot(database)?.state_json || '{}');
+      if (jobPayload.registrySha256 && hash(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'registry', 'agency-role-registry.json'))) !== jobPayload.registrySha256) throw new Error('agent job role registry changed before advisory completion');
+      const revisionArtifact = job.stage === 'visual' ? 'visualRevision' : job.stage === 'verify' && state.roleChain?.confirmationModel === 'two-confirmations' ? 'requirementRevisions' : null;
+      if (revisionArtifact && fs.existsSync(path.join(root, 'prompt-revisions.ndjson')) && !bindings.some(binding => binding.artifact === revisionArtifact)) throw new Error(`agent job input appeared before advisory completion: ${revisionArtifact}`);
+      for (const binding of bindings) {
+        const file = typeof binding?.path === 'string' && !path.isAbsolute(binding.path) ? path.resolve(root, binding.path) : null;
+        if (!file || !file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`) || !fs.statSync(file).isFile()) throw new Error(`agent job input is missing or outside the run: ${binding?.artifact || 'unknown'}`);
+        if (!['visualRevision', 'requirementRevisions'].includes(binding.artifact) && state.artifacts && state.artifacts[binding.artifact] !== binding.path) throw new Error(`agent job input reference changed: ${binding.artifact}`);
+        const current = binding.artifact === 'visualRevision' ? visualRevisionBindingCurrent(file, binding.sha256) : hash(fs.readFileSync(file)) === binding.sha256;
+        if (!current) throw new Error(`agent job input changed before advisory completion: ${binding.artifact}`);
+      }
+    }
     const destination = path.resolve(output);
     const expected = path.resolve(runDir, 'advisories', job.stage, `${job.agent_id}.json`);
     if (destination !== expected || !destination.startsWith(`${path.resolve(runDir)}${path.sep}`)) throw new Error('advisory output does not match its job');

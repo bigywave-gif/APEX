@@ -12,6 +12,7 @@ import { resolveTasteSkill, loadTasteSkill, requiredTasteLoadCurrent, optionalSk
 import { formalReviewBindings, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { validateRequirementReview } from './requirement-review.mjs';
 import { validateResourceReviews } from './existing-resource-freshness.mjs';
+import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const registryFile = path.join(apexRoot, 'registry', 'agency-role-registry.json');
@@ -206,6 +207,13 @@ function rebudget(runDir, stage) {
   console.log(JSON.stringify({ stage, selection: path.join(stageDirectory(runDir, stage), 'selection.json'), tokenBudget: selection.tokenBudget, jobs: pendingJobIds, status: 'rebudgeted' }));
 }
 function recordChecked(runDir, stage, selection, advisory) {
+  const current = currentSelectionInputs(runDir, stage);
+  const expectedBindings = selection.inputBindings || [];
+  const actualBindings = current.bindings.map(binding => {
+    const expected = expectedBindings.find(item => item.artifact === binding.artifact);
+    return binding.artifact === 'visualRevision' && expected && visualRevisionBindingCurrent(path.resolve(runDir, binding.path), expected.sha256) ? { ...binding, sha256: expected.sha256 } : binding;
+  });
+  if (JSON.stringify(selection.selectedRoles) !== JSON.stringify(current.selectedRoles) || JSON.stringify(expectedBindings) !== JSON.stringify(actualBindings) || selection.registry?.sha256 !== hash(registryFile)) die(`role selection inputs changed for ${stage}; repair before recording`);
   if (stage === 'verify' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') {
     const file = path.join(runDir, 'prompt-revisions.ndjson'), binding = selection.inputBindings?.find(item => item.artifact === 'requirementRevisions');
     if (fs.existsSync(file) ? !binding || binding.path !== 'prompt-revisions.ndjson' || binding.sha256 !== hash(file) : Boolean(binding)) die('verification role revision input changed; repair the selection before recording');
@@ -240,6 +248,7 @@ function recordChecked(runDir, stage, selection, advisory) {
     const job = agentRuntimeStatus(runDir, jobId).jobs[0];
     if (!job || job.agentId !== advisory.roleId || job.stage !== stage) die(`dedicated Agent job does not match advisory: ${advisory.roleId}`);
     if (job.status !== 'running') die(`dedicated Agent job must be claimed before advisory recording: ${advisory.roleId}/${job.status}`);
+    if (JSON.stringify(job.payload?.inputBindings) !== JSON.stringify(expectedBindings) || job.payload?.registrySha256 !== selection.registry?.sha256) die(`dedicated Agent job inputs do not match selection: ${advisory.roleId}`);
     if (stage === 'visual' && advisory.roleId === 'ui-designer' && (!job.payload?.tasteSkill || JSON.stringify(job.payload.tasteSkill) !== JSON.stringify(selection.tasteSkill))) die('visual UI designer job is missing or has an inconsistent required taste-skill binding');
     if (advisory.execution.sessionId !== job.payload?.agentSessionId) die(`advisory session does not match claimed Agent job: ${advisory.roleId}`);
     if (JSON.stringify(advisory.execution.skillBindings || []) !== JSON.stringify(job.payload?.skillBindings || [])) die(`advisory Skill bindings do not match claimed Agent job: ${advisory.roleId}`);
