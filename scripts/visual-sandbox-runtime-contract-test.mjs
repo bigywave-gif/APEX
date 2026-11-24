@@ -46,12 +46,31 @@ try {
     fs.unlinkSync(alias); fs.writeFileSync(manifestFile, original);
   } finally { fs.rmSync(foreign, { recursive: true, force: true }); }
   const authorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'runtime start authorization');
+  const concurrentAuthorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'concurrent runtime start authorization');
   // PM2-style runtime writes are deliberately outside the frozen formal source
   // closure. They must not make a run-local Demo look like it edited production
   // code while the action is in flight.
   spawn(process.execPath, ['-e', `const fs=require('fs'); const data=${JSON.stringify(path.join(project, 'data', 'runtime.json'))}; const log=${JSON.stringify(path.join(project, 'logs', 'output.log'))}; setTimeout(()=>fs.writeFileSync(data, '{"revision":1}\\n'), 20); setTimeout(()=>fs.appendFileSync(log, 'tick\\n'), 60);`], { detached: true, stdio: 'ignore' }).unref();
-  const output = expect(run(action, ['run', project, 'run-runtime', 'session-runtime', authorization.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir]), 'run-local runtime start');
+  const start = reference => new Promise((resolve, reject) => { const child = spawn(process.execPath, [action, 'run', project, 'run-runtime', 'session-runtime', reference, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir], { stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', data => stdout += data); child.stderr.on('data', data => stderr += data); child.on('error', reject); child.on('close', status => resolve({ status, stdout, stderr })); });
+  const concurrentStarts = await Promise.all([start(authorization.authorizationRef), start(concurrentAuthorization.authorizationRef)]);
+  const successes = concurrentStarts.filter(item => item.status === 0).map(item => JSON.parse(item.stdout));
+  if (!successes.length || new Set(successes.map(item => item.pid)).size !== 1 || concurrentStarts.some(item => item.status !== 0 && !/another runtime start is active|state.*changed|already failed|projection/i.test(item.stderr))) throw new Error(`concurrent runtime starts were not safely serialized: ${JSON.stringify(concurrentStarts)}`);
+  const output = successes[0];
   const receipt = JSON.parse(fs.readFileSync(output.visualSandboxRuntime, 'utf8')); pids.push(receipt.pid);
+  const lockPath = path.join(runDir, 'runtime-start-lock.sqlite');
+  const holder = spawn(process.execPath, ['--input-type=module', '-e', `import { DatabaseSync } from 'node:sqlite'; const db = new DatabaseSync(process.argv[1]); db.exec('BEGIN IMMEDIATE'); process.send('locked'); setInterval(() => {}, 1000);`, lockPath], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  try {
+    await new Promise((resolve, reject) => { const timeout = setTimeout(() => reject(new Error('test lock was not acquired')), 5000); holder.once('message', () => { clearTimeout(timeout); resolve(); }); holder.once('error', error => { clearTimeout(timeout); reject(error); }); });
+    const blockedAuth = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'locked runtime authorization');
+    const blocked = run(action, ['run', project, 'run-runtime', 'session-runtime', blockedAuth.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir]);
+    if (blocked.status === 0 || !blocked.stderr.includes('another runtime start is active')) throw new Error('a held runtime lock must prevent another start');
+    const exited = new Promise(resolve => holder.once('exit', resolve)); holder.kill('SIGKILL'); await exited;
+    const unblocked = expect(run(router, ['status', project, 'run-runtime', 'session-runtime']), 'released runtime lock status');
+    if (unblocked.executionDirective?.blockingOperation?.category === 'runtime-start-locked') throw new Error('released runtime lock must not remain a terminal blocker');
+    const retryAuth = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'released runtime lock authorization');
+    const retried = expect(run(action, ['run', project, 'run-runtime', 'session-runtime', retryAuth.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir]), 'retry after lock owner exits');
+    if (!retried.reused || retried.pid !== receipt.pid) throw new Error('retry after lock owner exit must reuse the existing service');
+  } finally { if (holder.exitCode === null && holder.signalCode === null) holder.kill('SIGKILL'); }
   const serviceRegistry = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-services.json'), 'utf8'));
   if (!output.url || await fetchStatus(output.url) !== 200 || !fs.existsSync(path.join(runDir, 'visual-sandbox-runtime.json')) || JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime !== 'visual-sandbox-runtime.json' || serviceRegistry.services?.[0]?.record !== 'visual-sandbox-runtime.json' || serviceRegistry.services?.[0]?.pid !== receipt.pid) throw new Error('runtime start must write a reachable, current-run-only Demo URL, artifact, and service registry');
   const sandbox = path.join(runDir, 'visual-sandbox');
@@ -89,7 +108,7 @@ try {
   if (formalReceipt.productionBoundary?.snapshotMode !== 'formal-source-discovery' || formalReceipt.productionBoundary?.changedFiles?.[0]?.path !== 'server/api.js' || !String(formalReceipt.stderr).includes('server/api.js')) throw new Error('a formal source boundary failure must identify its protected snapshot mode and exact changed file');
   pids.push(JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-runtime.json'), 'utf8')).pid);
   if (fs.existsSync(path.join(project, 'index.html'))) throw new Error('runtime start must not materialize files outside the run-local sandbox');
-  console.log(JSON.stringify({ status: 'passed', checks: 11 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 14 }));
 } finally {
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch {} }
   fs.rmSync(project, { recursive: true, force: true });

@@ -11,6 +11,7 @@ import { readRunState, recordArtifact, agentRuntimeStatus, pendingRevisionTransa
 import { requiredTasteLoadCurrent, optionalSkillLoadCurrent, resolveTasteSkill, availableAgentSkills } from './required-visual-skill.mjs';
 import { recordLateCancelledOperation } from './cancelled-operation-finalizer.mjs';
 import { runControlledSubprocess } from './controlled-subprocess.mjs';
+import { runtimeStartLockAvailable } from './runtime-start-lock.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
@@ -145,7 +146,7 @@ function runInputHashes() {
   // Ledger files are control-plane durability data, not business/action
   // inputs. Including WAL churn here makes an identical failed operation look
   // different merely because authorization or recovery appended an event.
-  const ignoredFiles = new Set(['events.ndjson', 'operations-index.json', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal', 'ledger-established.json']);
+  const ignoredFiles = new Set(['events.ndjson', 'operations-index.json', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal', 'runtime-start-lock.sqlite', 'runtime-start-lock.sqlite-journal', 'runtime-start-lock.sqlite-wal', 'runtime-start-lock.sqlite-shm', 'ledger-established.json']);
   const hashes = {};
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -271,7 +272,11 @@ const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: curre
 // another token after the same deterministic failure.
 const operationKey = digest({ runId, action, script, fingerprint, stateHash, inputDigest });
 const priorFailure = failedOperationWithSameKey(operationKey);
-if (priorFailure) fail(`an identical controlled operation already failed or was interrupted (${priorFailure}); inspect its outcome and change the observed cause, state, or input before requesting another retry`);
+if (priorFailure) {
+  const prior = JSON.parse(fs.readFileSync(path.join(runDirectory, priorFailure), 'utf8'));
+  const releasedRuntimeLock = script === 'visual-sandbox-runtime.mjs' && scriptArgs[0] === 'start' && prior.status === 'failed' && /another runtime start is active or its lock is unavailable/.test(prior.stderr || '') && runtimeStartLockAvailable(runDirectory);
+  if (!releasedRuntimeLock) fail(`an identical controlled operation already failed or was interrupted (${priorFailure}); inspect its outcome and change the observed cause, state, or input before requesting another retry`);
+}
 const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
 let localProcessIdentity = null;

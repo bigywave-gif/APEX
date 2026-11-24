@@ -8,6 +8,7 @@ import http from 'node:http';
 import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
+import { acquireRuntimeStartLock } from './runtime-start-lock.mjs';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
@@ -71,6 +72,10 @@ if (command === 'serve') {
   if (command !== 'start' || !arg || (portArg && portArg !== '--bind-host')) die('usage: start <run-dir> [--bind-host 127.0.0.1|::1]');
   const runDir = path.resolve(arg); try { requireRouterAction(runDir, 'generate_visual'); } catch (error) { die(error.message); }
   const { runId } = assertCurrentRun(runDir);
+  let startLock;
+  try { startLock = acquireRuntimeStartLock(runDir); }
+  catch (error) { die(`another runtime start is active or its lock is unavailable: ${error.message}`); }
+  try {
   const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
   const filesRef = state.artifacts?.visualSandboxFiles;
   const filesManifest = filesRef && inside(runDir, filesRef);
@@ -117,4 +122,5 @@ if (command === 'serve') {
   try { commitRunState(runDir, state, { reason: 'visual-sandbox-runtime-state-update', expectedStateHash }); }
   catch (error) { child.kill('SIGTERM'); throw error; }
   console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url, pid: child.pid, reused: false }));
+  } finally { try { startLock.exec('ROLLBACK'); } finally { startLock.close(); } }
 }

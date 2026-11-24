@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { demoPresentation, verifyChatPresentation } from './chat-demo.mjs';
 import { observedControlCoverageStatus, validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
+import { runtimeStartLockAvailable } from './runtime-start-lock.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -136,6 +137,7 @@ function failureCategory(receipt) {
     return 'production-boundary';
   }
   if (/(?:stage|run)-token-budget-exhausted/i.test(evidence)) return 'token-budget-exhausted';
+  if (/another runtime start is active or its lock is unavailable/i.test(evidence)) return 'runtime-start-locked';
   if (/required taste-skill changed after role selection/i.test(evidence)) return 'required-skill-drift';
   if (/required taste-skill (?:is not installed|is empty)/i.test(evidence)) return 'required-skill-unavailable';
   if (/optional agent skill is missing or changed/i.test(evidence)) return 'optional-skill-unavailable';
@@ -2250,7 +2252,8 @@ function executionDirective(state, runDir = null) {
       }
     } catch {}
   }
-  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || latestFailure?.category === 'obsolete-boundary-snapshot');
+  const releasedRuntimeStart = action === 'generate_visual' && latestFailure?.category === 'runtime-start-locked' && latestFailure.script === 'visual-sandbox-runtime.mjs' && runtimeStartLockAvailable(runDir);
+  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || releasedRuntimeStart || latestFailure?.category === 'obsolete-boundary-snapshot');
   const blockingOperation = continuationStall(runDir, action, currentStep.id) || (automaticallyRemediableFailure ? null : latestFailure);
   return {
     kind: 'must-complete-before-user-response',
