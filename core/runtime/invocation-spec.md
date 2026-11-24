@@ -39,7 +39,7 @@ APEX 在 Gate 1 前还会生成 `intent-brief.json` 和 `delivery-contract.json`
 
 新建 Run 默认启用 `roleChain` 1.1。它将代码库调研、产品、交付、后端、UX、UI、前端、图表/动效（按需）、QA、实施规划、代码审查、证据收集与现实核验串联为**阶段内自动工作**。每个角色必须产生带输入哈希、事实/推断分类、证据、选择理由、验收条件与实际 Token 用量的 `role-advisory`；每项选择还必须对应同一 Run Ledger 内成功结算的专属 Agent Job。`role-advisory-manifest.json` 记录选中角色、版本和上游来源提交；Router 会同时校验 advisory 回执、选择清单和 Job 成功状态。Router 是唯一 Gate、状态与实施授权方，角色不能修改正式项目代码、安装依赖、创建确认或批准方案。
 
-已登记的独立宿主调用用量未知、且没有可保留的尝试预算时，预算准入须保持阻断。取得可信用量后，以当前授权阶段调用 `agent-runtime.mjs reconcile-observed-usage <run-dir> <current-stage> <observation-key> <usage-json>`；JSON 包含原调用的 `stage`、`inputTokens`、`outputTokens`、`usageSource`（`provider-reported` 或 `estimated`）及 `evidence`。同一补账可幂等重放，冲突数据不得覆盖；无法核实的用量保持未知。
+已登记的独立宿主调用用量未知、且没有可保留的尝试预算时，预算准入须保持阻断。已领取任务可以按实际用量完成结算；新任务仍须等待未知用量核实，不能据此推断运行中的宿主调用已停止。取得可信用量后，以当前授权阶段调用 `agent-runtime.mjs reconcile-observed-usage <run-dir> <current-stage> <observation-key> <usage-json>`；JSON 包含原调用的 `stage`、`inputTokens`、`outputTokens`、`usageSource`（`provider-reported` 或 `estimated`）及 `evidence`。同一补账可幂等重放，冲突数据不得覆盖；无法核实的用量保持未知。
 
 角色结果只在 Gate 汇总展示：Gate 1 和视觉方案须将当前阶段的“内部专业协作摘要”写入完整人类可读正文，实施与验证摘要进入相应冻结/证据工件。用户不会为单个角色确认，也不会看到“继续”。任何已选中角色失败都必须保留受控失败回执并由 Router 输出真实阻断；不得写入 `unverified` advisory、不得降级汇总、更不得把失败转成确认或继续。旧 Run 未启用 `roleChain` 时保持可恢复，以确保 Core 升级不破坏既有任务。
 

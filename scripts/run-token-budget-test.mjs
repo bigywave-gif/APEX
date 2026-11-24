@@ -46,6 +46,15 @@ try {
     assert.equal(reconcileObservedTokenUsage(hostUnknown, correction).status, 'reconciled'); assert.equal(reconcileObservedTokenUsage(hostUnknown, correction).status, 'already-reconciled');
     assert.throws(() => reconcileObservedTokenUsage(hostUnknown, { ...correction, inputTokens: 21 }), /already reconciled/);
     const released = claimAgentJob(hostUnknown, pending.jobId); assert.equal(released.status, 'running'); assert.equal(released.runBudget.used, 25); assert.equal(released.runBudget.unboundedOtherUsage, 0);
+    recordObservedTokenUsage(hostUnknown, { stage: 'gate1', observationKey: 'host_late_unknown_001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown' });
+    registerAgent(hostUnknown, { agentId: 'host-late-next', vocation: 'review', stage: 'implementation' });
+    const next = enqueueAgentJob(hostUnknown, { agentId: 'host-late-next', stage: 'implementation', inputHash: 'next', payload: { tokenBudget: 10, stageTokenBudget: 100 } });
+    assert.equal(claimAgentJob(hostUnknown, next.jobId).reason, 'run-budget-unknown-usage', 'late unknown host use fences new claims even while an existing reservation is running');
+    const settled = settleAgentJob(hostUnknown, pending.jobId, { status: 'succeeded', leaseToken: released.leaseToken, usage: { inputTokens: 5, outputTokens: 5, usageSource: 'provider-reported' } });
+    assert.equal(settled.jobs[0].status, 'succeeded', 'already completed work may settle its actual usage while subsequent claims remain fenced');
+    assert.equal(claimAgentJob(hostUnknown, next.jobId).reason, 'run-budget-unknown-usage');
+    reconcileObservedTokenUsage(hostUnknown, { stage: 'gate1', observationKey: 'host_late_unknown_001', inputTokens: 7, outputTokens: 3, usageSource: 'provider-reported', evidence: 'late host receipt fixture' });
+    const afterLate = claimAgentJob(hostUnknown, next.jobId); assert.equal(afterLate.status, 'running'); assert.equal(afterLate.runBudget.used, 45);
   } finally { fs.rmSync(hostUnknown, { recursive: true, force: true }); }
   const hostStage = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-host-stage-unknown-'));
   try {

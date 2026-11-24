@@ -141,6 +141,12 @@ try {
   const missingKeyClaim = invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual']);
   assert.notEqual(missingKeyClaim.status, 0); assert.match(missingKeyClaim.stderr, /durable claim key is required/);
   assert.equal(agentRuntimeStatus(runDir, jobId).jobs[0].status, 'queued');
+  expect(invoke(authorize(), 'agent-runtime.mjs', ['tokens-observed', runDir, 'visual', 'late_unknown_host_001', '0', '0', 'unknown']), 'record another unmeasured host call');
+  const unknownClaim = invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]);
+  assert.notEqual(unknownClaim.status, 0); assert.match(unknownClaim.stderr, /stage-budget-unknown-usage/);
+  assert.equal(agentRuntimeStatus(runDir, jobId).jobs[0].status, 'queued');
+  const correction = { stage: 'visual', inputTokens: 0, outputTokens: 0, usageSource: 'estimated', evidence: 'isolated retry fixture' };
+  expect(invoke(authorize(), 'agent-runtime.mjs', ['reconcile-observed-usage', runDir, 'visual', 'late_unknown_host_001', JSON.stringify(correction)]), 'reconcile blocked host usage');
   const claimAuth = authorize();
   const claimed = expect(invoke(claimAuth, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'claim design role');
   assert.equal(claimed.dispatchDirective, 'start-once'); assert.equal(claimed.idempotent, false);
