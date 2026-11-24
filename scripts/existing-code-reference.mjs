@@ -12,7 +12,7 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '7';
+const CAPTURE_VERSION = '8';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -129,8 +129,24 @@ if (!entries.length) die('baseline input must declare target codeEntrypoints');
 const realProjectRoot = fs.realpathSync(projectRoot);
 if (realProjectRoot !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('code reference must use the Router-authorized project');
 tsconfigFile = path.join(projectRoot, 'tsconfig.json');
+const absentConfigCandidates = new Set();
 function projectConfig(file) { const real = fs.realpathSync(file); if (!inside(realProjectRoot, real)) throw new Error(`project configuration is outside the project: ${rel(projectRoot, file)}`); return fs.readFileSync(file, 'utf8'); }
 try {
+  for (const entry of entries) {
+    if (!inside(projectRoot, entry)) throw new Error('target code entrypoint is outside the project');
+    let current = path.dirname(entry);
+    while (inside(projectRoot, current)) {
+      for (const name of ['package.json', 'tsconfig.json']) {
+        const file = path.join(current, name);
+        let present = false;
+        try { fs.lstatSync(file); present = true; } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+        if (present) { projectConfig(file); configFiles.push(file); }
+        else absentConfigCandidates.add(rel(projectRoot, file));
+      }
+      if (current === projectRoot) break;
+      current = path.dirname(current);
+    }
+  }
   if (fs.existsSync(tsconfigFile)) { compilerOptions = parseJsonComments(projectConfig(tsconfigFile)).compilerOptions || {}; configFiles.push(tsconfigFile); }
   const manifestFile = path.join(projectRoot, 'package.json');
   if (fs.existsSync(manifestFile)) {
@@ -207,7 +223,7 @@ const files = [...selected].sort((a, b) => rel(projectRoot, a).localeCompare(rel
 });
 if (!nodes.length) die('target code closure has no mappable page skeleton nodes');
 const sourceTreeHash = `sha256:${aggregate.digest('hex')}`; const skeletonPayload = { sourceTreeHash, entrypoints: entries.map(entry => rel(projectRoot, entry)), nodes }; const skeletonHash = sha(Buffer.from(JSON.stringify(skeletonPayload)));
-const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
+const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, absentConfigCandidates: [...absentConfigCandidates].sort(), unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
 if (!reference.scope.routes.length) die('baseline input must declare target routes');
 const output = path.join(runDir, 'code-reference.json'); const skeletonOutput = path.join(runDir, 'page-skeleton.json'); write(output, reference); write(skeletonOutput, { schemaVersion: '3.0', ...skeletonPayload, skeletonHash });
 write(integrityIndexFile, { schemaVersion: '3.0', captureVersion: CAPTURE_VERSION, capturedAt: new Date().toISOString(), purpose: 'fast-path-only; Gate validation recomputes all SHA-256 values', sourceTreeHash, scopeHash: sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints.slice().sort(), configHash, publicRoots }))), entrypoints: skeletonPayload.entrypoints, files: integrityFiles, missingCandidates: [...new Set([...missingResources.values()].flatMap(item => item.candidates))] });

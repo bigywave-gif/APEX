@@ -13,6 +13,7 @@
     "totalBytes": { "type": "integer", "minimum": 1 },
     "sourceTreeHash": { "type": "string", "minLength": 1 },
     "excludedDirectories": { "type": "array", "items": { "type": "string" } },
+    "absentConfigCandidates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "unresolvedResources": { "type": "array", "items": { "type": "object", "required": ["source", "reference", "candidates"], "properties": { "source": { "type": "string", "minLength": 1 }, "reference": { "type": "string", "minLength": 1 }, "candidates": { "type": "array", "items": { "type": "string", "minLength": 1 } } } } },
     "files": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["path", "sha256", "bytes", "copyPath"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "minLength": 1 }, "bytes": { "type": "integer", "minimum": 0 }, "copyPath": { "type": "string", "minLength": 1 }, "language": { "type": "string" } } } }
   }

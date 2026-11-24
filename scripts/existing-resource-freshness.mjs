@@ -78,3 +78,16 @@ export function newlyAvailableResources(reference, projectRoot, allowed = new Se
   }
   return [...result].sort();
 }
+
+export function newlyAvailableConfigs(reference, projectRoot, allowed = new Set()) {
+  if (reference.absentConfigCandidates === undefined) return [];
+  if (!Array.isArray(reference.absentConfigCandidates)) throw new Error('absent configuration candidates are invalid');
+  const root = path.resolve(projectRoot), result = new Set();
+  for (const candidate of reference.absentConfigCandidates) {
+    if (typeof candidate !== 'string' || !candidate || path.isAbsolute(candidate) || !['package.json', 'tsconfig.json'].includes(path.basename(candidate))) throw new Error('absent configuration candidate is invalid');
+    const file = path.resolve(root, candidate);
+    if (!file.startsWith(`${root}${path.sep}`)) throw new Error('absent configuration candidate escapes the project');
+    try { fs.lstatSync(file); if (!allowed.has(candidate)) result.add(candidate); } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  }
+  return [...result].sort();
+}

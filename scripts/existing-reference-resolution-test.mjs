@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { newlyAvailableResources, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, newlyAvailableConfigs, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
 import { assessResourceVerification, observeResourceImages, observeResourceExemptions, observeBackgroundImages, resourceVerificationBinding, resourceImageProbeCode } from './existing-resource-runtime.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -183,5 +183,23 @@ try {
   const nestedScope = path.join(dir, 'nested-scope.json'); fs.writeFileSync(nestedScope, JSON.stringify({ routes: ['/'], codeEntrypoints: ['apps/client/src/main.tsx'] }));
   action('existing-code-reference.mjs', ['capture', dir, project, nestedScope]);
   assert.ok(paths().has('apps/client/public/avatar.png'), 'cross-workspace CSS must bind the target application public resource');
+  assert.ok(paths().has('apps/client/package.json'), 'entrypoint package must be frozen even when it is not declared in root workspaces');
+  const nestedReference = JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json')));
+  assert.ok(nestedReference.absentConfigCandidates.includes('apps/client/tsconfig.json'));
+  put('apps/client/tsconfig.json', '{"compilerOptions":{}}');
+  assert.deepEqual(newlyAvailableConfigs(nestedReference, project), ['apps/client/tsconfig.json']);
+  assert.deepEqual(newlyAvailableConfigs(nestedReference, project, new Set(['apps/client/tsconfig.json'])), []);
+  assert.throws(() => newlyAvailableConfigs({ absentConfigCandidates: ['../package.json'] }, project), /escapes the project/);
+  const addedConfigStatus = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(addedConfigStatus.executionDirective?.currentStep?.id, 'freeze-code-reference');
+  assert.match(addedConfigStatus.executionDirective.currentStep.details, /new entrypoint configuration/);
+  const nestedCapture = () => action('existing-code-reference.mjs', ['capture', dir, project, nestedScope]);
+  assert.notEqual(nestedCapture().reused, true); assert.ok(paths().has('apps/client/tsconfig.json'));
+  assert.equal(nestedCapture().reused, true);
+  put('apps/client/package.json', '{"dependencies":{"react":"19"}}');
+  const changedPackageStatus = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(changedPackageStatus.executionDirective?.currentStep?.id, 'freeze-code-reference');
+  assert.match(changedPackageStatus.executionDirective.currentStep.details, /apps\/client\/package\.json/);
+  assert.notEqual(nestedCapture().reused, true);
   console.log(JSON.stringify({ status: 'passed', scope: 'public paths, TypeScript imports, aliases, workspace sources and cache invalidation' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }
