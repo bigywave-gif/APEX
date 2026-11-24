@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T10:44:09.694Z",
+  "generatedAt": "2026-11-24T10:52:04.200Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -196,10 +196,10 @@
     "scripts/role-quality-evaluator.mjs": "7347aae8c6dadaeee794a551df83ea8b2431c26c02ddbe7a9e290430cdca0887",
     "scripts/role-summary-binding-test.mjs": "49f008dfcd414d2284af98be6179b1ed7de4703622e45449299daaa6938227f2",
     "scripts/role-summary-binding.mjs": "a1b54c3b340670cdc74aa2bfac61099cc46b4cb15893107f9e1f5a823dc563d8",
-    "scripts/router-contract-test.mjs": "9f4069d3fd57c15fc26f21ba96a0018be5b4eaf86ad58d36898ea828716c7e0b",
+    "scripts/router-contract-test.mjs": "a82e3f266a42175b134db6b324151c734a984d1f4641c2edad745b97f927e345",
     "scripts/run-ledger-contract-test.mjs": "b4b8bc8e70ba59b4edb09106339eb7684e8d90ed2dc54b60c00e7157c622374f",
     "scripts/run-ledger-init-race-test.mjs": "da27ba17ade730304ed7dcb498c165724c453680450b880dd0c62d6387f229c3",
-    "scripts/run-ledger.mjs": "adfa23f9bd2a50646735f5c151890eb34c23dbdabb573ff02ca338f7731eacdc",
+    "scripts/run-ledger.mjs": "0504d1ce3ba990e7d3c8528316e70bb1faf9a9759065370f8be54c6a227260c3",
     "scripts/run-metrics-test.mjs": "a08f7ae731f586fe6942f522e7567a2a019016f3dbdd9840530f3cf4bf032917",
     "scripts/run-metrics.mjs": "87e5cebbe87add60d77a57fec79f75841eee7f7d2f77a6b379286dd82da7ea2c",
     "scripts/run-migrate.mjs": "62e99e398b3235efd2f2b4d4dc0c432642153ec574672e963ca647b8f4e4e216",

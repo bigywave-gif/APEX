@@ -100,6 +100,12 @@ try {
   const pendingJob = enqueueAgentJob(cancelRunDir, { agentId: 'queued-agent', stage: 'visual', inputHash: 'queued' });
   const activeClaim = claimAgentJob(cancelRunDir, activeJob.jobId);
   recordTokenUsage(cancelRunDir, { stage: 'visual', agentId: 'running-agent', inputTokens: 7, metadata: { usageSource: 'provider-reported' } });
+  registerAgent(cancelRunDir, { agentId: 'repair-agent', vocation: 'design', stage: 'visual' });
+  const originalRepair = enqueueAgentJob(cancelRunDir, { agentId: 'repair-agent', stage: 'visual', inputHash: 'original' });
+  const originalRepairClaim = claimAgentJob(cancelRunDir, originalRepair.jobId);
+  settleAgentJob(cancelRunDir, originalRepair.jobId, { status: 'succeeded', leaseToken: originalRepairClaim.leaseToken, usage: { inputTokens: 0, outputTokens: 0, usageSource: 'provider-reported' } });
+  const replacementRepair = enqueueAgentJob(cancelRunDir, { agentId: 'repair-agent', stage: 'visual', inputHash: 'replacement', payload: { budgetRecovery: true, privateFixture: 'do-not-retain-job-payload' } });
+  claimAgentJob(cancelRunDir, replacementRepair.jobId);
   const otherRunSentinel = path.join(root, '.apex', 'runs', 'run-cancel-other', 'unrelated-session-sentinel.txt');
   fs.writeFileSync(otherRunSentinel, 'must survive current-run cancellation\n');
   const sandboxRoot = path.join(cancelRunDir, 'visual-sandbox'); fs.mkdirSync(sandboxRoot, { recursive: true }); fs.writeFileSync(path.join(sandboxRoot, 'index.html'), '<main>temporary sandbox</main>\n');
@@ -121,17 +127,22 @@ try {
   if (cancelled.integrity?.status !== 'consistent' || cancelled.integrity?.artifactLineage?.registered !== 1) throw new Error('cancelled Run must retain and archive artifact lineage without reporting reclaimed files missing');
   try { recordArtifact(cancelRunDir, { artifactId: 'late', reference: 'late.json', sha256: 'sha256:late' }); throw new Error('late artifact registration was accepted'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }
   const cancelDb = new DatabaseSync(path.join(cancelRunDir, 'run-ledger.sqlite'), { readOnly: true });
-  const retainedEvent = JSON.parse(cancelDb.prepare("SELECT payload_json FROM events WHERE event_type = 'cancelled-operation-receipts-retained' ORDER BY id DESC LIMIT 1").get().payload_json); cancelDb.close();
+  const retainedEvent = JSON.parse(cancelDb.prepare("SELECT payload_json FROM events WHERE event_type = 'cancelled-operation-receipts-retained' ORDER BY id DESC LIMIT 1").get().payload_json);
+  const cancellationEvent = cancelDb.prepare("SELECT payload_json FROM events WHERE event_type = 'run-cancellation-fenced' ORDER BY id DESC LIMIT 1").get().payload_json;
+  const cancelledUsage = cancelDb.prepare("SELECT metadata_json FROM token_usage WHERE agent_id = 'repair-agent' ORDER BY id DESC LIMIT 1").get(); cancelDb.close();
+  if (cancellationEvent.includes('do-not-retain-job-payload')) throw new Error('cancellation event must not retain job payloads');
+  const repairUsage = JSON.parse(cancelledUsage.metadata_json);
+  if (repairUsage.jobId !== replacementRepair.jobId || repairUsage.outcome !== 'cancelled' || repairUsage.usageSource !== 'unknown' || repairUsage.budgetRecovery !== true) throw new Error('cancelled replacement attempt must preserve recovery attribution and unknown usage');
   if (!retainedEvent.receipts.some(item => item.name === 'valid-receipt.json' && item.status === 'succeeded' && !('stdout' in item)) || !retainedEvent.receipts.some(item => item.status === 'unreadable')) throw new Error('cancellation must retain receipt metadata and unreadable evidence without storing raw output');
   const cancelReceipt = JSON.parse(fs.readFileSync(path.join(cancelRunDir, 'cancellation-receipt.json'), 'utf8'));
-  if (cancelReceipt.agents?.fencedJobs?.length !== 2 || cancelReceipt.agents.externalInterruption !== 'not-confirmed') throw new Error('cancellation receipt must identify fenced Agent jobs without claiming host interruption');
+  if (cancelReceipt.agents?.fencedJobs?.length !== 3 || cancelReceipt.agents.externalInterruption !== 'not-confirmed') throw new Error('cancellation receipt must identify fenced Agent jobs without claiming host interruption');
   const cancelEntries = fs.readdirSync(cancelRunDir).sort();
   const retainedNames = new Set(['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'run-ledger.sqlite-shm', 'run-ledger.sqlite-wal', 'ledger-established.json', 'ledger-integrity-incident.json', 'state.json']);
   if (cancelEntries.some(name => !retainedNames.has(name)) || !['cancellation-receipt.json', 'events.ndjson', 'run-ledger.sqlite', 'ledger-established.json', 'state.json'].every(name => cancelEntries.includes(name))) throw new Error(`cancellation must retain the receipt, durable ledger, protection marker and state projection, received: ${cancelEntries.join(', ')}`);
   const jobsAfterCancel = agentRuntimeStatus(cancelRunDir).jobs;
   if (jobsAfterCancel.find(job => job.jobId === activeJob.jobId)?.status !== 'cancelled' || jobsAfterCancel.find(job => job.jobId === pendingJob.jobId)?.status !== 'cancelled') throw new Error('cancellation must fence running and queued jobs in the retained ledger');
   if (agentRuntimeStatus(cancelRunDir).tokenUsage.visual !== 7) throw new Error('cancellation must retain previously recorded token usage');
-  if (agentRuntimeStatus(cancelRunDir).tokenUsageCoverage.visual?.unknown !== 1) throw new Error('cancelled running attempt must retain unknown usage rather than imply zero cost');
+  if (agentRuntimeStatus(cancelRunDir).tokenUsageCoverage.visual?.unknown !== 2) throw new Error('cancelled running attempts must retain unknown usage rather than imply zero cost');
   try { settleAgentJob(cancelRunDir, activeJob.jobId, { status: 'succeeded', leaseToken: activeClaim.leaseToken }); throw new Error('late Agent completion was accepted'); } catch (error) { if (!String(error.message).includes('not running')) throw error; }
   try { claimAgentJob(cancelRunDir, pendingJob.jobId); throw new Error('cancelled queued job was claimed'); } catch (error) { if (!String(error.message).includes('not queued')) throw error; }
   try { registerAgent(cancelRunDir, { agentId: 'running-agent', vocation: 'design', stage: 'visual' }); throw new Error('cancelled Agent was reactivated'); } catch (error) { if (!String(error.message).includes('cancelled run')) throw error; }

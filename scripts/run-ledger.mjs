@@ -294,7 +294,8 @@ export function fenceRunCancellation(runDir, sessionId, reason) {
     if (state.lifecycle === 'cancelled') { database.exec('COMMIT'); return { alreadyCancelled: true }; }
     database.prepare("UPDATE artifacts SET status = 'archived' WHERE status != 'archived'").run();
     cancelledJobs = database.prepare("SELECT job_id, agent_id, stage, status, attempt FROM agent_jobs WHERE status IN ('queued', 'running')").all();
-    for (const job of cancelledJobs.filter(item => item.status === 'running')) recordSettledAttemptUsage(database, job, null, 'cancelled', timestamp);
+    const runningJobs = database.prepare("SELECT * FROM agent_jobs WHERE status = 'running'").all();
+    for (const job of runningJobs) recordSettledAttemptUsage(database, job, null, 'cancelled', timestamp);
     database.prepare("UPDATE agent_jobs SET status = 'cancelled', finished_at = ?, last_error = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE status IN ('queued', 'running')").run(timestamp, 'run cancelled');
     database.prepare("UPDATE agent_sessions SET status = 'cancelled', updated_at = ? WHERE status IN ('ready', 'working')").run(timestamp);
     database.prepare("UPDATE agents SET status = 'cancelled', updated_at = ? WHERE status = 'ready'").run(timestamp);
