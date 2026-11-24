@@ -181,10 +181,10 @@ function imageInputTools(tools) {
     return /(?:upload|attach|add)[_-]?(?:reference[_-]?)?(?:image|screenshot|wireframe)|(?:reference|source)[_-]?(?:image|screenshot|wireframe)|image[_-]?(?:upload|input|reference)|wireframe[_-]?upload/i.test(`${name} ${description}`);
   });
 }
-function updateState(runDir, reference, current, automatic = false) {
+function updateState(runDir, reference, current, automatic = false, snapshot) {
   const stateFile = path.join(runDir, 'state.json');
   if (!fs.existsSync(stateFile)) return;
-  const { state, expectedStateHash } = readRunStateForUpdate(runDir);
+  const { state, expectedStateHash } = snapshot;
   state.artifacts.stitchFreeze = reference;
   state.locks.stitchCurrent = current;
   if (automatic) state.locks.stitchApproved = true;
@@ -247,7 +247,7 @@ if (command === 'list-projects') {
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
   const selectionFile = path.resolve(selectionArg);
   const selection = read(selectionFile);
-  const state = read(path.join(runDir, 'state.json'));
+  const stateSnapshot = readRunStateForUpdate(runDir), { state } = stateSnapshot;
   if (state.roleChain?.confirmationModel === 'two-confirmations' && selection.approvedScreens?.length > 1) {
     const baselineFile = state.artifacts?.runtimeVisualBaseline && path.join(runDir, state.artifacts.runtimeVisualBaseline);
     if (!baselineFile || !fs.existsSync(baselineFile)) die('multi-screen Stitch requires the confirmed Demo baseline');
@@ -262,17 +262,18 @@ if (command === 'list-projects') {
     try { skillAdaptation = stitchAdaptationForFreeze(runDir, state, job, selection); } catch (error) { die(error.message); }
   }
   const snap = await snapshot(selection, runDir);
+  if (readRunStateForUpdate(runDir).expectedStateHash !== stateSnapshot.expectedStateHash) die('run state changed during Stitch freeze; preserve and re-evaluate the confirmed Demo before retrying');
   const freeze = { schemaVersion: '3.0', projectId: selection.projectId, canvasUrl: selection.canvasUrl, approval: selection.approval, approvedScreens: snap.approvedScreens, excludedScreens: selection.excludedScreens, ...(selection.generationInput ? { generationInput: selection.generationInput } : {}), ...(skillAdaptation ? { skillAdaptation } : {}), fingerprints: { screenSetHash: hash({ listed: snap.listedHash, approved: snap.approvedScreens }), designSystemHash: snap.designSystemHash }, syncedAt: new Date().toISOString() };
   const freezeFile = path.join(runDir, 'stitch-freeze.json');
   write(freezeFile, freeze);
   write(path.join(runDir, 'stitch-raw.json'), { schemaVersion: '3.0', projectId: selection.projectId, screens: snap.rawScreens, designSystems: snap.designSystems });
-  updateState(runDir, 'stitch-freeze.json', false);
+  updateState(runDir, 'stitch-freeze.json', false, false, stateSnapshot);
   console.log(JSON.stringify({ freeze: freezeFile, status: 'provisional', next: 'run strict-replica.mjs stitch, then seal' }));
 } else if (command === 'seal') {
   const runDir = path.resolve(args[0] || '.');
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
   const stateFile = path.join(runDir, 'state.json');
-  const state = read(stateFile);
+  const stateSnapshot = readRunStateForUpdate(runDir), { state } = stateSnapshot;
   if (!state.locks.effectApproved) die('a confirmed runtime Demo is required before sealing Stitch');
   const automatic = state.roleChain?.confirmationModel === 'two-confirmations';
   if (!automatic && !state.locks.stitchApproved) die('Stitch approval is required before sealing Stitch');
@@ -288,6 +289,7 @@ if (command === 'list-projects') {
   if (!fs.existsSync(contractFile) || hash(fs.readFileSync(contractFile)) !== evidence.structuralVerification.contractHash) die('strict Stitch structure contract is missing or changed');
   const contract = read(contractFile);
   if (contract.source !== 'stitch-screen-export' || contract.sourceImageHash !== evidence.stitchImageHash || contract.verification?.status !== 'passed') die('strict Stitch structure contract is not a passed export of the compared screen');
+  if (readRunStateForUpdate(runDir).expectedStateHash !== stateSnapshot.expectedStateHash) die('run state changed during Stitch seal; re-evaluate the current Demo and parity evidence');
   if (automatic) {
     const freeze = read(path.join(runDir, state.artifacts.stitchFreeze));
     const reference = read(path.join(runDir, state.artifacts.visualReference));
@@ -295,7 +297,7 @@ if (command === 'list-projects') {
     const receipt = { schemaVersion: '3.0', type: 'stitch-machine-seal', status: 'validated', runId: state.runId, freeze: { path: state.artifacts.stitchFreeze, sha256: hash(fs.readFileSync(path.join(runDir, state.artifacts.stitchFreeze))) }, parity: { path: state.artifacts.stitchParityEvidence, sha256: hash(fs.readFileSync(evidenceFile)) }, ...(multi ? { screens: multi.screens } : {}), validatedAt: new Date().toISOString() };
     const receiptFile = path.join(runDir, 'machine-seals', 'stitch.json'); fs.mkdirSync(path.dirname(receiptFile), { recursive: true }); const temporary = `${receiptFile}.${process.pid}.tmp`; write(temporary, receipt); fs.renameSync(temporary, receiptFile);
   }
-  updateState(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json', true, automatic);
+  updateState(runDir, state.artifacts.stitchFreeze || 'stitch-freeze.json', true, automatic, stateSnapshot);
   console.log(JSON.stringify({ sealed: true, stitchFreeze: state.artifacts.stitchFreeze || 'stitch-freeze.json', ...(automatic ? { machineSeal: path.join(runDir, 'machine-seals', 'stitch.json') } : {}) }));
 } else if (command === 'check') {
   const runDir = path.resolve(args[0] || '.');

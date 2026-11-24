@@ -1,6 +1,7 @@
 /** Local test fixture; never contacts the Stitch service. */
 import http from 'node:http';
 import fs from 'node:fs';
+import { commitRunState, readRunState } from './run-ledger.mjs';
 const [manifestFile, portFile] = process.argv.slice(2);
 const files = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
 const server = http.createServer((request, response) => {
@@ -15,7 +16,16 @@ const server = http.createServer((request, response) => {
     try {
       const rpc = JSON.parse(body), tool = rpc.params?.name, args = rpc.params?.arguments || {};
       let structuredContent;
-      if (tool === 'list_screens') structuredContent = { screens: Object.keys(files).map(screenId => ({ screenId })) };
+      if (tool === 'list_screens') {
+        const flag = process.env.APEX_STITCH_STATE_RACE_FLAG;
+        if (flag && fs.existsSync(flag)) {
+          fs.unlinkSync(flag);
+          const runDir = process.env.APEX_STITCH_STATE_RACE_RUN, state = readRunState(runDir);
+          state.artifacts.concurrentFixture = 'concurrent-marker.json'; state.revision += 1;
+          commitRunState(runDir, state, { reason: 'stitch-race-fixture' });
+        }
+        structuredContent = { screens: Object.keys(files).map(screenId => ({ screenId })) };
+      }
       else if (tool === 'list_design_systems') structuredContent = { systems: [] };
       else if (tool === 'get_screen' && files[String(args.name || '').split('/').at(-1)]) {
         const id = String(args.name).split('/').at(-1);
