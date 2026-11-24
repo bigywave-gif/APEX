@@ -27,7 +27,7 @@ import { formalDirectProgress } from './formal-direct-progress.mjs';
 import { implementationSealCurrent } from './implementation-seal.mjs';
 import { assertDesignContractCurrent } from './design-contract-evidence.mjs';
 import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, validateProductTaskReview } from './formal-interaction-evidence.mjs';
-import { newlyAvailableResources } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, commitRunState, externalSubmissionIntents, fenceRunCancellation, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 
@@ -1230,6 +1230,7 @@ function existingVisualBaselineStatus(runDir, state) {
     const display = read(displayFile);
     if (display.kind !== 'existing' || display.status !== 'passed' || baseline.displayEvidence.hash !== sha256File(displayFile)) return { ready: false, reason: 'Existing browser display evidence is missing, replaced, or no longer matches the frozen baseline hash' };
     if (baseline.codeReference?.complete !== true || baseline.codeReference.sourceTreeHash !== reference.sourceTreeHash || baseline.codeReference.pageSkeletonHash !== skeleton.skeletonHash) return { ready: false, reason: 'existing baseline is not bound to the current code reference and page skeleton' };
+    assertResourceCoverage(reference, baseline);
     const scope = changeScopeStatus(runDir, state, reference);
     if (!scope.ready) return scope;
   } catch {

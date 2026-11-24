@@ -10,6 +10,8 @@ Existing 基线必须同时读取“目标范围完整代码”和“真实前�
 
 HTML 和 CSS 中可静态定位的本地图片、媒体、字体等资源也纳入快照；根路径按目标入口所属应用及项目的 `public` 目录寻找。无法在本地定位的资源写入 `unresolvedResources`，可能是运行时资源或缺失文件，须结合实际页面核查，不能视为已验证；候选文件之后出现时 Router、浏览器基线采集和 Gate 校验会识别快照失效并要求重采，不能复用旧索引。Gate 2 后仅已获批准的实施目标按既有变更闭包处理。
 
+新冻结的 Existing 基线在 `codeReference.resourceCoverage` 显示未定位数量及 `unverified`、`no-unresolved-detected` 或历史数据 `not-recorded`。Router 和 Gate 校验该状态与源码清单一致；`no-unresolved-detected` 只表示静态扫描未发现待核查项，不证明视觉素材均已加载或正确。产品、设计和前端角色应读取引用清单并针对本次范围核查，状态本身不增加用户确认。
+
 这两个脚本均只能使用 `collect_existing_baseline` 授权，经 Action Gateway 运行：
 
 ```text

@@ -1,6 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** Unknown assets remain explicit; an empty static list is not a visual audit. */
+export function resourceCoverage(reference) {
+  if (reference.unresolvedResources === undefined) return { status: 'not-recorded', unresolvedCount: null };
+  if (!Array.isArray(reference.unresolvedResources)) throw new Error('unresolved resource list is invalid');
+  return { status: reference.unresolvedResources.length ? 'unverified' : 'no-unresolved-detected', unresolvedCount: reference.unresolvedResources.length };
+}
+export function assertResourceCoverage(reference, baseline) {
+  const actual = baseline?.codeReference?.resourceCoverage;
+  if (actual === undefined) return { status: 'not-recorded', unresolvedCount: null }; // Historical baselines retain their original contract.
+  const expected = resourceCoverage(reference);
+  if (actual.status !== expected.status || actual.unresolvedCount !== expected.unresolvedCount) throw new Error('Existing baseline resource coverage does not match its source reference');
+  return expected;
+}
+
 /** A previously absent local resource becoming available changes the baseline. */
 export function newlyAvailableResources(reference, projectRoot, allowed = new Set()) {
   const root = path.resolve(projectRoot), result = new Set();

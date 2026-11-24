@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { newlyAvailableResources } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, resourceCoverage } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const validator = path.join(apexRoot, 'scripts', 'apex-validate.mjs');
@@ -73,7 +73,7 @@ if (!sourceSnapshot || sourceSnapshot.codeReference !== state.artifacts.codeRefe
 const baseline = read(path.resolve(inputArg));
 baseline.schemaVersion = '3.0';
 baseline.capturedAt = new Date().toISOString();
-baseline.codeReference = { path: state.artifacts.codeReference, sourceTreeHash: codeReference.sourceTreeHash, sourceFileCount: codeReference.sourceFileCount, complete: true, pageSkeletonPath: state.artifacts.pageSkeleton, pageSkeletonHash: pageSkeleton.skeletonHash };
+baseline.codeReference = { path: state.artifacts.codeReference, sourceTreeHash: codeReference.sourceTreeHash, sourceFileCount: codeReference.sourceFileCount, complete: true, pageSkeletonPath: state.artifacts.pageSkeleton, pageSkeletonHash: pageSkeleton.skeletonHash, resourceCoverage: resourceCoverage(codeReference) };
 baseline.displayEvidence = { path: path.relative(runDir, displayPath), hash: hash(fs.readFileSync(displayPath)), capturedRoutes: display.evidence.map(item => item.route) };
 for (const screen of baseline.screens || []) {
   requireProjectFile(projectRoot, screen.path, `screen evidence for ${screen.viewport}`);
@@ -111,4 +111,4 @@ state.artifacts.existingBaseline = 'existing-baseline.json';
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
 write(stateFile, state);
-console.log(JSON.stringify({ baseline: output, routes: baseline.routes.length, screens: baseline.screens.length, apiSamples: baseline.apiSamples.length, reusedIntegrityEntries }));
+console.log(JSON.stringify({ baseline: output, routes: baseline.routes.length, screens: baseline.screens.length, apiSamples: baseline.apiSamples.length, resourceCoverage: baseline.codeReference.resourceCoverage, reusedIntegrityEntries }));

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { newlyAvailableResources } from './existing-resource-freshness.mjs';
+import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
 import { validateRuntimeMotionSamples, validateVisualOutputSource } from './runtime-baseline-contract.mjs';
@@ -301,6 +301,7 @@ function validateGate1(runDir, stateFile = path.join(runDir, 'state.json')) {
     const baselineStyleHashes = new Set((baseline.styleBaseline.sources || []).map(source => source.sha256));
     if (!baselineStyleHashes.has(plannedStyle.sourceHash)) throw new Error('Existing visual strategy must bind one captured platform style source hash');
     const codeReference = assertExistingCodeReferenceUnchanged(runDir, state);
+    assertResourceCoverage(codeReference, baseline);
     const changeScope = validateFile('change-scope.schema.json', requireArtifact(runDir, state, 'changeScope', 'change-scope.json'));
     rejectPlaceholders(changeScope, 'Change Scope');
     const affectedTargets = new Set(changeScope.affected.runtimeTargets);
