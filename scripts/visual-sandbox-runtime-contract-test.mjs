@@ -64,6 +64,17 @@ try {
   if (afterStart.executionDirective?.currentStep?.id !== 'capture-runtime-browser-evidence' || afterStart.terminalResponseContract?.allowed !== false) throw new Error('a started Demo must advance to browser capture automatically instead of ending the chain');
   fs.unlinkSync(path.join(runDir, 'visual-sandbox-runtime.json')); delete JSON.parse(fs.readFileSync(stateFile, 'utf8')).artifacts.visualSandboxRuntime;
   const restartState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); delete restartState.artifacts.visualSandboxRuntime; commitRunState(path.dirname(stateFile), restartState, { reason: 'state-authority-test-fixture' });
+  const restoredAuth = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'lost runtime record authorization');
+  const restored = expect(run(action, ['run', project, 'run-runtime', 'session-runtime', restoredAuth.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir]), 'restore existing runtime');
+  if (!restored.reused || restored.pid !== receipt.pid || restored.url !== output.url || JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-services.json'))).services[0].pid !== receipt.pid) throw new Error('missing runtime record must recover the live registered server without starting a duplicate');
+  const runtimeFile = path.join(runDir, 'visual-sandbox-runtime.json'), registryFile = path.join(runDir, 'runtime-services.json');
+  const savedRuntime = fs.readFileSync(runtimeFile), savedRegistry = fs.readFileSync(registryFile);
+  const foreignRuntime = JSON.parse(savedRuntime), foreignRegistry = JSON.parse(savedRegistry); foreignRuntime.pid = process.pid; foreignRegistry.services[0].pid = process.pid;
+  fs.writeFileSync(runtimeFile, JSON.stringify(foreignRuntime)); fs.writeFileSync(registryFile, JSON.stringify(foreignRegistry));
+  const foreignPidAuth = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'foreign runtime PID authorization');
+  const foreignPid = run(action, ['run', project, 'run-runtime', 'session-runtime', foreignPidAuth.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir]);
+  if (foreignPid.status === 0 || !foreignPid.stderr.includes('runtime process does not match this Run and sandbox')) throw new Error('runtime must not reuse a different live process');
+  fs.writeFileSync(runtimeFile, savedRuntime); fs.writeFileSync(registryFile, savedRegistry);
   const formalChangeAuthorization = expect(run(router, ['authorize', project, 'run-runtime', 'session-runtime', 'generate_visual']), 'formal-change start authorization');
   // The boundary check surrounds an asynchronous local-server startup. Start
   // a proven-live mutator before the synchronous action begins; a one-shot
@@ -78,7 +89,7 @@ try {
   if (formalReceipt.productionBoundary?.snapshotMode !== 'formal-source-discovery' || formalReceipt.productionBoundary?.changedFiles?.[0]?.path !== 'server/api.js' || !String(formalReceipt.stderr).includes('server/api.js')) throw new Error('a formal source boundary failure must identify its protected snapshot mode and exact changed file');
   pids.push(JSON.parse(fs.readFileSync(path.join(runDir, 'visual-sandbox-runtime.json'), 'utf8')).pid);
   if (fs.existsSync(path.join(project, 'index.html'))) throw new Error('runtime start must not materialize files outside the run-local sandbox');
-  console.log(JSON.stringify({ status: 'passed', checks: 9 }));
+  console.log(JSON.stringify({ status: 'passed', checks: 11 }));
 } finally {
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch {} }
   fs.rmSync(project, { recursive: true, force: true });

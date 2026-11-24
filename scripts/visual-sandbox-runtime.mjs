@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 
@@ -26,6 +26,17 @@ function bindHost(value) {
 function loopbackUrl(host, port) { return `http://${host.includes(':') ? `[${host}]` : host}:${port}/`; }
 async function availablePort(host) { return await new Promise((resolve, reject) => { const probe = net.createServer(); probe.once('error', reject); probe.listen(0, host, () => { const address = probe.address(); probe.close(error => error ? reject(error) : resolve(address.port)); }); }); }
 async function reachable(url) { return await new Promise(resolve => { const request = http.get(url, response => { response.resume(); resolve(response.statusCode === 200); }); request.setTimeout(2500, () => { request.destroy(); resolve(false); }); request.on('error', () => resolve(false)); }); }
+function runtimeProcess(record, runId, sandboxRoot) {
+  if (!Number.isSafeInteger(record?.pid) || record.pid <= 1 || record.runId !== runId || record.runtimeRoot !== 'visual-sandbox') throw new Error('runtime record does not identify this Run');
+  let url; try { url = new URL(record.url); } catch { throw new Error('runtime URL is invalid'); }
+  if (url.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(url.hostname) || !/^\d+$/.test(url.port) || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error('runtime URL is not a loopback Demo URL');
+  const inspected = spawnSync('/bin/ps', ['-p', String(record.pid), '-o', 'stat=,command='], { encoding: 'utf8', timeout: 1000 });
+  if (inspected.error || (inspected.status !== 0 && !(inspected.status === 1 && !String(inspected.stderr || '').trim()))) throw new Error('runtime process inspection is unavailable');
+  const line = String(inspected.stdout || '').trim();
+  if (!line || /^Z/.test(line)) return 'stopped';
+  if (!line.includes('visual-sandbox-runtime.mjs serve ') || !`${line} `.includes(` serve ${sandboxRoot} ${url.port} --apex-run-id ${runId} `)) throw new Error('runtime process does not match this Run and sandbox');
+  return 'running';
+}
 function assertCurrentRun(runDir) {
   const projectRoot = path.resolve(process.env.APEX_ROUTER_PROJECT_ROOT || '');
   const runId = process.env.APEX_ROUTER_RUN_ID;
@@ -71,11 +82,27 @@ if (command === 'serve') {
   const expectedRoot = path.join(realRun, 'visual-sandbox');
   if (sandboxRoot !== expectedRoot || !fs.realpathSync(entrypoint).startsWith(`${sandboxRoot}${path.sep}`) || !fs.statSync(entrypoint).isFile()) die('visual sandbox entrypoint must resolve inside the current Run sandbox');
   const runtimeFile = path.join(runDir, 'visual-sandbox-runtime.json');
-  if (fs.existsSync(runtimeFile)) {
-    let prior = null; try { prior = read(runtimeFile); } catch {}
-    if (prior?.entrypointHash === hash(entrypoint) && prior.url && await reachable(prior.url)) {
+  const registryFile = path.join(runDir, 'runtime-services.json');
+  let prior = null;
+  if (fs.existsSync(runtimeFile)) prior = read(runtimeFile);
+  else if (fs.existsSync(registryFile)) {
+    const registry = read(registryFile), services = registry.services;
+    if (registry.runId !== runId || !Array.isArray(services) || services.length !== 1 || services[0]?.record !== 'visual-sandbox-runtime.json') die('runtime service registry cannot safely restore the missing runtime record');
+    prior = { ...services[0], runId };
+  }
+  if (prior) {
+    if (fs.existsSync(registryFile)) {
+      const registry = read(registryFile), service = registry.services?.[0];
+      if (registry.runId !== runId || !Array.isArray(registry.services) || registry.services.length !== 1 || service?.record !== 'visual-sandbox-runtime.json' || (service.pid !== undefined && service.pid !== prior.pid) || (service.url !== undefined && service.url !== prior.url)) die('runtime service registry does not match the existing runtime record');
+    }
+    let processStatus; try { processStatus = runtimeProcess(prior, runId, sandboxRoot); } catch (error) { die(error.message); }
+    if (processStatus === 'running') {
+      if (!await reachable(prior.url)) die('existing run-local Demo process is running but its URL is unavailable; inspect it before retrying');
+      const restored = { ...prior, schemaVersion: '3.0', runId, runtimeRoot: 'visual-sandbox', entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), status: 'running' };
+      write(runtimeFile, restored);
+      write(registryFile, { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: prior.pid, url: prior.url, runtimeRoot: 'visual-sandbox', startedAt: prior.startedAt }] });
       state.artifacts.visualSandboxRuntime = 'visual-sandbox-runtime.json'; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-sandbox-runtime-state-update', expectedStateHash });
-      console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url: prior.url, reused: true })); process.exit(0);
+      console.log(JSON.stringify({ visualSandboxRuntime: runtimeFile, url: prior.url, pid: prior.pid, reused: true })); process.exit(0);
     }
   }
   const port = await availablePort(host);
