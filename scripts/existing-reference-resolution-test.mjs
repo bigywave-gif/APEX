@@ -14,8 +14,9 @@ function action(script, args) { const auth = call('apex-router.mjs', ['authorize
 try {
   put('package.json', JSON.stringify({ workspaces: ['packages/*'] }));
   put('tsconfig.json', '{ /* alias config */ "compilerOptions": { "baseUrl": ".", "paths": { "~*": ["./src/*",], }, }, }');
-  put('index.html', '<main>Fixture</main><link rel="stylesheet" href="/style.css"><script src="/main.js"></script>');
-  put('public/style.css', 'body { color: red }'); put('public/main.js', "import '../src/main.js';");
+  put('index.html', '<main>Fixture<img src="/hero.png"></main><link rel="stylesheet" href="/style.css"><script src="/main.js"></script>');
+  put('public/style.css', 'body { background: url("/logo.svg"), url("/late.png"), url("data:image/svg+xml,example") }'); put('public/main.js', "import '../src/main.js';");
+  put('public/hero.png', 'fixture image'); put('public/logo.svg', '<svg></svg>');
   put('src/main.ts', "import './App.js'; import Button from '~components/Button.vue'; import {ui} from '@fixture/ui';\n");
   put('src/App.tsx', 'export const App = () => <main>Fixture</main>;');
   put('src/components/Button.vue', '<template><button>Original</button></template><script src="./button.ts"></script><style>@import "~shared.css";</style>');
@@ -30,12 +31,25 @@ try {
   const capture = () => action('existing-code-reference.mjs', ['capture', dir, project, scope]);
   capture();
   const paths = () => new Set(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).files.map(item => item.path));
-  for (const expected of ['public/style.css', 'public/main.js', 'src/main.ts', 'src/App.tsx', 'src/components/Button.vue', 'src/components/button.ts', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
+  for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/components/Button.vue', 'src/components/button.ts', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
+  const initial = JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json')));
+  assert.deepEqual(initial.unresolvedResources.map(item => item.reference), ['/late.png']);
   assert.equal(capture().reused, true);
+  put('public/late.png', 'late fixture image');
+  assert.notEqual(capture().reused, true);
+  assert.ok(paths().has('public/late.png'));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).unresolvedResources, []);
   put('src/alternate/components/Button.vue', '<template><button>New mapping</button></template>');
   put('tsconfig.json', '{ "compilerOptions": { "baseUrl": ".", "paths": { "~*": ["./src/alternate/*", "./src/*"] } } }');
   assert.notEqual(capture().reused, true);
   assert.ok(paths().has('src/alternate/components/Button.vue'));
   assert.ok(!paths().has('src/components/Button.vue'));
+  put('apps/client/package.json', '{}');
+  put('apps/client/src/main.tsx', "import '../../../packages/ui/src/theme.css'; export const App = () => <main>App</main>;");
+  put('apps/client/public/avatar.png', 'nested app image');
+  put('packages/ui/src/theme.css', '.avatar { background-image: url("/avatar.png") }');
+  const nestedScope = path.join(dir, 'nested-scope.json'); fs.writeFileSync(nestedScope, JSON.stringify({ routes: ['/'], codeEntrypoints: ['apps/client/src/main.tsx'] }));
+  action('existing-code-reference.mjs', ['capture', dir, project, nestedScope]);
+  assert.ok(paths().has('apps/client/public/avatar.png'), 'cross-workspace CSS must bind the target application public resource');
   console.log(JSON.stringify({ status: 'passed', scope: 'public paths, TypeScript imports, aliases, workspace sources and cache invalidation' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }
