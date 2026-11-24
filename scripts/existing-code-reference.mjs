@@ -12,8 +12,8 @@ import { newlyAvailableConfigs } from './existing-resource-freshness.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
-const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '9';
+const extensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
+const CAPTURE_VERSION = '10';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -50,6 +50,8 @@ function workspaceTarget(specifier) {
   return generated;
 }
 function resolveImport(projectRoot, from, specifier) {
+  specifier = specifier.split(/[?#]/, 1)[0];
+  if (!specifier) return null;
   const bases = [];
   if (specifier.startsWith('.')) bases.push(path.resolve(path.dirname(from), specifier));
   else {

@@ -34,5 +34,8 @@ try {
   assert.equal(limitedPackages.coverage.sourceTruncated, true); assert.equal(limitedPackages.packageManifests.length, 1);
   const completePackages = scanProjectSources(packageOnly, expandedProjectScanOptions(limitedPackages.coverage));
   assert.equal(completePackages.coverage.complete, true); assert.equal(completePackages.packageManifests.length, 2);
+  const modules = path.join(root, 'modules'); fs.mkdirSync(modules); fs.writeFileSync(path.join(modules, 'main.mts'), ''); fs.writeFileSync(path.join(modules, 'server.cts'), '');
+  const moduleScan = scanProjectSources(modules);
+  assert.deepEqual(moduleScan.entrypoints.sort(), ['main.mts', 'server.cts']);
   console.log(JSON.stringify({ status: 'passed', scope: 'scan limits, exact boundaries and ignored directories' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const ignoredProjectDirectories = new Set(['.git', '.apex', '.worktrees', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
-const extensions = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.vue', '.svelte', '.html', '.htm', '.ejs', '.hbs', '.pug', '.php', '.py', '.java', '.go', '.rb', '.cs']);
-const entryPattern = /(^|\/)(main|index|app|server|client|layout|page)\.(js|jsx|mjs|cjs|ts|tsx|vue|svelte|py|html|htm)$/i;
+const extensions = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts', '.vue', '.svelte', '.html', '.htm', '.ejs', '.hbs', '.pug', '.php', '.py', '.java', '.go', '.rb', '.cs']);
+const entryPattern = /(^|\/)(main|index|app|server|client|layout|page)\.(js|jsx|mjs|cjs|ts|tsx|mts|cts|vue|svelte|py|html|htm)$/i;
 const routePattern = /(^|\/)(pages|app|routes|router|views)\/|(^|\/)(routes?|router)\.(js|jsx|ts|tsx|py)$/;
 export function projectScanOptions(input = {}) {
   const defaults = { maxSourceFiles: 12000, maxEntrypoints: 80, maxRoutes: 160 }, result = {};

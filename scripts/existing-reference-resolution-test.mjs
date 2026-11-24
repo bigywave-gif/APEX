@@ -20,8 +20,10 @@ try {
   put('index.html', '<main>Fixture<img src="/hero.png"></main><link rel="stylesheet" href="/style.css"><script src="/main.js"></script>');
   put('public/style.css', 'body { background: url("/logo.svg"), url("/late.png"), url("data:image/svg+xml,example") }'); put('public/main.js', "import '../src/main.js';");
   put('public/hero.png', 'fixture image'); put('public/logo.svg', '<svg></svg>');
-  put('src/main.ts', "import './App.js'; import Button from '~components/Button.vue'; import {ui} from '@fixture/ui';\n");
+  put('src/main.ts', "import './App.js?raw'; import './module'; import './module-common'; import Button from '~components/Button.vue'; import {ui} from '@fixture/ui';\n");
   put('src/App.tsx', 'export const App = () => <main>Fixture</main>;');
+  put('src/module.mts', 'export const moduleValue = true;');
+  put('src/module-common.cts', 'export const commonValue = true;');
   put('src/components/Button.vue', '<template><button>Original</button></template><script src="./button.ts"></script><style>@import "~shared.css";</style>');
   put('src/components/button.ts', 'export const button = true;');
   put('src/shared.css', 'button { color: red }');
@@ -35,7 +37,14 @@ try {
   const capture = () => action('existing-code-reference.mjs', ['capture', dir, project, scope]);
   capture();
   const paths = () => new Set(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).files.map(item => item.path));
-  for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/components/Button.vue', 'src/components/button.ts', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
+  for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/module.mts', 'src/module-common.cts', 'src/components/Button.vue', 'src/components/button.ts', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
+  assert.equal(capture().reused, true);
+  put('src/App.tsx', 'export const App = () => <main>Changed</main>;');
+  const changedQueryImport = call('apex-router.mjs', ['status', project, run, session]);
+  assert.equal(changedQueryImport.executionDirective?.currentStep?.id, 'freeze-code-reference');
+  assert.match(changedQueryImport.executionDirective.currentStep.details, /src\/App\.tsx/);
+  assert.notEqual(capture().reused, true);
+  put('src/App.tsx', 'export const App = () => <main>Fixture</main>;'); assert.notEqual(capture().reused, true);
   const initial = JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json')));
   assert.deepEqual(initial.unresolvedResources.map(item => item.reference), ['/late.png']);
   assert.deepEqual(initial.unresolvedResources[0].contexts, ['css-background-url']);
