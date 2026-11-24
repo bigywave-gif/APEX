@@ -1015,6 +1015,11 @@ export function recoverAgentJobs(runDir, { force = false } = {}) {
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 
+export function readRunStateForUpdate(runDir) {
+  const state = readRunState(runDir);
+  return { state, expectedStateHash: stateHash(state) };
+}
+
 export function readRunState(runDir) {
   const file = statePath(runDir);
   const disk = fs.existsSync(file) ? parseState(file) : null;

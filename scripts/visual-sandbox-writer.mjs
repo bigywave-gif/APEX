@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 /** Materializes runtime Demo source only inside the current project-local run sandbox. */
 import crypto from 'node:crypto';
@@ -45,7 +46,7 @@ if (!inputFile.startsWith(`${runDir}${path.sep}`)) die('Demo source manifest mus
 const input = read(inputFile);
 if (input.schemaVersion !== '3.0' || !Array.isArray(input.files) || !input.files.length || !input.entrypoint) die('Demo source manifest requires schemaVersion 3.0, entrypoint, and files');
 const stateFile = path.join(requestedRunDir, 'state.json');
-const state = read(stateFile);
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 try { assertDemoDesignHandoff(runDir, state, input.designHandoff); } catch (error) { die(error.message); }
 let existingPageSkeleton = null;
 if (state.track === 'existing') {
@@ -94,5 +95,5 @@ if (!entrypoint || !seen.has(entrypoint)) die('Demo entrypoint must reference on
 const manifest = { schemaVersion: '3.0', kind: 'project-local-runtime-demo-source', projectRoot, runId: process.env.APEX_ROUTER_RUN_ID, runtimeRoot: 'visual-sandbox', entrypoint: path.relative(runDir, entrypoint), files: outputs, interactionContract: input.interactionContract, ...(input.designHandoff ? { designHandoff: input.designHandoff } : {}), ...(input.chatPreview ? { chatPreview: input.chatPreview } : {}), sourceManifest: path.relative(runDir, inputFile), existingPageSkeleton, status: 'materialized' };
 try { readChatPreview(runDir, manifest); } catch (error) { die(error.message); }
 const output = path.join(runDir, 'visual-sandbox-files.json'); write(output, manifest);
-state.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+state.artifacts.visualSandboxFiles = 'visual-sandbox-files.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'visual-sandbox-writer-state-update', expectedStateHash });
 console.log(JSON.stringify({ visualSandboxFiles: output, runtimeRoot: sandboxRoot, entrypoint }));

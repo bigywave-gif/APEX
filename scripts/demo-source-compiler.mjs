@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 /** Compile a host-authored runtime Demo source input into the only manifest the sandbox writer accepts. */
 import fs from 'node:fs';
 import { compileChatPreview } from './chat-demo.mjs';
@@ -23,7 +24,7 @@ const inputFile = path.resolve(inputArg);
 if (!inputFile.startsWith(`${runDir}${path.sep}`) || !fs.existsSync(inputFile)) die('Demo source input must be an existing file inside the current run');
 let input = read(inputFile);
 if (input.schemaVersion !== '3.0' || typeof input.entrypoint !== 'string' || !Array.isArray(input.files) || !input.files.length || !Array.isArray(input.sourceBindings)) die('Demo source input requires schemaVersion 3.0, entrypoint, files, and sourceBindings');
-const stateFile = path.join(runDir, 'state.json'); const state = read(stateFile);
+const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 const planFile = state.artifacts?.visualExecutionPlan ? path.join(runDir, state.artifacts.visualExecutionPlan) : null;
 if (!planFile || !fs.existsSync(planFile)) die('Demo source compilation requires the current confirmed visual-execution-plan.json');
 const plan = read(planFile); const selected = new Set((plan.sourceSelections || []).map(item => item.id));
@@ -81,5 +82,5 @@ if (state.track === 'existing') {
 let designHandoff; try { designHandoff = demoDesignHandoff(runDir, state); } catch (error) { die(error.message); }
 const manifest = { schemaVersion: '3.0', ...(designHandoff ? { designHandoff } : {}), entrypoint: input.entrypoint, files: input.files, interactionContract: input.interactionContract, sourceBindings: input.sourceBindings, ...(input.chatPreview ? { chatPreview: input.chatPreview } : {}), ...(existingPageSkeleton ? { existingPageSkeleton } : {}) };
 const output = path.join(runDir, 'demo-source-manifest.json'); write(output, manifest);
-state.artifacts.demoSourceManifest = 'demo-source-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); write(stateFile, state);
+state.artifacts.demoSourceManifest = 'demo-source-manifest.json'; state.revision = Number(state.revision || 0) + 1; state.updatedAt = new Date().toISOString(); commitRunState(runDir, state, { reason: 'demo-source-compiler-state-update', expectedStateHash });
 console.log(JSON.stringify({ demoSourceManifest: output, sourceBindingCount: bindings.size }));

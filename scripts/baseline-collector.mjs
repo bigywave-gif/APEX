@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commitRunState, readRunStateForUpdate } from './run-ledger.mjs';
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +37,7 @@ try { requireRouterAction(runDir, 'collect_existing_baseline'); } catch (error) 
 const projectRoot = path.resolve(projectArg || path.join(runDir, '..', '..', '..'));
 if (fs.realpathSync(projectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('baseline must use the Router-authorized project');
 const stateFile = path.join(runDir, 'state.json');
-const state = read(stateFile);
+const { state, expectedStateHash } = readRunStateForUpdate(runDir);
 if (state.track !== 'existing') die('Existing Baseline can only be captured for an existing run');
 if (!state.artifacts.codeReference) die('complete code reference is required before Existing Baseline capture');
 const codeReferencePath = path.resolve(runDir, state.artifacts.codeReference);
@@ -110,5 +111,5 @@ write(output, baseline);
 state.artifacts.existingBaseline = 'existing-baseline.json';
 state.revision = Number(state.revision || 0) + 1;
 state.updatedAt = new Date().toISOString();
-write(stateFile, state);
+commitRunState(runDir, state, { reason: 'baseline-collector-state-update', expectedStateHash });
 console.log(JSON.stringify({ baseline: output, routes: baseline.routes.length, screens: baseline.screens.length, apiSamples: baseline.apiSamples.length, resourceCoverage: baseline.codeReference.resourceCoverage, reusedIntegrityEntries }));
