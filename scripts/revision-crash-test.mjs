@@ -18,7 +18,11 @@ try {
   recordArtifact(dir, { artifactId: 'crash-plan', reference: ref, sha256: `sha256:${crypto.createHash('sha256').update(text).digest('hex')}` });
   const demoRef = 'runtime-demo.json', demoText = 'preserved generated demo'; fs.writeFileSync(path.join(dir, demoRef), demoText);
   recordArtifact(dir, { artifactId: 'crash-demo', reference: demoRef, sha256: `sha256:${crypto.createHash('sha256').update(demoText).digest('hex')}` });
-  const state = readRunState(dir); state.artifacts.visualExecutionPlan = ref; state.artifacts.runtimeDemo = demoRef; state.revision += 1; commitRunState(dir, state, { reason: 'revision-crash-fixture' });
+  const manifestRef = 'role-advisory-manifest.json', manifestText = '{ "stages": { "gate1": { "status": "ready" } } }\n';
+  fs.writeFileSync(path.join(dir, manifestRef), manifestText);
+  recordArtifact(dir, { artifactId: 'crash-manifest', reference: manifestRef, sha256: `sha256:${crypto.createHash('sha256').update(manifestText).digest('hex')}` });
+  fs.mkdirSync(path.join(dir, 'advisories', 'gate1'), { recursive: true }); fs.writeFileSync(path.join(dir, 'advisories', 'gate1', 'old.json'), '{}\n');
+  const state = readRunState(dir); state.artifacts.visualExecutionPlan = ref; state.artifacts.runtimeDemo = demoRef; state.artifacts.roleAdvisoryManifest = manifestRef; state.revision += 1; commitRunState(dir, state, { reason: 'revision-crash-fixture' });
   const initialEpoch = Number(state.confirmationEpochs?.gate1 || 0);
   const injection = path.join(project, 'crash-after-move.mjs');
   fs.writeFileSync(injection, `import fs from 'node:fs'; const rename = fs.renameSync; fs.renameSync = (...args) => { const result = rename(...args); if (String(args[0]).endsWith('/${ref}') && String(args[1]).includes('/invalidated/')) process.exit(73); return result; };\n`);
@@ -46,6 +50,8 @@ try {
   const revisions = fs.readFileSync(path.join(dir, 'prompt-revisions.ndjson'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.equal(revisions.length, 1); assert.equal(revisions[0].transactionId, transaction.transactionId); assert.equal(revisions[0].reason, transaction.reason);
   assert.ok(revisionInvalidationEvents(dir, transaction.transactionId).some(event => event.type === 'visual-intermediates-invalidated' && event.recovered));
+  const roleArchive = revisionInvalidationEvents(dir, transaction.transactionId).find(event => event.type === 'role-advisories-invalidated');
+  assert.ok(roleArchive); assert.equal(fs.readFileSync(path.join(dir, roleArchive.archive, manifestRef), 'utf8'), manifestText, 'role manifest history must retain its exact original bytes');
   result = recover(); assert.equal(result.status, 0, result.stderr || result.stdout); assert.equal(reconcileRun(dir).status, 'consistent');
   assert.equal(readRunState(dir).confirmationEpochs.gate1, initialEpoch + 1);
   const secondId = 'committed-crash', secondSession = 'committed-crash-session';

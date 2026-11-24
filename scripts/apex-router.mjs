@@ -33,6 +33,7 @@ import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
+import { preserveRoleManifest } from './role-manifest-archive.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, pendingRevisionTransactions, readRunState, reconcileRun, recordArtifact, revisionInvalidationEvents, archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -555,15 +556,13 @@ function invalidateRoleStages(dir, state, stages, reason, transactionId = null) 
     if (state.artifacts?.roleDecisionSummaries) delete state.artifacts.roleDecisionSummaries[stage];
   }
   if (manifestFile && fs.existsSync(manifestFile)) {
-    try {
-      const manifest = read(manifestFile);
-      if (stages.some(stage => Object.hasOwn(manifest.stages || {}, stage))) {
-        archiveArtifacts(dir, [manifestRef], 'role-stages-invalidated');
-        for (const stage of stages) delete manifest.stages?.[stage];
-        write(manifestFile, manifest);
-      }
+    let manifest;
+    try { manifest = read(manifestFile); } catch { state.artifacts.roleAdvisoryManifest = null; }
+    if (manifest && stages.some(stage => Object.hasOwn(manifest.stages || {}, stage))) {
+      preserveRoleManifest(dir, manifestRef, path.join(dir, 'invalidated', stamp), 'role-stages-invalidated');
+      for (const stage of stages) delete manifest.stages?.[stage];
+      write(manifestFile, manifest);
     }
-    catch { state.artifacts.roleAdvisoryManifest = null; }
   }
   if (moved.length) appendEvent(dir, { type: 'role-advisories-invalidated', reason, stages, archive: path.join('invalidated', stamp), artifacts: moved, transactionId });
   return moved;

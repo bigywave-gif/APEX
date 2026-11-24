@@ -37,6 +37,7 @@ try {
   invoke('analyze_requirement','role-advisory.mjs',['record',dir,'gate1',put(roleId+'-input.json',input)]);
  }
  invoke('analyze_requirement','role-advisory.mjs',['summarize',dir,'gate1']);
+ const productManifestSnapshot=fs.readFileSync(path.join(dir,'role-advisory-manifest.json'));
  const titles=['需求方向与成功标准','用户、场景与核心任务','轨道判断与正式基线','产品范围、页面与功能边界','信息架构、数据、API 与权限','交付路径、技术约束与不包含项','质量门槛、验证与验收','已知事实、假设、待决项与风险'];
  const body=titles.map((title,i)=>`## ${i+1}. ${title}\n\n本节针对${title}明确任务管理页面的目标用户、功能边界、现有约束、状态变化和可验证的验收依据，确保交付内容可以供后续设计师逐项使用。`).join('\n\n')+'\n\n### 内部专业协作摘要\n'+fs.readFileSync(path.join(dir,'advisories/gate1/role-decision-summary.md'),'utf8');
  invoke('analyze_requirement','contract-recorder.mjs',['gate1-presentation',dir,put('gate1-input.md',body)]);
@@ -72,6 +73,7 @@ try {
   invoke('plan_visual','role-advisory.mjs',['record',dir,'visual',put('visual-'+roleId+'.json',review)]);
  }
  invoke('plan_visual','role-advisory.mjs',['summarize',dir,'visual']);
+ assert.ok(fs.readdirSync(path.join(dir,'invalidated')).some(epoch=>{const file=path.join(dir,'invalidated',epoch,'role-advisory-manifest.json');return fs.existsSync(file)&&fs.readFileSync(file).equals(productManifestSnapshot)}),'visual summary must preserve the exact previous product role manifest');
  const runDir=dir;
   const designText = '# Design contract\nPrioritize task hierarchy and clear feedback.\n';
   fs.writeFileSync(path.join(runDir, 'DESIGN.md'), designText);

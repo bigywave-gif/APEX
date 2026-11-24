@@ -527,7 +527,7 @@ export function recordArtifact(runDir, { artifactId, reference, sha256, status =
 // Archived artifacts remain in the ledger and keep their lineage edges, but
 // are no longer the current materialization for a reference. This is needed
 // when an authorized repair preserves stale evidence under invalidated/.
-export function archiveArtifacts(runDir, references, reason = 'superseded-by-controlled-repair') {
+export function archiveArtifacts(runDir, references, reason = 'superseded-by-controlled-repair', { expectedHashes = null } = {}) {
   const unique = [...new Set((references || []).filter(Boolean))];
   if (!unique.length) return 0;
   const database = open(runDir);
@@ -535,7 +535,13 @@ export function archiveArtifacts(runDir, references, reason = 'superseded-by-con
   try {
     database.exec('BEGIN IMMEDIATE');
     const statement = database.prepare(`UPDATE artifacts SET status = 'archived', metadata_json = ? WHERE reference = ? AND status != 'archived'`);
-    for (const reference of unique) changes += statement.run(JSON.stringify({ archivedAt: now(), reason }), reference).changes;
+    for (const reference of unique) {
+      if (expectedHashes && Object.hasOwn(expectedHashes, reference)) {
+        const current = database.prepare("SELECT sha256 FROM artifacts WHERE reference = ? AND status != 'archived' ORDER BY rowid DESC LIMIT 1").get(reference);
+        if (current && current.sha256 !== expectedHashes[reference]) throw new Error(`artifact changed before archival: ${reference}`);
+      }
+      changes += statement.run(JSON.stringify({ archivedAt: now(), reason }), reference).changes;
+    }
     database.exec('COMMIT');
   } catch (error) {
     try { database.exec('ROLLBACK'); } catch {}

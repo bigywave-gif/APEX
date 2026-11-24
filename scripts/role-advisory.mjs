@@ -13,6 +13,7 @@ import { formalReviewBindings, validateProductTaskReview } from './formal-intera
 import { validateRequirementReview } from './requirement-review.mjs';
 import { validateResourceReviews } from './existing-resource-freshness.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
+import { preserveRoleManifest } from './role-manifest-archive.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const registryFile = path.join(apexRoot, 'registry', 'agency-role-registry.json');
@@ -342,7 +343,8 @@ function repair(runDir, stage) {
       supersededJobs = supersedeQueuedAgentJobs(runDir, stage, selection.selectedRoles.map(role => selection.agentJobs[role]));
     }
   }
-  const archive = path.join(runDir, 'invalidated', `${Date.now()}-role-input-repair`, 'advisories', stage);
+  const epoch = path.join(runDir, 'invalidated', `${Date.now()}-role-${crypto.randomUUID()}-input-repair`);
+  const archive = path.join(epoch, 'advisories', stage);
   fs.mkdirSync(path.dirname(archive), { recursive: true });
   fs.renameSync(source, archive);
   const references = fs.readdirSync(archive).filter(name => fs.statSync(path.join(archive, name)).isFile()).map(name => `advisories/${stage}/${name}`);
@@ -351,7 +353,7 @@ function repair(runDir, stage) {
   if (fs.existsSync(manifestFile)) {
     const manifest = read(manifestFile);
     if (Object.hasOwn(manifest.stages || {}, stage)) {
-      archiveArtifacts(runDir, ['role-advisory-manifest.json'], 'role-stage-repaired');
+      preserveRoleManifest(runDir, 'role-advisory-manifest.json', epoch, 'role-stage-repaired');
       delete manifest.stages[stage];
       write(manifestFile, manifest);
     }
@@ -400,7 +402,9 @@ function summarize(runDir, stage) {
   });
   manifest.stages[stage] = { selectedRoles: selection.selectedRoles, advisories: advisoryEntries, summary: relative(runDir, summaryFile), summarySha256: hash(summaryFile), status: 'ready' };
   manifest.registry = { path: 'registry/agency-role-registry.json', sha256: hash(registryFile), upstreamCommit: read(registryFile).upstream.commit };
-  write(path.join(runDir, 'role-advisory-manifest.json'), manifest); validate('role-advisory-manifest.schema.json', path.join(runDir, 'role-advisory-manifest.json'));
+  const manifestPath = path.join(runDir, 'role-advisory-manifest.json');
+  if (fs.existsSync(manifestPath) && fs.readFileSync(manifestPath, 'utf8') !== `${JSON.stringify(manifest, null, 2)}\n`) preserveRoleManifest(runDir, 'role-advisory-manifest.json', path.join(runDir, 'invalidated', `${Date.now()}-role-summary-${crypto.randomUUID()}`), 'role-summary-updated');
+  write(manifestPath, manifest); validate('role-advisory-manifest.schema.json', manifestPath);
   const state = stateFor(runDir); state.artifacts.roleAdvisoryManifest = 'role-advisory-manifest.json'; state.artifacts.roleDecisionSummaries ||= {}; state.artifacts.roleDecisionSummaries[stage] = relative(runDir, summaryFile); saveState(runDir, state);
   console.log(JSON.stringify({ stage, summary: summaryFile, manifest: path.join(runDir, 'role-advisory-manifest.json'), roles: selection.selectedRoles }));
 }

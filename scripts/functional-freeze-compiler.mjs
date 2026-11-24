@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalApexRoot } from './apex-paths.mjs';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { archiveArtifacts, commitRunState, readRunState } from './run-ledger.mjs';
+import { preserveRoleManifest } from './role-manifest-archive.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const [command, runArg] = process.argv.slice(2);
@@ -103,7 +104,8 @@ write(outputFile, output);
 if (previousHash && previousHash !== sha256(outputFile)) {
   const stage = 'baseline', advisoryDir = path.join(runDir, 'advisories', stage);
   if (fs.existsSync(advisoryDir)) {
-    const archive = path.join(runDir, 'invalidated', `${Date.now()}-functional-freeze-repair`, 'advisories', stage);
+    const epoch = path.join(runDir, 'invalidated', `${Date.now()}-${crypto.randomUUID()}-functional-freeze-repair`);
+    const archive = path.join(epoch, 'advisories', stage);
     fs.mkdirSync(path.dirname(archive), { recursive: true });
     fs.renameSync(advisoryDir, archive);
     archiveArtifacts(runDir, [
@@ -116,7 +118,7 @@ if (previousHash && previousHash !== sha256(outputFile)) {
     if (fs.existsSync(manifestFile)) {
       const manifest = read(manifestFile);
       if (Object.hasOwn(manifest.stages || {}, stage)) {
-        archiveArtifacts(runDir, ['role-advisory-manifest.json'], 'functional-freeze-recompiled');
+        preserveRoleManifest(runDir, 'role-advisory-manifest.json', epoch, 'functional-freeze-recompiled');
         delete manifest.stages[stage];
         write(manifestFile, manifest);
       }
