@@ -11,6 +11,7 @@ import { canonicalApexRoot, globalBridge } from './apex-paths.mjs';
  * allow-list scoped to one project, run, and session.
  */
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { demoPresentation, verifyChatPresentation } from './chat-demo.mjs';
 import { observedControlCoverageStatus, validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
 import fs from 'node:fs';
@@ -32,7 +33,7 @@ import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
-import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
+import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, readRunState, reconcileRun, recordArtifact, archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bridgeSource = path.join(apexRoot, 'runtime', 'host-bridges', 'codex-skill', 'SKILL.md');
@@ -2888,8 +2889,8 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
   if (['visual-plan', 'visual'].includes(checkpoint) && state.gates?.gate1?.status !== 'passed' && !(usesCombinedPlan(state) && checkpointReady(state, run.runDir, 'gate1'))) fail('visual prompt revision requires a current product plan');
   if (checkpoint === 'stitch' && !state.locks?.effectApproved) fail('Stitch prompt revision requires confirmed effect image');
   if (checkpoint === 'implementation' && !state.locks?.stitchCurrent && !state.locks?.stitchSkipped) fail('implementation prompt revision requires sealed or explicitly skipped Stitch');
-  const transactionId = crypto.randomUUID();
-  beginRevisionTransaction(run.runDir, { type: 'prompt-revision-transaction-started', transactionId, at: now(), sessionId, checkpoint, impact, reason, stateRevision: Number(state.revision || 0), ownerPid: process.pid });
+  const transactionId = crypto.randomUUID(), initialStateHash = sha256Text(JSON.stringify(state));
+  beginRevisionTransaction(run.runDir, { type: 'prompt-revision-transaction-started', transactionId, at: now(), sessionId, checkpoint, impact, reason, stateRevision: Number(state.revision || 0), baseStateHash: initialStateHash, ownerPid: process.pid, ownerHost: os.hostname() });
   const gate2Open = state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed === true;
   const approvalsBefore = { gate1: state.gates?.gate1?.status === 'passed', 'visual-plan': state.locks?.visualPlanApproved === true, stitch: state.locks?.stitchApproved === true, implementation: state.locks?.implementationApproved === true };
   let revisionOutcome = { kind: 'current-checkpoint-revision', checkpoint, impact, reopenedApprovedCheckpoints: [], message: '调整只影响当前未确认工件；将自动重建后回到同一确认点。' };
@@ -2934,11 +2935,12 @@ function recordPromptRevision(root, run, sessionId, checkpoint, impact, reason) 
     appendEvent(run.runDir, { type: 'post-gate2-implementation-revision-retained', sessionId, reason, preserved: ['gate2', 'implementation-authority'], gate3: 'must-revalidate' });
     revisionOutcome = { kind: 'post-gate2-implementation-revision', checkpoint, impact, reopenedApprovedCheckpoints: [], message: '该调整未改变冻结视觉、动效、依赖或映射；保留 Gate 2 与实施权限，但交付前必须重新通过 Gate 3。' };
   }
-  state.revision = Number(state.revision || 0) + 1; state.updatedAt = now(); write(path.join(run.runDir, 'state.json'), state);
+  state.revision = Number(state.revision || 0) + 1; state.updatedAt = now();
   const revision = { at: now(), sessionId, checkpoint, impact, reason, stateRevision: state.revision, transactionId, revisionOutcome };
-  fs.appendFileSync(path.join(run.runDir, 'prompt-revisions.ndjson'), `${JSON.stringify(revision)}\n`); appendEvent(run.runDir, { type: 'prompt-revised', sessionId, checkpoint, impact, reason });
+  commitRunState(run.runDir, state, { reason: 'prompt-revision-state', expectedStateHash: initialStateHash, event: { type: 'prompt-revision-state-committed', transactionId, stateHash: sha256Text(JSON.stringify(state)), revision } });
+  appendEvent(run.runDir, { type: 'prompt-revised', sessionId, checkpoint, impact, reason });
   appendEvent(run.runDir, { type: 'revision-outcome-recorded', sessionId, ...revisionOutcome });
-  appendLedgerEvent(run.runDir, { type: 'prompt-revision-transaction-completed', transactionId, at: now(), stateRevision: state.revision });
+  finalizeCommittedRevision(run.runDir, transactionId);
   return { revisionOutcome, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
 }
 

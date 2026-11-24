@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { beginRevisionTransaction, pendingRevisionTransactions, readRunState, reconcileRun } from './run-ledger.mjs';
+import { beginRevisionTransaction, commitRunState, finalizeCommittedRevision, pendingRevisionTransactions, readRunState, reconcileRun } from './run-ledger.mjs';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 const project = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-revision-transaction-'));
 const run = (name, args) => spawnSync(process.execPath, [path.join(scripts, name), ...args], { encoding: 'utf8', timeout: 30000 });
 try {
-  for (const kind of ['live', 'interrupted', 'completed']) {
+  for (const kind of ['live', 'foreign', 'interrupted', 'completed', 'committed', 'already-logged', 'conflict', 'diverged']) {
     const session = `session-${kind}`, id = `revision-${kind}`;
     let result = run('apex-router.mjs', ['intake', project, id, 'greenfield', 'standard', 'interactive', session, '确认调用 APEX']);
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -24,17 +25,39 @@ try {
       continue;
     }
     const before = readRunState(dir);
-    const entry = { type: 'prompt-revision-transaction-started', transactionId: `transaction-${kind}`, at: new Date().toISOString(), sessionId: session, checkpoint: 'gate1', impact: 'visible', reason: '保留用户原始修改要求', stateRevision: before.revision, ownerPid: kind === 'live' ? process.pid : 2147483647 };
+    const entry = { type: 'prompt-revision-transaction-started', transactionId: `transaction-${kind}`, at: new Date().toISOString(), sessionId: session, checkpoint: 'gate1', impact: 'visible', reason: '保留用户原始修改要求', stateRevision: before.revision, ownerPid: kind === 'live' ? process.pid : 2147483647, ownerHost: kind === 'foreign' ? 'another-host' : os.hostname() };
+    assert.throws(() => beginRevisionTransaction(dir, { ...entry, baseStateHash: 'sha256:incorrect' }), /base state hash changed/);
     beginRevisionTransaction(dir, entry);
     assert.equal(pendingRevisionTransactions(dir)[0].reason, entry.reason);
+    assert.match(pendingRevisionTransactions(dir)[0].baseStateHash, /^sha256:[a-f0-9]{64}$/);
     assert.throws(() => beginRevisionTransaction(dir, { ...entry, transactionId: 'duplicate' }), /earlier prompt revision/);
     assert.ok(reconcileRun(dir).issues.some(issue => issue.type === 'prompt-revision-pending' && issue.transactionId === entry.transactionId));
+    if (['committed', 'already-logged', 'conflict', 'diverged'].includes(kind)) {
+      const next = structuredClone(before); next.revision += 1; next.updatedAt = new Date().toISOString();
+      next.confirmationEpochs = { ...(next.confirmationEpochs || {}), gate1: 3 };
+      const revision = { at: new Date().toISOString(), sessionId: session, checkpoint: entry.checkpoint, impact: entry.impact, reason: entry.reason, stateRevision: next.revision, transactionId: entry.transactionId, revisionOutcome: { kind: 'current-checkpoint-revision' } };
+      const stateHash = `sha256:${crypto.createHash('sha256').update(JSON.stringify(next)).digest('hex')}`;
+      commitRunState(dir, next, { reason: 'revision-commit-fixture', event: { type: 'prompt-revision-state-committed', transactionId: entry.transactionId, stateHash, revision } });
+      if (kind === 'diverged') { const later = structuredClone(next); later.revision += 1; commitRunState(dir, later, { reason: 'conflicting-state-fixture' }); }
+      if (kind === 'already-logged' || kind === 'conflict') fs.writeFileSync(path.join(dir, 'prompt-revisions.ndjson'), `${JSON.stringify(kind === 'conflict' ? { ...revision, reason: 'changed' } : revision)}\n`);
+    }
     result = run('apex-router.mjs', ['authorize', project, id, session, 'recover']); assert.equal(result.status, 0, result.stderr || result.stdout);
     const auth = JSON.parse(result.stdout).authorizationRef;
     result = run('apex-action.mjs', ['run', project, id, session, auth, 'recover', 'apex-recover.mjs', dir]);
-    if (kind === 'live') { assert.equal(result.status, 0, result.stderr || result.stdout); assert.equal(JSON.parse(result.stdout).status, 'waiting'); }
-    else { assert.notEqual(result.status, 0); assert.match(result.stdout, /revision-recovery-required/); }
-    assert.equal(readRunState(dir).revision, before.revision, 'recovery must not change state before the revision is resolved');
+    if (kind === 'live' || kind === 'foreign') { assert.equal(result.status, 0, result.stderr || result.stdout); assert.equal(JSON.parse(result.stdout).status, 'waiting'); }
+    else if (kind === 'interrupted') { assert.notEqual(result.status, 0); assert.match(result.stdout, /revision-recovery-required/); }
+    else if (kind === 'conflict') { assert.notEqual(result.status, 0); assert.match(result.stderr, /revision log conflicts/); }
+    else if (kind === 'diverged') { assert.notEqual(result.status, 0); assert.match(result.stderr, /current state/); }
+    else {
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(JSON.parse(result.stdout).revisionRecovery.status, 'completed');
+      assert.equal(readRunState(dir).confirmationEpochs.gate1, 3, 'recovery must not apply the revision twice');
+      assert.equal(fs.readFileSync(path.join(dir, 'prompt-revisions.ndjson'), 'utf8').trim().split('\n').length, 1);
+      assert.deepEqual(pendingRevisionTransactions(dir), []);
+      assert.equal(finalizeCommittedRevision(dir, entry.transactionId).status, 'already-completed');
+      continue;
+    }
+    if (['live', 'foreign', 'interrupted'].includes(kind)) assert.equal(readRunState(dir).revision, before.revision, 'recovery must not change state before the revision is resolved');
     assert.equal(pendingRevisionTransactions(dir)[0].reason, entry.reason);
   }
   const raceId = 'revision-race', raceSession = 'session-race';

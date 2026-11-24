@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { canonicalApexRoot } from './apex-paths.mjs';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { appendLedgerEvent, archiveArtifacts, commitRunState, invalidationEvents, pendingRevisionTransactions, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
+import { appendLedgerEvent, archiveArtifacts, commitRunState, finalizeCommittedRevision, invalidationEvents, pendingRevisionTransactions, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
 import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
 import { inspectRunningOperations, markInterruptedOperations } from './operation-recovery.mjs';
 import { archivedMissingReferences } from './recovery-archive.mjs';
@@ -25,14 +26,23 @@ if (operationInspection.deferred.length) {
   process.exit(0);
 }
 const pendingRevisions = pendingRevisionTransactions(runDir);
+let revisionRecovery = null;
 if (pendingRevisions.length) {
   const active = pendingRevisions.some(item => {
-    if (!Number.isInteger(item.ownerPid) || item.ownerPid <= 0) return true;
+    if (item.ownerHost !== os.hostname() || !Number.isInteger(item.ownerPid) || item.ownerPid <= 0) return true;
     try { process.kill(item.ownerPid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; }
   });
-  console.log(JSON.stringify({ status: active ? 'waiting' : 'revision-recovery-required', transactions: pendingRevisions.map(item => ({ transactionId: item.transactionId, checkpoint: item.checkpoint, startedAt: item.at })), note: active ? 'The revision owner may still be running; its state and files are not modified.' : 'The interrupted revision retains its original request; automatic replay is not yet available.' }));
-  if (!active) process.exitCode = 2;
-  process.exit();
+  if (active) {
+    console.log(JSON.stringify({ status: 'waiting', transactions: pendingRevisions.map(item => ({ transactionId: item.transactionId, checkpoint: item.checkpoint, startedAt: item.at })), note: 'The revision owner may still be running; its state and files are not modified.' }));
+    process.exit(0);
+  }
+  if (pendingRevisions.length !== 1) die('multiple pending revision transactions require investigation');
+  try { revisionRecovery = finalizeCommittedRevision(runDir, pendingRevisions[0].transactionId); }
+  catch (error) { die(`revision recovery refused: ${error.message}`); }
+  if (revisionRecovery.status === 'state-not-committed') {
+    console.log(JSON.stringify({ status: 'revision-recovery-required', transactions: pendingRevisions.map(item => ({ transactionId: item.transactionId, checkpoint: item.checkpoint, startedAt: item.at })), note: 'The interrupted revision retains its original request; replay before state commit is not yet available.' }));
+    process.exit(2);
+  }
 }
 let implementationSealRecovery = null;
 if (state.roleChain?.confirmationModel === 'two-confirmations' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed) {
@@ -100,5 +110,5 @@ state.updatedAt = new Date().toISOString();
 commitRunState(runDir, state, { reason: 'controlled-recovery', event: { type: 'run-recovered', changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs } });
 appendLedgerEvent(runDir, { type: 'recovery-complete', interruptedOperations, recoveredAgentJobs, archivedArtifacts, staleInputReferences, staleRuntimeEvidenceReferences, implementationSealRecovery });
 const reconciliation = reconcileRun(runDir);
-console.log(JSON.stringify({ checkpoint: latestRef?.path || null, changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs, archivedArtifacts, reconciliation, gate2: state.gates.gate2.status, gate3: state.gates.gate3.status }));
+console.log(JSON.stringify({ checkpoint: latestRef?.path || null, changed, invalidates: [...invalidates], interruptedOperations, recoveredAgentJobs, archivedArtifacts, revisionRecovery, reconciliation, gate2: state.gates.gate2.status, gate3: state.gates.gate3.status }));
 if (reconciliation.status !== 'consistent') process.exitCode = 2;

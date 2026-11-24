@@ -417,8 +417,37 @@ export function beginRevisionTransaction(runDir, event) {
     const snapshot = latestSnapshot(database), state = JSON.parse(snapshot?.state_json || '{}');
     if (state.lifecycle === 'cancelled') throw new Error('cannot revise a cancelled run');
     if (!snapshot || Number(snapshot.revision) !== event.stateRevision) throw new Error('revision base state changed before transaction began');
-    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('prompt-revision-transaction-started', now(), JSON.stringify(event));
+    if (event.baseStateHash && event.baseStateHash !== snapshot.state_hash) throw new Error('revision base state hash changed before transaction began');
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('prompt-revision-transaction-started', now(), JSON.stringify({ ...event, baseStateHash: snapshot.state_hash }));
     database.exec('COMMIT');
+  } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
+}
+
+export function finalizeCommittedRevision(runDir, transactionId) {
+  const database = open(runDir);
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    const pending = pendingRevisionsFromDatabase(database).find(item => item.transactionId === transactionId);
+    if (!pending) {
+      const completed = database.prepare("SELECT payload_json FROM events WHERE event_type = 'prompt-revision-transaction-completed'").all().some(row => parseJson(row.payload_json)?.transactionId === transactionId);
+      if (!completed) throw new Error('revision transaction is not pending');
+      database.exec('COMMIT'); return { status: 'already-completed', transactionId };
+    }
+    const records = database.prepare("SELECT payload_json FROM events WHERE event_type = 'prompt-revision-state-committed' ORDER BY id").all().map(row => parseJson(row.payload_json)).filter(item => item?.transactionId === transactionId);
+    if (!records.length) { database.exec('COMMIT'); return { status: 'state-not-committed', transactionId }; }
+    if (records.length !== 1) throw new Error('revision state commit is ambiguous');
+    const committed = records[0], revision = committed.revision, snapshot = latestSnapshot(database);
+    if (!revision || revision.transactionId !== transactionId || revision.sessionId !== pending.sessionId || revision.checkpoint !== pending.checkpoint || revision.impact !== pending.impact || revision.reason !== pending.reason || revision.stateRevision !== Number(snapshot?.revision) || committed.stateHash !== snapshot?.state_hash) throw new Error('revision state commit does not match its original request and current state');
+    const file = path.join(runDir, 'prompt-revisions.ndjson');
+    if (fs.existsSync(file) && (!fs.lstatSync(file).isFile() || !fs.realpathSync(file).startsWith(`${fs.realpathSync(runDir)}${path.sep}`))) throw new Error('revision log must be a Run-local regular file');
+    const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+    let entries;
+    try { entries = content.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)); } catch { throw new Error('revision log is unreadable; preserve it for investigation'); }
+    const matching = entries.filter(entry => entry.transactionId === transactionId);
+    if (matching.length > 1 || (matching.length && JSON.stringify(matching[0]) !== JSON.stringify(revision))) throw new Error('revision log conflicts with the committed transaction');
+    if (!matching.length) atomicWrite(file, `${content}${content && !content.endsWith('\n') ? '\n' : ''}${JSON.stringify(revision)}\n`);
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('prompt-revision-transaction-completed', now(), JSON.stringify({ type: 'prompt-revision-transaction-completed', transactionId, at: now(), stateRevision: revision.stateRevision }));
+    database.exec('COMMIT'); return { status: 'completed', transactionId, recoveredLog: !matching.length };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 
