@@ -15,7 +15,7 @@ import os from 'node:os';
 import { demoPresentation, verifyChatPresentation } from './chat-demo.mjs';
 import { observedControlCoverageStatus, validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
 import { acquireRuntimeStartLock, runtimeStartLockAvailable } from './runtime-start-lock.mjs';
-import { readRuntimeLaunchIntent, findRuntimeLaunchProcess } from './runtime-launch-intent.mjs';
+import { readRuntimeLaunchIntent, findRuntimeLaunchProcess, recoveredRuntimeReady } from './runtime-launch-intent.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -139,6 +139,7 @@ function failureCategory(receipt) {
   }
   if (/(?:stage|run)-token-budget-exhausted/i.test(evidence)) return 'token-budget-exhausted';
   if (/another runtime start is active or its lock is unavailable/i.test(evidence)) return 'runtime-start-locked';
+  if (/existing run-local Demo process is running but its URL is unavailable/i.test(evidence)) return 'runtime-recovery-unavailable';
   if (/required taste-skill changed after role selection/i.test(evidence)) return 'required-skill-drift';
   if (/required taste-skill (?:is not installed|is empty)/i.test(evidence)) return 'required-skill-unavailable';
   if (/optional agent skill is missing or changed/i.test(evidence)) return 'optional-skill-unavailable';
@@ -2271,7 +2272,8 @@ function executionDirective(state, runDir = null) {
     } catch {}
   }
   const releasedRuntimeStart = action === 'generate_visual' && latestFailure?.category === 'runtime-start-locked' && latestFailure.script === 'visual-sandbox-runtime.mjs' && runtimeStartLockAvailable(runDir);
-  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || releasedRuntimeStart || latestFailure?.category === 'obsolete-boundary-snapshot');
+  const recoveredRuntime = action === 'generate_visual' && latestFailure?.category === 'runtime-recovery-unavailable' && latestFailure.script === 'visual-sandbox-runtime.mjs' && recoveredRuntimeReady(runDir, state.runId);
+  const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || releasedRuntimeStart || recoveredRuntime || latestFailure?.category === 'obsolete-boundary-snapshot');
   const blockingOperation = continuationStall(runDir, action, currentStep.id) || (automaticallyRemediableFailure ? null : latestFailure);
   return {
     kind: 'must-complete-before-user-response',

@@ -27,3 +27,13 @@ export function findRuntimeLaunchProcess(intent) {
   if (matches.length > 1) throw new Error('multiple processes match the runtime launch intent');
   return matches[0] || null;
 }
+
+export function recoveredRuntimeReady(runDir, runId) {
+  try {
+    const intent = readRuntimeLaunchIntent(runDir, runId);
+    if (!intent || !findRuntimeLaunchProcess(intent)) return false;
+    const url = `http://${intent.bindHost === '::1' ? '[::1]' : intent.bindHost}:${intent.port}/`;
+    const probe = spawnSync(process.execPath, ['-e', "const http=require('node:http');const r=http.get(process.argv[1],s=>{s.resume();process.exit(s.statusCode===200?0:1)});r.setTimeout(500,()=>r.destroy());r.on('error',()=>process.exit(1));", url], { encoding: 'utf8', timeout: 1500 });
+    return probe.status === 0;
+  } catch { return false; }
+}

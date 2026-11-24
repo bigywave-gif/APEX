@@ -41,7 +41,22 @@ try {
   childPid = observed.pid; process.kill(childPid, 'SIGSTOP'); stopped = true; process.kill(observed.starter, 'SIGKILL');
   const result = await ended; assert.notEqual(result.code, 0); assert.equal(fs.existsSync(path.join(runDir, 'runtime-launch-intent.json')), true); assert.equal(fs.existsSync(path.join(runDir, 'visual-sandbox-runtime.json')), false);
   const retry = call(['authorize', project, runId, session, 'generate_visual']);
-  const recovered = await new Promise((resolve, reject) => {
+  let recovered;
+  if (process.env.APEX_TEST_LONG_RECOVERY === '1') {
+    const blocked = spawnSync(process.execPath, [action, 'run', project, runId, session, retry.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir], { encoding: 'utf8', timeout: 30000 });
+    assert.notEqual(blocked.status, 0); assert.match(blocked.stderr, /existing run-local Demo process is running but its URL is unavailable/);
+    const pending = call(['status', project, runId, session]); assert.equal(pending.executionDirective.blockingOperation.category, 'runtime-recovery-unavailable');
+    const identical = call(['authorize', project, runId, session, 'generate_visual']);
+    const denied = spawnSync(process.execPath, [action, 'run', project, runId, session, identical.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir], { encoding: 'utf8', timeout: 30000 });
+    assert.notEqual(denied.status, 0); assert.match(denied.stderr, /identical controlled operation already failed/);
+    process.kill(childPid, 'SIGCONT'); stopped = false;
+    const intent = readRuntimeLaunchIntent(runDir, runId), healthUrl = `http://127.0.0.1:${intent.port}/`;
+    let ready = false; for (let i = 0; i < 50 && !ready; i++) { try { ready = (await fetch(healthUrl)).status === 200; } catch {} if (!ready) await new Promise(resolve => setTimeout(resolve, 100)); }
+    assert.equal(ready, true);
+    const resumed = call(['status', project, runId, session]); assert.notEqual(resumed.executionDirective?.blockingOperation?.category, 'runtime-recovery-unavailable');
+    const finalAuth = call(['authorize', project, runId, session, 'generate_visual']);
+    recovered = spawnSync(process.execPath, [action, 'run', project, runId, session, finalAuth.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir], { encoding: 'utf8', timeout: 30000 });
+  } else recovered = await new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, [action, 'run', project, runId, session, retry.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir], { stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = '';
     proc.stdout.on('data', data => stdout += data); proc.stderr.on('data', data => stderr += data); proc.on('error', reject);
     const retryReceipt = path.join(runDir, 'operations', `${path.basename(retry.authorizationRef, '.json')}.json`);
@@ -52,6 +67,10 @@ try {
   assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout); const output = JSON.parse(recovered.stdout);
   assert.equal(output.reused, true); assert.equal(output.pid, childPid); assert.equal(fs.existsSync(path.join(runDir, 'runtime-launch-intent.json')), false);
   const cancelled = call(['cancel', project, runId, session, '取消当前执行']); assert.ok(cancelled.cancellation.services.stopped.some(item => item.pid === childPid)); childPid = null;
+  if (process.env.APEX_TEST_LONG_RECOVERY !== '1') {
+    const long = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { encoding: 'utf8', timeout: 60000, env: { ...process.env, APEX_TEST_LONG_RECOVERY: '1' } });
+    assert.equal(long.status, 0, long.stderr || long.stdout);
+  }
   console.log(JSON.stringify({ status: 'passed', scope: 'actual starter SIGKILL before registration; delayed child readiness and recovery' }));
 } finally {
   if (!childPid) { try { const intent = readRuntimeLaunchIntent(runDir, runId); if (intent) childPid = findRuntimeLaunchProcess(intent); } catch {} }
