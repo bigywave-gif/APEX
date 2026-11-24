@@ -38,8 +38,15 @@ function seedImplementationSeal(state) {
   const name = fs.readdirSync(path.join(runDir, 'approvals')).find(value => value.startsWith('demo-') && value.endsWith('.json'));
   if (!name) throw new Error('Demo confirmation is missing');
   const demoApproval = `approvals/${name}`;
+  state.artifacts.visualSourceManifest = 'fixture-visual-source.json';
+  fs.writeFileSync(path.join(runDir, state.artifacts.visualSourceManifest), JSON.stringify({ bindings: [] }));
+  const sourceHash = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(runDir, state.artifacts.visualSourceManifest))).digest('hex')}`;
+  const plan = JSON.parse(fs.readFileSync(path.join(runDir, state.artifacts.visualExecutionPlan)));
+  // This isolated parity test does not assert formal source provenance.
+  state.artifacts.runtimeStateMatrix = 'fixture-runtime-state-matrix.json';
+  fs.writeFileSync(path.join(runDir, state.artifacts.runtimeStateMatrix), JSON.stringify({ sourceProvenance: { ready: true, bindings: [], sourceSelectionIds: (plan.sourceSelections || []).map(item => item.id) } }));
   for (const [key, file] of Object.entries({ visualBundle: 'fixture-bundle.json', implementationMap: 'fixture-map.json', implementationPresentation: 'fixture-presentation.md', implementationPresentationManifest: 'fixture-presentation.json' })) {
-    fs.writeFileSync(path.join(runDir, file), key === 'implementationMap' ? JSON.stringify({ entries: [{ runtimeTarget: ['fixture-formal.html'] }] }) : `fixture ${key}\n`); state.artifacts[key] = file;
+    fs.writeFileSync(path.join(runDir, file), key === 'implementationMap' ? JSON.stringify({ entries: [{ runtimeTarget: ['fixture-formal.html'] }] }) : key === 'visualBundle' ? JSON.stringify({ visualSourceManifest: { path: state.artifacts.visualSourceManifest, hash: sourceHash } }) : `fixture ${key}\n`); state.artifacts[key] = file;
   }
   const refs = [demoApproval, state.artifacts.visualBundle, state.artifacts.implementationMap, state.artifacts.implementationPresentation, state.artifacts.implementationPresentationManifest];
   const artifactHashes = refs.map(ref => ({ path: ref, sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(runDir, ref))).digest('hex') }));
@@ -195,6 +202,13 @@ try {
     const staleMap = run('apex-router.mjs', ['status', project, runId, session]);
     if (staleMap.nextRequiredAction !== 'recover' || staleMap.allowedActions.includes('implement') || staleMap.allowedActions.includes('verify')) throw new Error('changed sealed implementation map must prevent post-Gate-2 authority');
     fs.writeFileSync(mapFile, mapBytes);
+    const sourceFile = path.join(runDir, directState.artifacts.visualSourceManifest), sourceBytes = fs.readFileSync(sourceFile);
+    fs.appendFileSync(sourceFile, ' ');
+    const staleSource = run('apex-router.mjs', ['status', project, runId, session]);
+    if (staleSource.nextRequiredAction !== 'recover' || staleSource.allowedActions.includes('implement') || staleSource.allowedActions.includes('verify')) throw new Error('changed visual source manifest must block post-Gate-2 authority');
+    const deniedSource = spawnSync(process.execPath, [path.join(apexRoot, 'scripts/apex-router.mjs'), 'authorize', project, runId, session, 'verify'], { encoding: 'utf8' });
+    if (deniedSource.status === 0) throw new Error('changed visual source manifest must not authorize verification');
+    fs.writeFileSync(sourceFile, sourceBytes);
     const sealRef = directState.gates.gate2.evidence.find(ref => ref.startsWith('machine-seals/implementation-'));
     fs.unlinkSync(path.join(runDir, sealRef));
     const missingSeal = run('apex-router.mjs', ['status', project, runId, session]);

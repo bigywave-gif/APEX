@@ -22,6 +22,7 @@ import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 import { stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
+import { visualSourceCurrent } from './implementation-seal.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schemas = path.join(root, 'core/runtime/schemas');
@@ -506,6 +507,7 @@ function validateGate2(runDir, { machineSealPending = false, stateFile } = {}) {
 
 function validateGate3(runDir) {
   const { state, contract } = validateGate1(runDir);
+  if (!visualSourceCurrent(runDir, state)) throw new Error('sealed visual source manifest is missing or changed');
   if (stitchMachineSealRequired(state) && !stitchMachineSealCurrent(runDir, state)) throw new Error('Stitch machine seal is missing or stale');
   const resourceReview = assessResourceVerification(runDir, state);
   if (resourceReview.status === 'unverified') throw new Error(`Existing in-scope resources remain unverified: ${resourceReview.pending.length}`);

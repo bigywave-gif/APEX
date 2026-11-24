@@ -3,8 +3,24 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
+export function visualSourceCurrent(runDir, state) {
+  if (state.roleChain?.confirmationModel !== 'two-confirmations') return true;
+  try {
+    const root = fs.realpathSync(runDir);
+    const localFile = ref => {
+      if (typeof ref !== 'string' || !ref || path.isAbsolute(ref)) throw new Error('invalid reference');
+      const file = path.resolve(root, ref);
+      if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file) || !fs.realpathSync(file).startsWith(`${root}${path.sep}`) || !fs.statSync(file).isFile()) throw new Error('unsafe reference');
+      return file;
+    };
+    const bundle = JSON.parse(fs.readFileSync(localFile(state.artifacts?.visualBundle), 'utf8'));
+    const source = bundle.visualSourceManifest;
+    return source?.path === state.artifacts?.visualSourceManifest && /^sha256:[a-f0-9]{64}$/.test(source?.hash || '') && source.hash === `sha256:${sha(fs.readFileSync(localFile(source.path)))}`;
+  } catch { return false; }
+}
 export function implementationSealCurrent(runDir, state, demoApproval) {
   try {
+    if (!visualSourceCurrent(runDir, state)) return false;
     const refs = [demoApproval, state.artifacts?.visualBundle, state.artifacts?.implementationMap, state.artifacts?.implementationPresentation, state.artifacts?.implementationPresentationManifest];
     if (refs.some(ref => typeof ref !== 'string' || !ref) || new Set(refs).size !== refs.length) return false;
     const seals = (state.gates?.gate2?.evidence || []).filter(ref => typeof ref === 'string' && /^machine-seals\/implementation-[a-f0-9]{64}\.json$/.test(ref));
@@ -23,6 +39,7 @@ export function implementationSealCurrent(runDir, state, demoApproval) {
 // be rebuilt and revalidated rather than silently receiving a new authority.
 export function recoverImplementationSeal(runDir, state, demoApproval) {
   try {
+    if (!visualSourceCurrent(runDir, state)) throw new Error('sealed visual source manifest is missing or changed');
     const refs = [demoApproval, state.artifacts?.visualBundle, state.artifacts?.implementationMap, state.artifacts?.implementationPresentation, state.artifacts?.implementationPresentationManifest];
     if (refs.some(ref => typeof ref !== 'string' || !ref) || new Set(refs).size !== refs.length) throw new Error('implementation seal references are incomplete');
     const seals = (state.gates?.gate2?.evidence || []).filter(ref => typeof ref === 'string' && /^machine-seals\/implementation-[a-f0-9]{64}\.json$/.test(ref));

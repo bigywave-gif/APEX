@@ -137,7 +137,7 @@ Existing 项目的适配器推荐优先依据实际框架或明确的微前端�
 
 需要真实页面截图时，使用 `browser-capture.mjs capture <run-dir> <base-url> <browser-spec.json>` 调用全局 Playwright bridge。采集产物只记录真实截图和浏览器日志，永远不会自行把 `approved` 设为 true；通过必须由已冻结的 Stitch 画布及适用设计契约基线确认。
 
-所有正式效果图在 Stitch 前还必须形成 `visual-source-manifest.json`：每个视觉节点必须分别锁定布局、组件、样式、图标/素材（如适用）和内容来源，并声明同一份代码目标、选择器与实现方式。效果图只能使用该清单中可追溯的资源；代码阶段不得重新检索“相似元素”或替换来源。Existing 实施与 Gate 3 前使用 `implementation-audit.mjs audit <run-dir> <project-root>` 验证 Implementation Map 消费这份来源清单、指向真实代码目标、保留基线入口、测试选择器与后端 API 映射；任何断链都写成失败证据，不能以效果图替代。
+所有正式效果图在 Stitch 前还必须形成 `visual-source-manifest.json`：每个视觉节点必须分别锁定布局、组件、样式、图标/素材（如适用）和内容来源，并声明同一份代码目标、选择器与实现方式。效果图只能使用该清单中可追溯的资源；代码阶段不得重新检索“相似元素”或替换来源。两次确认流程在 Gate 2 后和 Gate 3 校验时，须重新核对实施包中绑定的来源清单路径及内容哈希；缺失或变化时停止实施与验收，恢复原清单或重新履行设计与实施验证。Existing 实施与 Gate 3 前使用 `implementation-audit.mjs audit <run-dir> <project-root>` 验证 Implementation Map 消费这份来源清单、指向真实代码目标、保留基线入口、测试选择器与后端 API 映射；任何断链都写成失败证据，不能以效果图替代。
 
 ## 阶段直接入口
 

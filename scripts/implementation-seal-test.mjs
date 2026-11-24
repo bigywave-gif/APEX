@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
+import { implementationSealCurrent, recoverImplementationSeal, visualSourceCurrent } from './implementation-seal.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-seal-test-'));
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 try {
@@ -32,6 +32,24 @@ try {
   fs.unlinkSync(path.join(root, sealPath)); fs.appendFileSync(path.join(root, refs[2]), 'changed');
   assert.equal(recoverImplementationSeal(root, state, refs[0]).status, 'failed');
   assert.equal(fs.existsSync(path.join(root, sealPath)), false);
+
+  fs.writeFileSync(path.join(root, refs[2]), refs[2]);
+  const sourceRef = 'visual-source.json', sourcePath = path.join(root, sourceRef); fs.writeFileSync(sourcePath, '{"version":1}');
+  fs.writeFileSync(path.join(root, refs[1]), JSON.stringify({ visualSourceManifest: { path: sourceRef, hash: `sha256:${sha(fs.readFileSync(sourcePath))}` } }));
+  const sourceHashes = refs.map(ref => ({ path: ref, sha256: sha(fs.readFileSync(path.join(root, ref))) }));
+  const sourceSeal = `machine-seals/implementation-${sha(JSON.stringify(sourceHashes))}.json`;
+  fs.writeFileSync(path.join(root, sourceSeal), JSON.stringify({ ...seal, artifactHashes: sourceHashes }));
+  const current = { ...state, roleChain: { confirmationModel: 'two-confirmations' }, artifacts: { ...state.artifacts, visualSourceManifest: sourceRef }, gates: { gate2: { evidence: [sourceSeal] } } };
+  assert.equal(implementationSealCurrent(root, current, refs[0]), true);
+  assert.equal(visualSourceCurrent(root, current), true);
+  fs.appendFileSync(sourcePath, ' ');
+  assert.equal(visualSourceCurrent(root, current), false);
+  assert.equal(implementationSealCurrent(root, current, refs[0]), false);
+  fs.unlinkSync(path.join(root, sourceSeal));
+  assert.equal(recoverImplementationSeal(root, current, refs[0]).status, 'failed');
+  assert.equal(fs.existsSync(path.join(root, sourceSeal)), false);
+  fs.writeFileSync(sourcePath, '{"version":1}');
+  assert.equal(recoverImplementationSeal(root, current, refs[0]).status, 'recovered');
 
   console.log(JSON.stringify({ status: 'passed', checks: 10 }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
