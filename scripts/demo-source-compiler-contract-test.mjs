@@ -32,6 +32,20 @@ try {
   const invalidAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize invalid compiler');
   const invalid = run(action, ['run', project, 'run-demo-source', 'session-demo-source', invalidAuth.authorizationRef, 'generate_visual', 'demo-source-compiler.mjs', 'compile', runDir, invalidInput]);
   if (invalid.status === 0 || !String(invalid.stderr).includes('cover every confirmed visual source selection')) throw new Error('compiler accepted an incomplete selected-source binding');
+  const lookalikeInput = path.join(runDir, 'lookalike-demo-source-input.json');
+  const lookalike = JSON.parse(fs.readFileSync(input));
+  lookalike.files[0].content = lookalike.files[0].content.replace('data-apex-source-selection="layout-a"', 'data-apex-source-selection="layout-a-extra"');
+  fs.writeFileSync(lookalikeInput, JSON.stringify(lookalike));
+  const lookalikeAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize lookalike source check');
+  const lookalikeResult = run(action, ['run', project, 'run-demo-source', 'session-demo-source', lookalikeAuth.authorizationRef, 'generate_visual', 'demo-source-compiler.mjs', 'compile', runDir, lookalikeInput]);
+  if (lookalikeResult.status === 0 || !String(lookalikeResult.stderr).includes('selected source marker for layout-a')) throw new Error('compiler accepted a different hyphenated source ID as the selected ID');
+  const prefixedInput = path.join(runDir, 'prefixed-marker-demo-input.json');
+  const prefixed = JSON.parse(fs.readFileSync(input));
+  prefixed.files[0].content = prefixed.files[0].content.replace('data-apex-source-selection="layout-a"', 'data-other-data-apex-source-selection="layout-a"');
+  fs.writeFileSync(prefixedInput, JSON.stringify(prefixed));
+  const prefixedAuth = expect(run(router, ['authorize', project, 'run-demo-source', 'session-demo-source', 'generate_visual']), 'authorize prefixed source marker check');
+  const prefixedResult = run(action, ['run', project, 'run-demo-source', 'session-demo-source', prefixedAuth.authorizationRef, 'generate_visual', 'demo-source-compiler.mjs', 'compile', runDir, prefixedInput]);
+  if (prefixedResult.status === 0 || !String(prefixedResult.stderr).includes('selected source marker for layout-a')) throw new Error('compiler accepted a different attribute as the selected source marker');
   const strategyPath = path.join(runDir, 'fixture-product-strategy.json'), strategyBytes = fs.readFileSync(strategyPath);
   fs.unlinkSync(strategyPath);
   try {

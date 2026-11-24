@@ -138,7 +138,7 @@ for (const screen of spec.screens) {
   const resize = open.ok && authenticate.ok && authenticated ? call(session, artifactDir, ['resize', String(screen.width), String(screen.height)], runDir) : { ok: false, output: authentication && !authenticated ? 'authentication did not expose the required authenticated selector' : 'open or authentication failed' };
   const snapshot = resize.ok ? call(session, artifactDir, ['snapshot'], runDir) : { ok: false, output: 'resize failed' };
   const shot = snapshot.ok ? call(session, artifactDir, ['screenshot'], runDir) : { ok: false, output: 'snapshot failed' };
-  const dom = snapshot.ok ? call(session, artifactDir, ['run-code', 'async (page) => JSON.stringify({ html: await page.content(), url: page.url(), viewport: await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })), layoutMetrics: await page.evaluate(() => ({ documentScrollWidth: document.documentElement.scrollWidth, documentClientWidth: document.documentElement.clientWidth })) })'], runDir, 2000000) : { ok: false, output: 'snapshot failed' };
+  const dom = snapshot.ok ? call(session, artifactDir, ['run-code', 'async (page) => JSON.stringify({ html: await page.content(), url: page.url(), viewport: await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })), layoutMetrics: await page.evaluate(() => ({ documentScrollWidth: document.documentElement.scrollWidth, documentClientWidth: document.documentElement.clientWidth })), sourceAttributes: await page.evaluate(() => Object.fromEntries(["data-apex-source-selection", "data-apex-source", "data-apex-source-file"].map(name => [name, Array.from(document.querySelectorAll("[" + name + "]"), node => node.getAttribute(name))]))) })'], runDir, 2000000) : { ok: false, output: 'snapshot failed' };
   const sourceBindingProbe = snapshot.ok && requiredSourceBindings.length
     ? call(session, artifactDir, ['run-code', `async (page) => JSON.stringify(await page.evaluate((bindings) => bindings.map(binding => ({ ...binding, rendered: Array.from(document.querySelectorAll(binding.selector)).some(node => node.getAttribute('data-apex-source') === binding.sourceMarker) })), ${JSON.stringify(requiredSourceBindings)}))`], runDir, 2000000)
     : { ok: true, output: 'not-required' };
@@ -153,14 +153,15 @@ for (const screen of spec.screens) {
 
   const domFile = html ? path.join(artifactDir, screen.id + '.dom.html') : null;
   if (domFile) fs.writeFileSync(domFile, html);
-  const declaredSourceSelections = html ? [...new Set([...html.matchAll(/data-apex-source-selection=["']([^"']+)["']/g)].flatMap(match => match[1].trim().split(/\s+/).filter(Boolean)))] : [];
-  const sourceMarkers = html ? [...html.matchAll(/data-apex-source=["']([^"']+)["']/g)].map(match => match[1]) : [];
+  const sourceAttributes = browserView?.sourceAttributes || {};
+  const declaredSourceSelections = [...new Set((sourceAttributes['data-apex-source-selection'] || []).flatMap(value => String(value || '').trim().split(/\s+/).filter(Boolean)))];
+  const sourceMarkers = sourceAttributes['data-apex-source'] || [];
   const probedBindings = resultValueFrom(sourceBindingProbe.output);
   const formalBindingEvidence = Array.isArray(probedBindings)
     ? probedBindings
     : requiredSourceBindings.map(binding => ({ ...binding, rendered: false }));
   const sourceSelections = [...new Set([...declaredSourceSelections, ...formalBindingEvidence.filter(binding => binding.rendered).flatMap(binding => binding.sourceSelectionIds)])].sort();
-  const sourceFiles = html ? [...html.matchAll(/data-apex-source-file=["']([^"']+)["']/g)].map(match => match[1]) : [];
+  const sourceFiles = sourceAttributes['data-apex-source-file'] || [];
   // A package-backed motion library can be materially present as a local
   // script module rather than a component DOM attribute. Bind that actual
   // script tag to the selected runtime package and hash the served file.

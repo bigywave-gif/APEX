@@ -65,7 +65,7 @@ try {
   write('visual-execution-plan.json', { sourceSelections: selections, selectionAnalysis: { designContract: { path: 'DESIGN.md', sha256: `sha256:${crypto.createHash('sha256').update(designText).digest('hex')}` } } });
   state.gates.gate1 = { status: 'passed', evidence: ['test-fixture'] }; state.locks.requirementsApproved = true; state.locks.visualPlanApproved = true; state.phase = 'G-05 VISUAL'; state.artifacts.visualExecutionPlan = 'visual-execution-plan.json'; fs.writeFileSync(stateFile, JSON.stringify(state));
   const tokenHash = `sha256:${crypto.createHash('sha256').update('{}').digest('hex')}`;
-  const markedFragment = demoFragment.replace('<div id="apex-chat-example"', `<div data-apex-node="demo-root" data-apex-component="demo-root" data-apex-component-kind="panel" data-apex-token-hash="${tokenHash}" id="apex-chat-example"`);
+  const markedFragment = demoFragment.replace('<div id="apex-chat-example"', `<div data-apex-node="demo-root" data-apex-component="demo-root" data-apex-component-kind="panel" data-apex-token-hash="${tokenHash}" id="apex-chat-example"`) + '\n<!-- data-apex-source-selection="comment-only-source" -->';
   const input = write('demo-source-input.json', { schemaVersion: '3.0', entrypoint: 'index.html', interactionContract: demoContract, chatPreview: { fragment: 'preview.html' }, files: [{ path: 'preview.html', content: markedFragment }], sourceBindings: selections.map(item => ({ sourceSelectionId: item.id, files: ['preview.html'] })) });
   action('demo-source-compiler.mjs', 'compile', runDir, input);
   action('visual-sandbox-writer.mjs', 'materialize', runDir, path.join(runDir, 'demo-source-manifest.json'));
@@ -74,6 +74,7 @@ try {
   const spec = write('runtime-browser-spec.json', { requiredSourceSelectionIds: selections.map(item => item.id), formalJourneys: process.env.APEX_TEST_DIRECT === '1' ? demoContract.journeys.filter(item => item.kind !== 'reset') : demoContract.journeys, screens: [{ id: 'desktop', route: '/', width: 1440, height: 900 }, { id: 'mobile', route: '/', width: 390, height: 844 }] });
   action('browser-capture.mjs', 'capture', runDir, runtime.url, spec);
   const capture = JSON.parse(fs.readFileSync(path.join(runDir, 'evidence/runtime-browser-capture.json')));
+  if (capture.evidence.some(item => item.sourceSelections.includes('comment-only-source'))) throw new Error('a source marker inside an HTML comment must not be reported as a DOM element');
   verifyDemoInteractions(runDir, capture, runtime.url);
   const captureStatus = run('apex-router.mjs', ['status', project, runId, session]);
   if (captureStatus.executionDirective?.currentStep?.id === 'capture-runtime-browser-evidence') throw new Error('successful same-origin multi-route capture must advance instead of repeating browser capture');

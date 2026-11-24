@@ -37,12 +37,11 @@ if (declared.size !== input.files.length || [...bindings.values()].some(binding 
 const contentByPath = new Map(input.files.map(file => [file.path, typeof file?.content === 'string' ? file.content : '']));
 for (const [sourceSelectionId, binding] of bindings.entries()) {
   const selection = selectionById.get(sourceSelectionId);
-  const marker = `data-apex-source-selection`;
   const declaredInRenderedSource = binding.files.some(file => {
     const content = contentByPath.get(file) || '';
     // HTML data attributes may carry a space-separated selection set when one
     // rendered node truthfully materializes several approved sources.
-    return new RegExp(`${marker}=[\"'][^\"']*\\b${sourceSelectionId}\\b[^\"']*[\"']`).test(content);
+    return [...content.matchAll(/(?:^|[\s<])data-apex-source-selection\s*=\s*(["'])(.*?)\1/gs)].some(match => match[2].split(/\s+/).includes(sourceSelectionId));
   });
   // CSS/font/motion selections are materialized as executable assets, not DOM nodes.
   // Requiring an HTML data attribute for them turns a provenance check into invalid markup.
