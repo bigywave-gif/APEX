@@ -9,7 +9,7 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { archiveArtifacts, commitRunState, readRunState, visualSkillLoads } from './run-ledger.mjs';
 import { agentRuntimeStatus, claimAgentJob, completeAgentAdvisory, enqueueAgentJob, endTraceSpan, rebudgetAgentJobs, registerAgent, settleAgentJob, startTraceSpan, supersedeQueuedAgentJobs } from './run-ledger.mjs';
 import { resolveTasteSkill, loadTasteSkill, requiredTasteLoadCurrent, optionalSkillLoadCurrent } from './required-visual-skill.mjs';
-import { formalReviewBindings, validateProductTaskReview } from './formal-interaction-evidence.mjs';
+import { formalReviewBindings, requiredFormalTasks, validateProductTaskReview } from './formal-interaction-evidence.mjs';
 import { validateRequirementReview } from './requirement-review.mjs';
 import { validateResourceReviews } from './existing-resource-freshness.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
@@ -103,6 +103,19 @@ function outputReceipt(runDir, file) {
 function loadSelection(runDir, stage) { const file = path.join(stageDirectory(runDir, stage), 'selection.json'); if (!fs.existsSync(file)) die(`select roles for ${stage} before recording an advisory`); return read(file); }
 function currentSelectionInputs(runDir, stage) {
   const state = stateFor(runDir); state.__runDir = runDir;
+  if (stage === 'visual' && state.roleChain?.confirmationModel === 'two-confirmations') {
+    const required = ['deliveryContract', 'experienceStrategy', ...(state.track === 'existing' ? ['changeScope'] : [])], root = fs.realpathSync(runDir);
+    for (const artifact of required) {
+      const reference = state.artifacts?.[artifact];
+      try {
+        if (typeof reference !== 'string' || !reference || path.isAbsolute(reference)) throw new Error('invalid reference');
+        const file = path.resolve(runDir, reference), real = fs.realpathSync(file);
+        if (!file.startsWith(`${path.resolve(runDir)}${path.sep}`) || !real.startsWith(`${root}${path.sep}`) || !fs.statSync(real).isFile()) throw new Error('outside run or not a file');
+      } catch { die(`visual role requires the current Run-local product input: ${artifact}`); }
+    }
+    try { requiredFormalTasks({}, read(path.resolve(runDir, state.artifacts.experienceStrategy)), { requireProductPlan: true }); }
+    catch (error) { die(`visual role requires a complete product task plan: ${error.message}`); }
+  }
   const registry = read(registryFile); const selectedRoles = requiredRoleIds(registry, state, stage); delete state.__runDir;
   if (!selectedRoles.length) die(`no role is eligible for ${stage}/${state.track}`);
   const bindings = (stageArtifacts[stage] || []).flatMap(artifact => {

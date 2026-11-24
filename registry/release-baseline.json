@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T18:43:54.787Z",
+  "generatedAt": "2026-11-24T18:55:41.311Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -191,7 +191,7 @@
     "scripts/revision-crash-test.mjs": "bf9eec680231b1a64f99177dc47b04ca8d31dd9ac93d5733d272f9d9a25976e3",
     "scripts/revision-transaction-test.mjs": "6eba0a3ed174e0dc33700e6a9cb36f66d2e81c4dd2e66ad523b40a2ba4c65c77",
     "scripts/role-advisory-contract-test.mjs": "c6d835d0c79c7195c59685f2d092d11cdfce9f0b5f025baf98ab1003301bc41d",
-    "scripts/role-advisory.mjs": "4a69e60c57e6e6a96a4cc50e6a95a2901f4f157a6b67aea7b517aad50094171f",
+    "scripts/role-advisory.mjs": "23ef7899b434bbb4e7a682ba38139162276e835f3d05cd973244777990a37a97",
     "scripts/role-manifest-archive-test.mjs": "b879963f9e6abc3a58752fb5497ea2b32c3c6ca34bd2f5239cbef379e8fd3a9c",
     "scripts/role-manifest-archive.mjs": "357d293ec470154a5dfeab99d8c1357fd5718d2d9de3d382104ee87fa98e1a98",
     "scripts/role-quality-evaluator.mjs": "7347aae8c6dadaeee794a551df83ea8b2431c26c02ddbe7a9e290430cdca0887",
@@ -249,7 +249,7 @@
     "scripts/visual-reference-compiler.mjs": "f73887397be7d64142e438e1069e2f52e6e06cd1514035bdbf842d342fe7c120",
     "scripts/visual-revision-binding-test.mjs": "9dcc1c1c40f34b5db2a0f2daf69f963c13e8ad44bfdcac51b4f3de06720d99eb",
     "scripts/visual-revision-binding.mjs": "6e2d276b7255de99198d6f5480993470d33635636753aa9f76d75d97a168408b",
-    "scripts/visual-role-skill-integration-test.mjs": "1f536be8523454d4a73a4d881db1088c720c53e3fe2ee95e7255336b4addde85",
+    "scripts/visual-role-skill-integration-test.mjs": "4fdf42fc1480184a8e0aad498da6f4d0872d8dbdd3d8484cffd69d077acbb343",
     "scripts/visual-sandbox-dependency.mjs": "af95637d97f233dd75b103c23fc9dcdb12d9f5757a21176b004fdd2f6edcde89",
     "scripts/visual-sandbox-runtime-contract-test.mjs": "8d19870ba7c5f3150a59652ea61500dc1dc2804cb9673b3e61db12f1ace37b66",
     "scripts/visual-sandbox-runtime.mjs": "49a35b2adf5630261df85622b09add7bb49396d04d728ddf581bcafdbdba42de",
