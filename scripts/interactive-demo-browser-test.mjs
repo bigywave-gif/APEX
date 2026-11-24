@@ -87,7 +87,7 @@ try {
   verifyDemoInteractions(runDir, capture, runtime.url);
   const captureStatus = run('apex-router.mjs', ['status', project, runId, session]);
   if (captureStatus.executionDirective?.currentStep?.id === 'capture-runtime-browser-evidence') throw new Error('successful same-origin multi-route capture must advance instead of repeating browser capture');
-  for (const [id, size] of [['desktop', '1440x900'], ['mobile', '390x844']]) { const screen = capture.evidence.find(item => item.id === id); if (screen?.viewport !== size || screen.logs?.viewport !== 'matched' || screen.url !== new URL('/', runtime.url).href || screen.controlInventory?.viewport !== size || screen.controlInventory?.url !== screen.url) throw new Error(`browser capture must bind the observed URL, viewport and control inventory for ${id}`); }
+  for (const [id, size] of [['desktop', '1440x900'], ['mobile', '390x844']]) { const screen = capture.evidence.find(item => item.id === id); if (screen?.viewport !== size || screen.logs?.viewport !== 'matched' || screen.url !== new URL('/', runtime.url).href || screen.controlInventory?.viewport !== size || screen.controlInventory?.url !== screen.url || !screen.logs.open.includes('about:blank')) throw new Error(`browser capture must start blank and bind the observed URL, viewport and control inventory for ${id}`); }
   action('runtime-visual-baseline.mjs', 'compile', runDir, project, write('runtime-visual-baseline-input.json', { schemaVersion: '3.0', runtimeRoot: 'visual-sandbox', referenceScreenId: 'desktop', patterns: [] }));
   const baseline = JSON.parse(fs.readFileSync(path.join(runDir, 'runtime-visual-baseline.json')));
   const baselineValidation = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-validate.mjs'), 'validate', 'runtime-visual-baseline.schema.json', path.join(runDir, 'runtime-visual-baseline.json')], { encoding: 'utf8' });
@@ -123,6 +123,11 @@ try {
       const screenResult = cliCall(['run-code', demoScreenResourceCode({ url: runtime.url })]);
       const screenMatch = screenResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /); let screenTrace = screenMatch && JSON.parse(screenMatch[1]); if (typeof screenTrace === 'string') screenTrace = JSON.parse(screenTrace);
       if (screenResult.status !== 0 || screenTrace?.status !== 'failed' || !screenTrace.failedResources?.some(item => item.path === '/pages/missing.css' && item.status === 404)) throw new Error('missing Demo stylesheet must fail the real-browser screen observation');
+      const externalPage = '<!doctype html><html><body><img src="https://outside.invalid/example.png"></body></html>';
+      fs.writeFileSync(nestedPage, externalPage); nestedManifest.files.find(item => item.path === `visual-sandbox/${entrypoint}`).sha256 = `sha256:${crypto.createHash('sha256').update(externalPage).digest('hex')}`; fs.writeFileSync(nestedManifestFile, JSON.stringify(nestedManifest));
+      const externalResult = cliCall(['run-code', demoScreenResourceCode({ url: runtime.url })]);
+      const externalMatch = externalResult.stdout.match(/### Result\s*\n([\s\S]*?)\n### /); let externalTrace = externalMatch && JSON.parse(externalMatch[1]); if (typeof externalTrace === 'string') externalTrace = JSON.parse(externalTrace);
+      if (externalResult.status !== 0 || externalTrace?.status !== 'failed' || !externalTrace.blockedRequests?.includes('https://outside.invalid')) throw new Error('Demo screen must block external requests during its first guarded load');
     } finally { fs.writeFileSync(nestedManifestFile, savedNestedManifest); for (const file of [nestedPage, nestedCss, nestedJs]) fs.rmSync(file, { force: true }); }
     const wrongButton = structuredClone(demoContract.journeys[0]); wrongButton.steps[0].selector = '#reset';
     const clicked = cliCall(['run-code', journeyCode({ journey: wrongButton, url: runtime.url, notice: demoContract.notice, screenshotPath: path.join(runDir, 'evidence/no-op-button.png') })]);
@@ -508,7 +513,7 @@ try {
 
 
   }
-  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 37 : 33, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
+  console.log(JSON.stringify({ status: 'passed', checks: process.env.APEX_TEST_DIRECT === '1' ? 38 : 34, route: process.env.APEX_TEST_DIRECT === '1' ? 'direct-code' : 'stitch', journeys: demo.journeyCount, viewports: 2, runDir, evidence: path.join(runDir, 'evidence/runtime-browser-capture.json') }));
 } finally {
   if (mockServer) mockServer.kill('SIGTERM');
   if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }

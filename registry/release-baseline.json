@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T20:20:35.745Z",
+  "generatedAt": "2026-11-24T20:29:31.359Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -88,7 +88,7 @@
     "scripts/asset-resolver.mjs": "95e0ef1ddb982555c6dafc4648a2f6ed75bee32cb7edceff203e5eeac7a19cdb",
     "scripts/baseline-collector.mjs": "749687461030d458596b6c9ae4f60e4cd3e8a0034ee0ef94fdc6589ebe6d2076",
     "scripts/bridge-confirmation-contract-test.mjs": "b8e9055439ddeeb7f5644ea2c26c30f3384fbc4d82b69ea7b264574dd9a801d8",
-    "scripts/browser-capture.mjs": "05ea96c74ce11df7600ba636f9cd60e300007fd98a2e60bcf68587397f5871a3",
+    "scripts/browser-capture.mjs": "a8c08851ec4f5456933d8736f2ab2b3437f735eb4d854007f923ee8e828f79fa",
     "scripts/budget-recovery-router-test.mjs": "b3b2500ef337b52880d7dc3baa963e09e7001e9f74c156c0fa7dfc06ec29859f",
     "scripts/bundle-compiler.mjs": "73f5091731d4a6bdf1ea7a86870dad4d94b2157715712927bc94088a2d7c80b3",
     "scripts/cancelled-action-race-test.mjs": "f7584a486c5c6d3b83d010af62eb29845322909e08f818c485eb6f3b34ffbb1e",
@@ -149,7 +149,7 @@
     "scripts/install-codex-session-refresh-hook.mjs": "233ba5661387498fda4185179593201a4724e1970117d8e648f8aeddfa073faf",
     "scripts/install-codex-stop-hook.mjs": "f0cd80304e2cefa1c5360c4b451dc3db04c6072c747d491f29893a24caf7a4e8",
     "scripts/install.mjs": "21e83f1258c5c66c8e50f78a52292ba61665230e89b096359eb4ff303a3685d0",
-    "scripts/interactive-demo-browser-test.mjs": "97eb86dc3f8fd092abdfe22ac68f3eb75d1123e168aafb7f81c72ee69d6f6d57",
+    "scripts/interactive-demo-browser-test.mjs": "a95636fa353fbf14a032fb5e981b2b48087ebd7fa23c7632632bbce741def25f",
     "scripts/interactive-demo-contract-test.mjs": "d200c9758ea68f8a524c02537082acfa5ea7e2267146f14d32802907663a2265",
     "scripts/interactive-demo-test-fixture.mjs": "f4c436ec536caf6fd26c0227cbac5af9e29d3d7ff1ce4aa2bd821ac6e4345b56",
     "scripts/interactive-demo.mjs": "eda42f22223983bba5721c7f48a6f05c4812e0033364bfcd1dbcd52cc507d680",

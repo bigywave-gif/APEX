@@ -173,7 +173,7 @@ const motionSamples = [];
 for (const screen of spec.screens) {
   const session = `apex-${crypto.createHash('sha1').update(`${runDir}:${screen.id}`).digest('hex').slice(0, 12)}`;
   const before = new Set(images(artifactDir)); const url = routeUrl(baseUrl, screen.route);
-  const open = call(session, artifactDir, ['open', url], runDir);
+  const open = call(session, artifactDir, ['open', demoSource ? 'about:blank' : url], runDir);
   const priorCaptureCount = captured.length;
   try {
   const authenticate = open.ok && authentication ? call(session, artifactDir, ['run-code', formalAuthenticationCode({ authentication, credentials: authCredentials, url: baseUrl })], runDir, 2000000) : { ok: true, output: 'not-required' };
@@ -270,7 +270,7 @@ for (const screen of spec.screens) {
 let interactiveDemo = null;
 if (demoSource) {
   const journeys = [], session = `apex-interactive-${crypto.createHash('sha1').update(runDir).digest('hex').slice(0, 12)}`;
-  const opened = call(session, artifactDir, ['open', baseUrl], runDir);
+  const opened = call(session, artifactDir, ['open', 'about:blank'], runDir);
   try {
     for (const journey of demoSource.contract.journeys) {
       const screenshot = path.join(artifactDir, `journey-${journey.id}.png`);
