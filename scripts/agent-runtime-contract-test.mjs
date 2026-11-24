@@ -43,7 +43,7 @@ try {
   registerAgent(root, { agentId: 'backend-engineer', vocation: 'backend', stage: 'gate1' });
   const second = enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:next' }); const secondClaim = claimAgentJob(root, second.jobId);
   assert.equal(settleAgentJob(root, second.jobId, { status: 'succeeded', leaseToken: secondClaim.leaseToken, result: { artifact: 'api-contract.json' } }).jobs[0].status, 'succeeded');
-  assert.equal(recordTokenUsage(root, { stage: 'gate1', inputTokens: 10, outputTokens: 20, limit: 50 }).used, 30);
+  assert.equal(recordTokenUsage(root, { stage: 'gate1', inputTokens: 10, outputTokens: 20, limit: 50, legacyOnly: true }).used, 30);
   recordTokenUsage(root, { stage: 'coverage', inputTokens: 0, outputTokens: 0, metadata: { usageSource: 'unknown' } });
   recordTokenUsage(root, { stage: 'coverage', inputTokens: 4, outputTokens: 2, metadata: { usageSource: 'provider-reported' } });
   assert.deepEqual(agentRuntimeStatus(root).tokenUsageCoverage.coverage, { providerReported: 1, estimated: 0, unknown: 1, unverified: 0 });

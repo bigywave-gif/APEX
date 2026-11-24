@@ -946,13 +946,14 @@ export function renewAgentJobLease(runDir, jobId, leaseToken) {
     return { jobId, leaseExpiresAt };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
-export function recordTokenUsage(runDir, { stage, agentId = null, inputTokens = 0, outputTokens = 0, limit = null, metadata = {} }) {
+export function recordTokenUsage(runDir, { stage, agentId = null, inputTokens = 0, outputTokens = 0, limit = null, metadata = {}, legacyOnly = false }) {
   requireNonEmpty(stage, 'stage');
   if (![inputTokens, outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(inputTokens + outputTokens)) throw new Error('token usage must be non-negative safe integers with a safe total');
   if (metadata.usageSource === 'unknown' && (inputTokens !== 0 || outputTokens !== 0)) throw new Error('unknown token usage requires zero placeholders');
   const database = open(runDir); const total = inputTokens + outputTokens;
   try {
     database.exec('BEGIN IMMEDIATE');
+    if (legacyOnly && database.prepare("SELECT value FROM ledger_meta WHERE key = 'projectionPolicy'").get()?.value === 'ledger-authoritative') throw new Error('legacy tokens command is unavailable for new Runs; use tokens-observed for independent host usage or the Agent attempt settlement');
     const prior = database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(stage).total;
     if (limit !== null && (!Number.isInteger(limit) || limit < total || Number(prior) + total > limit)) throw new Error(`token budget exceeded for ${stage}: used=${prior}, requested=${total}, limit=${limit}`);
     database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(stage, agentId, inputTokens, outputTokens, total, now(), JSON.stringify(metadata));

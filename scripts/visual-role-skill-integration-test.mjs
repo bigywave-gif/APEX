@@ -55,6 +55,9 @@ try {
   assert.equal(agentRuntimeStatus(runDir).jobs.length, countBeforeReplay);
   const jobId = savedSelection.agentJobs['ui-designer'];
   const queued = agentRuntimeStatus(runDir, jobId).jobs[0];
+  const rejectedLegacyUsage = invoke(authorize(), 'agent-runtime.mjs', ['tokens', runDir, 'visual', '1500', '0', '10']);
+  assert.notEqual(rejectedLegacyUsage.status, 0); assert.match(rejectedLegacyUsage.stderr, /use tokens-observed/);
+  assert.equal(agentRuntimeStatus(runDir).tokenUsage.visual || 0, 0, 'a rejected legacy report must not create an ambiguous usage record');
   const hostUsage = expect(invoke(authorize(), 'agent-runtime.mjs', ['tokens-observed', runDir, 'visual', 'independent_host_0001', '0', '0', 'unknown']), 'record independent host usage');
   assert.equal(hostUsage.budgetScope, 'reported-usage-only');
   assert.equal(hostUsage.idempotent, false);

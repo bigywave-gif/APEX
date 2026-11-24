@@ -63,6 +63,8 @@ Agent 尝试的用量未知时，调度继续保留该尝试结算时的预留�
 
 非 Agent Job 的独立宿主调用如果已取得用量，应通过受控 `agent-runtime.mjs tokens-observed <run-dir> <stage> <observation-key> <input> <output> <provider-reported|estimated|unknown> [limit|null]` 入账。调用方为每次实际调用提供稳定且唯一的 observation key；相同记录重放不会重复计费，内容冲突会报错。已发生用量即使与运行中预留额度合计超过限制也必须入账，返回的 `overcommitted` 提示超额，新 Job 的领取继续按已用与预留额度计算。`unknown` 使用零占位但不表示实际零消耗。该入口仅记录独立宿主调用，Agent Job 的尝试仍通过其结算路径入账；宿主必须避免将同一次调用两次上报，系统无法自行证明两条不同标识是否对应同一次调用。
 
+新建的账本优先 Run 不允许通过旧 `tokens` 命令登记：该命令把额度检查和写入合在一起，不能安全表示已发生的超额用量，且缺少稳定观察键。独立宿主调用使用 `tokens-observed`，Agent 尝试使用结算路径；历史兼容 Run 仍保留旧命令行为，不能将它视为完整或幂等的实际用量记录。
+
 阶段内存在未知或未核实的记录时，独立用量登记返回 `incompleteUsage: true`，不把剩余额度当作已知值；只有已知用量与预留已超过限制时，才能确定 `overcommitted: true`。未记录的宿主调用仍不在统计范围内，估算值也不是服务商实际值。
 
 领取成功、幂等恢复领取，以及因预算不足或预留等待而返回时，均标记阶段内已知的用量不完整情况；此时 `available` 为未知，`reportedAvailable` 仅表示按已记录数值计算的余额，不能视为实际剩余额度。成功领取回执也包含已记录用量、当前预留和阶段预算；已知记录与预留超额时标记 `overcommitted: true`。未记录的宿主调用无法由账本自动发现，所有领取结果仍仅覆盖已报告用量。
