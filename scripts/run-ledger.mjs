@@ -644,9 +644,12 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
 }
 function assertCurrentAgentLease(job, jobId, leaseToken) {
   if (!job || job.status !== 'running') throw new Error(`agent job is not running: ${jobId}`);
-  if (job.lease_token && job.lease_token !== leaseToken) throw new Error(`agent job lease token is stale or missing: ${jobId}`);
-  if (job.lease_token && !job.lease_expires_at) throw new Error(`agent job lease expiry is missing: ${jobId}`);
-  const expiry = job.lease_expires_at ? Date.parse(job.lease_expires_at) : Date.parse(job.started_at) + AGENT_JOB_LEASE_MS;
+  // Pre-lease running jobs have no identity to fence. Recover them after
+  // their legacy timeout and issue a new lease instead of accepting output.
+  if (!job.lease_token) throw new Error(`legacy agent job has no fenced lease; controlled recovery is required: ${jobId}`);
+  if (job.lease_token !== leaseToken) throw new Error(`agent job lease token is stale or missing: ${jobId}`);
+  if (!job.lease_expires_at) throw new Error(`agent job lease expiry is missing: ${jobId}`);
+  const expiry = Date.parse(job.lease_expires_at);
   if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error(`agent job lease has expired: ${jobId}`);
 }
 function recordSettledAttemptUsage(database, job, usage, outcome, timestamp) {
@@ -733,7 +736,6 @@ export function renewAgentJobLease(runDir, jobId, leaseToken) {
     database.exec('BEGIN IMMEDIATE');
     const job = database.prepare('SELECT * FROM agent_jobs WHERE job_id = ?').get(jobId);
     assertCurrentAgentLease(job, jobId, leaseToken);
-    if (!job.lease_token) throw new Error(`legacy agent job has no renewable lease: ${jobId}`);
     const leaseExpiresAt = new Date(Date.now() + AGENT_JOB_LEASE_MS).toISOString();
     database.prepare('UPDATE agent_jobs SET lease_expires_at = ? WHERE job_id = ?').run(leaseExpiresAt, jobId);
     database.exec('COMMIT');

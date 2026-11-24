@@ -104,6 +104,31 @@ try {
     const migrated = new DatabaseSync(path.join(legacyRoot, 'run-ledger.sqlite')); const columns = migrated.prepare('PRAGMA table_info(agent_jobs)').all().map(item => item.name); migrated.close();
     assert.ok(columns.includes('lease_token') && columns.includes('lease_expires_at') && columns.includes('claim_key'));
   } finally { fs.rmSync(legacyRoot, { recursive: true, force: true }); }
+  const unfencedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-unfenced-agent-'));
+  try {
+    registerAgent(unfencedRoot, { agentId: 'legacy-agent', vocation: 'legacy', stage: 'gate1' });
+    const item = enqueueAgentJob(unfencedRoot, { agentId: 'legacy-agent', stage: 'gate1', inputHash: 'legacy-input' });
+    const key = 'legacy_claim_key_0001';
+    const old = claimAgentJob(unfencedRoot, item.jobId, { claimKey: key });
+    const ledger = new DatabaseSync(path.join(unfencedRoot, 'run-ledger.sqlite'));
+    ledger.prepare('UPDATE agent_jobs SET lease_token = NULL, lease_expires_at = NULL WHERE job_id = ?').run(item.jobId);
+    const legacyOutput = path.join(unfencedRoot, 'advisories', 'gate1', 'legacy-agent.json');
+    fs.mkdirSync(path.dirname(legacyOutput), { recursive: true });
+    const args = { leaseToken: old.leaseToken, output: legacyOutput, content: '{}', inputTokens: 1, outputTokens: 1, limit: 100 };
+    assert.throws(() => claimAgentJob(unfencedRoot, item.jobId, { claimKey: key }), /no fenced lease/);
+    assert.throws(() => renewAgentJobLease(unfencedRoot, item.jobId, old.leaseToken), /no fenced lease/);
+    assert.throws(() => settleAgentJob(unfencedRoot, item.jobId, { status: 'succeeded', leaseToken: old.leaseToken }), /no fenced lease/);
+    assert.throws(() => completeAgentAdvisory(unfencedRoot, item.jobId, args), /no fenced lease/);
+    assert.equal(fs.existsSync(legacyOutput), false);
+    assert.deepEqual(recoverAgentJobs(unfencedRoot), [], 'an unexpired legacy attempt must not be retried early');
+    ledger.prepare("UPDATE agent_jobs SET started_at = '2000-01-01T00:00:00.000Z' WHERE job_id = ?").run(item.jobId); ledger.close();
+    assert.equal(recoverAgentJobs(unfencedRoot).find(job => job.jobId === item.jobId)?.status, 'queued');
+    assert.equal(agentRuntimeStatus(unfencedRoot).tokenUsageCoverage.gate1.unknown, 1);
+    const current = claimAgentJob(unfencedRoot, item.jobId, { claimKey: 'legacy_claim_key_0002' });
+    assert.throws(() => completeAgentAdvisory(unfencedRoot, item.jobId, args), /stale or missing/);
+    completeAgentAdvisory(unfencedRoot, item.jobId, { ...args, leaseToken: current.leaseToken });
+    assert.equal(agentRuntimeStatus(unfencedRoot, item.jobId).jobs[0].status, 'succeeded');
+  } finally { fs.rmSync(unfencedRoot, { recursive: true, force: true }); }
   const status = agentRuntimeStatus(root); assert.equal(status.counts['dead-letter'], 1); assert.equal(status.counts.succeeded, 3); assert.equal(status.tokenUsage.gate1, 30); assert.equal(status.sessions.length, 1); assert.equal(status.sessions[0].agentId, 'backend-engineer'); assert.equal(status.jobs.find(job => job.jobId === second.jobId).payload.agentSessionId, status.sessions[0].sessionId);
   // Real processes race the same ledger; no pair may both consume the last allowance.
   const moduleUrl = pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), 'run-ledger.mjs')).href;
