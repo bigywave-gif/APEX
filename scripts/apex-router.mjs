@@ -419,7 +419,7 @@ function processIsLive(pid) {
   const status = processInfo(pid, 'stat');
   return Boolean(status) && !status.includes('Z');
 }
-function runtimeRecordCandidates(runDir, runId) {
+function runtimeRecordCandidates(runDir, runId, intent, launchedPid) {
   const candidates = [path.join(runDir, 'visual-sandbox-runtime.json')];
   const registry = path.join(runDir, 'runtime-services.json');
   if (fs.existsSync(registry) || fs.lstatSync(registry, { throwIfNoEntry: false })) {
@@ -431,7 +431,11 @@ function runtimeRecordCandidates(runDir, runId) {
       for (const service of services) {
         if (typeof service?.record !== 'string' || path.isAbsolute(service.record) || !isCurrentRunChild(runDir, path.resolve(runDir, service.record))) throw new Error('invalid-service-record-reference');
         const file = path.resolve(runDir, service.record);
-        if (!fs.existsSync(file)) throw new Error('registered-service-record-missing');
+        if (!fs.existsSync(file)) {
+          const intentUrl = intent && `http://${intent.bindHost === '::1' ? '[::1]' : intent.bindHost}:${intent.port}/`;
+          if (service.record === 'visual-sandbox-runtime.json' && launchedPid && service.pid === launchedPid && service.url === intentUrl && service.runtimeRoot === 'visual-sandbox') continue;
+          throw new Error('registered-service-record-missing');
+        }
         if (!fs.realpathSync(file).startsWith(`${realRun}${path.sep}`) || !fs.statSync(file).isFile()) throw new Error('service-record-outside-run');
         candidates.push(file);
       }
@@ -444,11 +448,11 @@ function stopRunLocalServices(runDir, runId) {
   let lock;
   try { lock = acquireRuntimeStartLock(runDir); } catch { return { stopped, alreadyStopped, refused: [{ record: 'runtime-launch-intent.json', reason: 'runtime-start-active-or-lock-unavailable' }] }; }
   try {
-  const records = runtimeRecordCandidates(runDir, runId);
-  if (records.error) return { stopped, alreadyStopped, refused: [{ record: 'runtime-services.json', reason: records.error }] };
   let intent, launchedPid;
   try { intent = readRuntimeLaunchIntent(runDir, runId); launchedPid = intent ? findRuntimeLaunchProcess(intent) : null; }
   catch (error) { return { stopped, alreadyStopped, refused: [{ record: 'runtime-launch-intent.json', reason: error.message }] }; }
+  const records = runtimeRecordCandidates(runDir, runId, intent, launchedPid);
+  if (records.error) return { stopped, alreadyStopped, refused: [{ record: 'runtime-services.json', reason: records.error }] };
   const candidates = records.candidates.map(file => ({ file }));
   if (intent && launchedPid) candidates.push({ file: path.join(runDir, 'runtime-launch-intent.json'), record: { pid: launchedPid, runtimeRoot: 'visual-sandbox', url: `http://${intent.bindHost === '::1' ? '[::1]' : intent.bindHost}:${intent.port}/` } });
   const handled = new Set();

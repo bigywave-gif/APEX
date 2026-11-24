@@ -40,16 +40,19 @@ try {
   }, 'child process before registration'), ended.then(result => { throw new Error(`startup ended before crash injection: ${JSON.stringify(result)} ${stderr}`); })]);
   childPid = observed.pid; process.kill(childPid, 'SIGSTOP'); stopped = true; process.kill(observed.starter, 'SIGKILL');
   const result = await ended; assert.notEqual(result.code, 0); assert.equal(fs.existsSync(path.join(runDir, 'runtime-launch-intent.json')), true); assert.equal(fs.existsSync(path.join(runDir, 'visual-sandbox-runtime.json')), false);
-  process.kill(childPid, 'SIGCONT'); stopped = false;
-  const intent = readRuntimeLaunchIntent(runDir, runId), healthUrl = `http://127.0.0.1:${intent.port}/`;
-  let ready = false; for (let i = 0; i < 50 && !ready; i++) { try { ready = (await fetch(healthUrl)).status === 200; } catch {} if (!ready) await new Promise(resolve => setTimeout(resolve, 100)); }
-  assert.equal(ready, true, 'orphaned test server must become reachable before recovery');
   const retry = call(['authorize', project, runId, session, 'generate_visual']);
-  const recovered = spawnSync(process.execPath, [action, 'run', project, runId, session, retry.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir], { encoding: 'utf8', timeout: 30000 });
+  const recovered = await new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, [action, 'run', project, runId, session, retry.authorizationRef, 'generate_visual', 'visual-sandbox-runtime.mjs', 'start', runDir], { stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = '';
+    proc.stdout.on('data', data => stdout += data); proc.stderr.on('data', data => stderr += data); proc.on('error', reject);
+    const retryReceipt = path.join(runDir, 'operations', `${path.basename(retry.authorizationRef, '.json')}.json`);
+    let resume;
+    const monitor = setInterval(() => { try { if (JSON.parse(fs.readFileSync(retryReceipt)).localProcess?.pid) { clearInterval(monitor); resume = setTimeout(() => { try { process.kill(childPid, 'SIGCONT'); stopped = false; } catch (error) { reject(error); } }, 500); } } catch {} }, 5);
+    proc.on('close', status => { clearInterval(monitor); clearTimeout(resume); resolve({ status, stdout, stderr }); });
+  });
   assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout); const output = JSON.parse(recovered.stdout);
   assert.equal(output.reused, true); assert.equal(output.pid, childPid); assert.equal(fs.existsSync(path.join(runDir, 'runtime-launch-intent.json')), false);
   const cancelled = call(['cancel', project, runId, session, '取消当前执行']); assert.ok(cancelled.cancellation.services.stopped.some(item => item.pid === childPid)); childPid = null;
-  console.log(JSON.stringify({ status: 'passed', scope: 'actual starter SIGKILL after child launch before runtime registration' }));
+  console.log(JSON.stringify({ status: 'passed', scope: 'actual starter SIGKILL before registration; delayed child readiness and recovery' }));
 } finally {
   if (!childPid) { try { const intent = readRuntimeLaunchIntent(runDir, runId); if (intent) childPid = findRuntimeLaunchProcess(intent); } catch {} }
   if (childPid) { if (stopped) try { process.kill(childPid, 'SIGCONT'); } catch {} try { process.kill(childPid, 'SIGTERM'); } catch {} }

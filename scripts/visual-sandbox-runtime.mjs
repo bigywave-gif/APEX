@@ -28,7 +28,15 @@ function bindHost(value) {
 }
 function loopbackUrl(host, port) { return `http://${host.includes(':') ? `[${host}]` : host}:${port}/`; }
 async function availablePort(host) { return await new Promise((resolve, reject) => { const probe = net.createServer(); probe.once('error', reject); probe.listen(0, host, () => { const address = probe.address(); probe.close(error => error ? reject(error) : resolve(address.port)); }); }); }
-async function reachable(url) { return await new Promise(resolve => { const request = http.get(url, response => { response.resume(); resolve(response.statusCode === 200); }); request.setTimeout(2500, () => { request.destroy(); resolve(false); }); request.on('error', () => resolve(false)); }); }
+async function reachable(url, timeoutMs = 2500) { return await new Promise(resolve => { const request = http.get(url, response => { response.resume(); resolve(response.statusCode === 200); }); request.setTimeout(timeoutMs, () => { request.destroy(); resolve(false); }); request.on('error', () => resolve(false)); }); }
+async function waitForRecoveredRuntime(url) {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    if (await reachable(url, Math.min(250, Math.max(1, deadline - Date.now())))) return true;
+    if (Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+  }
+  return false;
+}
 function runtimeProcess(record, runId, sandboxRoot) {
   if (!Number.isSafeInteger(record?.pid) || record.pid <= 1 || record.runId !== runId || record.runtimeRoot !== 'visual-sandbox') throw new Error('runtime record does not identify this Run');
   let url; try { url = new URL(record.url); } catch { throw new Error('runtime URL is invalid'); }
@@ -111,7 +119,7 @@ if (command === 'serve') {
     }
     let processStatus; try { processStatus = runtimeProcess(prior, runId, sandboxRoot); } catch (error) { die(error.message); }
     if (processStatus === 'running') {
-      if (!await reachable(prior.url)) die('existing run-local Demo process is running but its URL is unavailable; inspect it before retrying');
+      if (!(intent && launchedPid ? await waitForRecoveredRuntime(prior.url) : await reachable(prior.url))) die('existing run-local Demo process is running but its URL is unavailable; inspect it before retrying');
       const restored = { ...prior, schemaVersion: '3.0', runId, runtimeRoot: 'visual-sandbox', entrypoint: manifest.entrypoint, entrypointHash: hash(entrypoint), status: 'running' };
       write(runtimeFile, restored);
       write(registryFile, { schemaVersion: '1.0', runId, services: [{ kind: 'visual-sandbox-http', record: 'visual-sandbox-runtime.json', pid: prior.pid, url: prior.url, runtimeRoot: 'visual-sandbox', startedAt: prior.startedAt }] });

@@ -218,8 +218,9 @@ try {
   const intentPort = freePort(), intentId = crypto.randomUUID(), realIntentSandbox = fs.realpathSync(intentSandbox);
   fs.writeFileSync(path.join(intentDir, 'runtime-launch-intent.json'), JSON.stringify({ schemaVersion: '1.0', id: intentId, runId: 'run-cancel-intent', host: os.hostname(), bindHost: '127.0.0.1', port: intentPort, runtimeRoot: realIntentSandbox, startedAt: new Date().toISOString() }));
   const intentChild = spawn(process.execPath, [sandboxRuntime, 'serve', realIntentSandbox, String(intentPort), '--apex-run-id', 'run-cancel-intent', '--bind-host', '127.0.0.1', '--apex-start-id', intentId], { detached: true, stdio: 'ignore' }); intentChild.unref(); cancellationRuntimePid = intentChild.pid;
+  fs.writeFileSync(path.join(intentDir, 'runtime-services.json'), JSON.stringify({ schemaVersion: '1.0', runId: 'run-cancel-intent', services: [{ record: 'visual-sandbox-runtime.json', pid: intentChild.pid, url: `http://127.0.0.1:${intentPort}/`, runtimeRoot: 'visual-sandbox' }] }));
   const intentCancelled = expect(run(router, ['cancel', root, 'run-cancel-intent', 'session-cancel-intent', '取消当前执行']), 'cancel interrupted runtime launch');
-  if (!intentCancelled.cancellation?.services?.stopped?.some(item => item.pid === intentChild.pid)) throw new Error('cancellation must find and stop the launched but unregistered service');
+  if (!intentCancelled.cancellation?.services?.stopped?.some(item => item.pid === intentChild.pid)) throw new Error('cancellation must find and stop the launched service despite its missing runtime record');
   cancellationRuntimePid = null;
   reject(run(runController, ['init', root, 'direct-run', 'greenfield']), 'cannot be executed', 'direct run-controller state mutation must be denied');
   reject(run(runController, ['init', root, 'spoofed-run', 'greenfield'], { APEX_ROUTER_COMMAND: 'init' }), 'cannot be executed', 'spoofed Router environment must not mutate state');
