@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { commitRunState } from './run-ledger.mjs';
+import { assertMaterializationCurrent } from './materialization-current.mjs';
+import assert from 'node:assert/strict';
 /** Regression test: only a confirmed selected source file may be transferred and must remain byte-identical. */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -51,7 +53,13 @@ try {
   const appliedState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); appliedState.artifacts.pageDelta = 'page-delta.json'; fs.writeFileSync(path.join(runDir, 'page-delta.json'), '{"status":"recorded"}\n'); commitRunState(path.dirname(stateFile), appliedState, { reason: 'state-authority-test-fixture' });
   const auditAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'verify']), 'audit authorization');
   expect(run(action, ['run', root, 'run-assets', 'asset-session', auditAuth.authorizationRef, 'verify', 'asset-materializer.mjs', 'audit', runDir, root]), 'audit selected asset');
+  const materialState = JSON.parse(fs.readFileSync(stateFile)); const plan = JSON.parse(fs.readFileSync(path.join(runDir, 'visual-execution-plan.json')));
+  assert.doesNotThrow(() => assertMaterializationCurrent(runDir, root, materialState, plan));
+  const target = path.join(root, 'src', 'icons', 'triangle-alert.svg'), bytes = fs.readFileSync(target), outside = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-asset-outside-'));
+  try { const external = path.join(outside, 'icon.svg'); fs.writeFileSync(external, bytes); fs.unlinkSync(target); fs.symlinkSync(external, target); assert.throws(() => assertMaterializationCurrent(runDir, root, materialState, plan), /outside its root/); }
+  finally { fs.rmSync(target, { force: true }); fs.writeFileSync(target, bytes); fs.rmSync(outside, { recursive: true, force: true }); }
   fs.writeFileSync(path.join(root, 'src', 'icons', 'triangle-alert.svg'), '<svg data-lucide="substitute"/>');
+  assert.throws(() => assertMaterializationCurrent(runDir, root, materialState, plan), /materialized source changed/);
   const changedAuditAuth = expect(run(router, ['authorize', root, 'run-assets', 'asset-session', 'verify']), 'changed audit authorization');
   reject(run(action, ['run', root, 'run-assets', 'asset-session', changedAuditAuth.authorizationRef, 'verify', 'asset-materializer.mjs', 'audit', runDir, root]), 'audit must reject a substituted selected asset');
   console.log(JSON.stringify({ status: 'passed', checks: 4 }));

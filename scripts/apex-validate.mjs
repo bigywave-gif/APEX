@@ -23,6 +23,7 @@ import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { qualityEvidenceCurrent } from './quality-measurement-lib.mjs';
 import { stitchMachineSealCurrent, stitchMachineSealRequired } from './stitch-machine-seal.mjs';
 import { visualSourceCurrent } from './implementation-seal.mjs';
+import { assertMaterializationCurrent } from './materialization-current.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schemas = path.join(root, 'core/runtime/schemas');
@@ -568,6 +569,7 @@ function validateGate3(runDir) {
       const actual = new Set((runtimeAudit.packages || []).flatMap(item => item.selectionIds || []));
       for (const selectionId of expected) if (!actual.has(selectionId)) throw new Error(`selected runtime package was not verified in the project: ${selectionId}`);
     }
+    if (requiresMaterialization || requiresRuntimeMaterialization) assertMaterializationCurrent(runDir, path.dirname(path.dirname(path.dirname(runDir))), state, visualPlan);
     if (visualPlan.threeD?.length) {
       const threeDEvidence = validateFile('three-d-evidence.schema.json', requireArtifact(runDir, state, 'threeDEvidence', 'three-d-evidence.json'));
       if (threeDEvidence.visualExecutionPlanHash !== hashFile(visualPlanFile)) throw new Error('3D evidence does not bind the frozen visual execution plan');
