@@ -30,8 +30,25 @@ try {
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'role-advisory.mjs', 'select', d2, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout);
   const selection = JSON.parse(fs.readFileSync(path.join(d2, 'advisories/gate1/selection.json')));
   const role = selection.selectedRoles[0], jobId = selection.agentJobs[role];
+  registerAgent(d2, { agentId: 'other-stage-fixture', vocation: 'test', stage: 'visual' });
+  const otherJob = enqueueAgentJob(d2, { agentId: 'other-stage-fixture', stage: 'visual', inputHash: 'stage-test' });
+  const otherClaim = claimAgentJob(d2, otherJob.jobId);
+  for (const command of ['fail', 'succeed']) {
+    r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', command, d2, otherJob.jobId, 'gate1', command === 'fail' ? 'fixture' : '{}', otherClaim.leaseToken]);
+    assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /does not belong to the authorized stage/);
+    assert.equal(agentRuntimeStatus(d2, otherJob.jobId).jobs[0].status, 'running');
+  }
+  settleAgentJob(d2, otherJob.jobId, { status: 'succeeded', leaseToken: otherClaim.leaseToken });
+  registerAgent(d2, { agentId: 'generic-fixture', vocation: 'test', stage: 'gate1' });
+  const generic = enqueueAgentJob(d2, { agentId: 'generic-fixture', stage: 'gate1', inputHash: 'generic' });
+  const genericClaim = claimAgentJob(d2, generic.jobId);
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'succeed', d2, generic.jobId, 'gate1', '{}', genericClaim.leaseToken]);
+  assert.equal(r.status, 0, r.stderr || r.stdout); assert.equal(agentRuntimeStatus(d2, generic.jobId).jobs[0].status, 'succeeded');
   rebudgetAgentJobs(d2, { stage: 'gate1', jobIds: [jobId], perAgentBudget: 100, stageBudget: selection.tokenBudget.stage });
   r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'claim', d2, jobId, 'gate1']); assert.equal(r.status, 0, r.stderr || r.stdout); const oldLease = JSON.parse(r.stdout).leaseToken;
+  r = run('apex-action.mjs', ['run', p2, 'budget', 'budget-session', authorize('analyze_requirement'), 'analyze_requirement', 'agent-runtime.mjs', 'succeed', d2, jobId, 'gate1', '{}', oldLease]);
+  assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /must complete through role-advisory record/);
+  assert.equal(agentRuntimeStatus(d2, jobId).jobs[0].status, 'running');
   const jobInfo = agentRuntimeStatus(d2, jobId).jobs[0];
   const advisory = { schemaVersion: '1.0', roleId: role, stage: 'gate1', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'fixture', classification: 'fact', statement: 'Review the bound inputs.', evidence: selection.inputBindings.map(item => item.path) }], execution: { inputTokens: 100, outputTokens: 1, usageSource: 'provider-reported', model: 'fixture', sessionId: jobInfo.payload.agentSessionId, skillBindings: jobInfo.payload.skillBindings, leaseToken: oldLease }, recommendations: [{ id: 'fixture', choice: 'Keep the scope.', rationale: 'The task must be reviewed.', alternatives: ['Expand'], acceptance: ['Reviewed'] }], status: 'ready' };
   const inputFile = path.join(d2, 'over-budget-advisory.json'); fs.writeFileSync(inputFile, JSON.stringify(advisory));

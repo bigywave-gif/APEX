@@ -660,12 +660,14 @@ function recordSettledAttemptUsage(database, job, usage, outcome, timestamp) {
   if (report.usageSource === 'unknown' && (report.inputTokens !== 0 || report.outputTokens !== 0)) throw new Error('unknown Agent attempt usage requires zero placeholders');
   database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, report.inputTokens, report.outputTokens, report.inputTokens + report.outputTokens, timestamp, JSON.stringify({ jobId: job.job_id, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome, usageSource: report.usageSource }));
 }
-export function settleAgentJob(runDir, jobId, { status, result = null, error = null, retryDelayMs = null, leaseToken = null, usage = null, budgetExceeded = false } = {}) {
+export function settleAgentJob(runDir, jobId, { status, result = null, error = null, retryDelayMs = null, leaseToken = null, usage = null, budgetExceeded = false, expectedStage = null, directCompletion = false } = {}) {
   if (!['succeeded', 'failed'].includes(status)) throw new Error('agent job settlement status must be succeeded or failed');
   const database = open(runDir), timestamp = now();
   try {
     database.exec('BEGIN IMMEDIATE'); const job = database.prepare('SELECT * FROM agent_jobs WHERE job_id = ?').get(jobId);
     assertCurrentAgentLease(job, jobId, leaseToken);
+    if (expectedStage !== null && job.stage !== expectedStage) throw new Error(`agent job does not belong to the authorized stage: ${jobId}/${expectedStage}`);
+    if (directCompletion && status === 'succeeded' && parseJson(job.payload_json)?.roleId) throw new Error(`selected role must complete through role-advisory record: ${jobId}`);
     if (budgetExceeded && (status !== 'failed' || !usage || !Number(job.reserved_tokens || 0) || !Number.isInteger(usage.inputTokens) || !Number.isInteger(usage.outputTokens) || usage.inputTokens + usage.outputTokens <= Number(job.reserved_tokens))) throw new Error('budget-exceeded settlement requires actual usage above the active reservation');
     const payload = parseJson(job.payload_json), reported = usage && Number.isInteger(usage.inputTokens) && Number.isInteger(usage.outputTokens) ? usage.inputTokens + usage.outputTokens : 0;
     const prior = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
