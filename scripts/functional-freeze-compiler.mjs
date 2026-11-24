@@ -115,8 +115,11 @@ if (previousHash && previousHash !== sha256(outputFile)) {
     const manifestFile = path.join(runDir, 'role-advisory-manifest.json');
     if (fs.existsSync(manifestFile)) {
       const manifest = read(manifestFile);
-      delete manifest.stages?.[stage];
-      write(manifestFile, manifest);
+      if (Object.hasOwn(manifest.stages || {}, stage)) {
+        archiveArtifacts(runDir, ['role-advisory-manifest.json'], 'functional-freeze-recompiled');
+        delete manifest.stages[stage];
+        write(manifestFile, manifest);
+      }
     }
     if (state.artifacts?.roleDecisionSummaries) delete state.artifacts.roleDecisionSummaries[stage];
   }

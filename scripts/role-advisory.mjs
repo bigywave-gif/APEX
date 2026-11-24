@@ -350,8 +350,11 @@ function repair(runDir, stage) {
   const manifestFile = path.join(runDir, 'role-advisory-manifest.json');
   if (fs.existsSync(manifestFile)) {
     const manifest = read(manifestFile);
-    delete manifest.stages?.[stage];
-    write(manifestFile, manifest);
+    if (Object.hasOwn(manifest.stages || {}, stage)) {
+      archiveArtifacts(runDir, ['role-advisory-manifest.json'], 'role-stage-repaired');
+      delete manifest.stages[stage];
+      write(manifestFile, manifest);
+    }
   }
   const state = stateFor(runDir);
   if (state.artifacts?.roleDecisionSummaries) delete state.artifacts.roleDecisionSummaries[stage];

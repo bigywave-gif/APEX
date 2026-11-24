@@ -5,49 +5,16 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { appendLedgerEvent, archiveArtifacts, commitRunState, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
+import { appendLedgerEvent, archiveArtifacts, commitRunState, invalidationEvents, readRunState, recoverAgentJobs, reconcileRun } from './run-ledger.mjs';
 import { implementationSealCurrent, recoverImplementationSeal } from './implementation-seal.mjs';
 import { inspectRunningOperations, markInterruptedOperations } from './operation-recovery.mjs';
+import { archivedMissingReferences } from './recovery-archive.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function die(message) { console.error(`APEX recovery failed: ${message}`); process.exit(1); }
 function read(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function hashFile(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
-function archivedArtifactReferences(runDir) {
-  const root = path.join(runDir, 'invalidated');
-  if (!fs.existsSync(root)) return [];
-  const references = new Set(); let hasArchivedRoleStage = false;
-  const visit = directory => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const file = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(file);
-      else if (entry.isFile()) {
-        const parts = path.relative(root, file).split(path.sep);
-        const advisory = parts.lastIndexOf('advisories');
-        if (advisory >= 0 && parts.length > advisory + 2) {
-          references.add(['advisories', ...parts.slice(advisory + 1)].join('/'));
-          hasArchivedRoleStage = true;
-        }
-      }
-    }
-  };
-  visit(root);
-  if (hasArchivedRoleStage) references.add('role-advisory-manifest.json');
-  return [...references];
-}
-
-function archivedReferenceExists(runDir, reference) {
-  const root = path.join(runDir, 'invalidated');
-  const basename = path.basename(String(reference || ''));
-  if (!basename || !fs.existsSync(root)) return false;
-  const visit = directory => fs.readdirSync(directory, { withFileTypes: true }).some(entry => {
-    const file = path.join(directory, entry.name);
-    return entry.isDirectory() ? visit(file) : entry.isFile() && entry.name === basename;
-  });
-  return visit(root);
-}
-
 const runDir = path.resolve(process.argv[2] || '.');
 try { requireRouterAction(runDir, 'recover'); } catch (error) { die(error.message); }
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
@@ -88,9 +55,7 @@ const staleInputReferences = (preRecoveryReconciliation.issues || [])
 // A user-approved visual revision deliberately moves prior outputs into the
 // run-local invalidated archive. Their original operation registrations must
 // be retired too; otherwise a correct revision is permanently repair-required.
-const staleArchivedOutputReferences = (preRecoveryReconciliation.issues || [])
-  .filter(issue => issue.type === 'registered-artifact-missing' && archivedReferenceExists(runDir, issue.reference))
-  .map(issue => issue.reference);
+const staleArchivedOutputReferences = archivedMissingReferences(runDir, preRecoveryReconciliation.issues, invalidationEvents(runDir), state);
 // Runtime browser capture is an append-only observation that is deliberately
 // replaced by a later authorized capture.  Preserve the old ledger artifact
 // as archived lineage and let the next capture register its new hash; treating
@@ -98,7 +63,7 @@ const staleArchivedOutputReferences = (preRecoveryReconciliation.issues || [])
 const staleRuntimeEvidenceReferences = (preRecoveryReconciliation.issues || [])
   .filter(issue => issue.type === 'registered-artifact-hash-mismatch' && String(issue.reference || '') === 'evidence/runtime-browser-capture.json')
   .map(issue => issue.reference);
-const archivedArtifacts = archiveArtifacts(runDir, [...archivedArtifactReferences(runDir), ...staleInputReferences, ...staleArchivedOutputReferences, ...staleRuntimeEvidenceReferences], 'recovery-recognized-invalidated-artifacts');
+const archivedArtifacts = archiveArtifacts(runDir, [...staleInputReferences, ...staleArchivedOutputReferences, ...staleRuntimeEvidenceReferences], 'recovery-recognized-invalidated-artifacts');
 const refs = state.checkpoints || [];
 const changed = [];
 const latestRef = refs[refs.length - 1] || null;

@@ -382,6 +382,13 @@ export function appendLedgerEvent(runDir, event) {
   } finally { database.close(); }
 }
 
+export function invalidationEvents(runDir) {
+  const database = open(runDir);
+  try {
+    return database.prepare("SELECT created_at, payload_json FROM events WHERE event_type IN ('visual-intermediates-invalidated', 'role-advisories-invalidated') ORDER BY id").all().map(row => ({ ...parseJson(row.payload_json), recordedAt: row.created_at }));
+  } finally { database.close(); }
+}
+
 export function stitchAdaptationSkillLoads(runDir) {
   const database = open(runDir);
   try { return database.prepare("SELECT payload_json FROM events WHERE event_type = 'stitch-adaptation-skill-loaded' ORDER BY id").all().map(row => parseJson(row.payload_json)); }
@@ -991,7 +998,7 @@ export function reconcileRun(runDir) {
   let running = []; let registered = []; let edges = [];
   try {
     running = database.prepare("SELECT job_id, agent_id, stage, started_at, lease_expires_at FROM agent_jobs WHERE status = 'running'").all();
-    registered = database.prepare('SELECT artifact_id, reference, sha256, status FROM artifacts').all();
+    registered = database.prepare('SELECT artifact_id, reference, sha256, status, created_at FROM artifacts').all();
     edges = database.prepare('SELECT parent_artifact_id, child_artifact_id FROM artifact_edges').all();
   } finally { database.close(); }
   for (const [name, reference] of stateReferences) {
@@ -1013,7 +1020,7 @@ export function reconcileRun(runDir) {
     // unrecoverable data-integrity fault.
     if (artifact.reference === 'visual-sandbox-runtime.json') continue;
     const candidate = path.resolve(root, artifact.reference);
-    if (!candidate.startsWith(`${root}${path.sep}`) || !fs.existsSync(candidate)) issues.push({ type: 'registered-artifact-missing', artifactId: artifact.artifact_id, reference: artifact.reference });
+    if (!candidate.startsWith(`${root}${path.sep}`) || !fs.existsSync(candidate)) issues.push({ type: 'registered-artifact-missing', artifactId: artifact.artifact_id, reference: artifact.reference, expectedSha256: artifact.sha256, registeredAt: artifact.created_at });
     else if (`sha256:${crypto.createHash('sha256').update(fs.readFileSync(candidate)).digest('hex')}` !== artifact.sha256) issues.push({ type: 'registered-artifact-hash-mismatch', artifactId: artifact.artifact_id, reference: artifact.reference });
   }
   for (const edge of edges) if (!registered.some(item => item.artifact_id === edge.parent_artifact_id) || !registered.some(item => item.artifact_id === edge.child_artifact_id)) issues.push({ type: 'artifact-lineage-broken', parentArtifactId: edge.parent_artifact_id, childArtifactId: edge.child_artifact_id });

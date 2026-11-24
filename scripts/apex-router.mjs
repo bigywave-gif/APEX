@@ -525,9 +525,11 @@ function invalidateVisualIntermediates(dir, reason) {
   // Preserve the evidence trail under invalidated/, but leave no runnable
   // generated visual at the active run root after a material reset.
   const candidates = ['visual-execution-plan.json', 'visual-plan-presentation.md', 'visual-plan-presentation-manifest.json', 'visual-sandbox', 'visual-sandbox-files.json', 'runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'design-candidates.json', 'visual-reference.json', 'visual-screen-references.json', 'visual-screen-references', 'gate1-visual-output.json', 'stitch-job.json', 'stitch-freeze.json', 'stitch-raw.json', 'stitch-parity-evidence.json', 'visual-bundle.json', 'implementation-map.json', 'evidence/stitch-ui-import.json'];
-  const stamp = `${Date.now()}-${String(reason).replace(/[^A-Za-z0-9._-]/g, '_')}`;
+  const stamp = `${Date.now()}-${crypto.randomUUID()}-${String(reason).replace(/[^A-Za-z0-9._-]/g, '_')}`;
   const archive = path.join(dir, 'invalidated', stamp); const moved = [];
-  for (const relative of candidates) {
+  const planned = candidates.filter(relative => fs.existsSync(path.join(dir, relative)));
+  if (planned.length) appendEvent(dir, { type: 'visual-intermediates-invalidation-started', reason, archive: path.relative(dir, archive), artifacts: planned });
+  for (const relative of planned) {
     const source = path.join(dir, relative);
     if (!fs.existsSync(source)) continue;
     const target = path.join(archive, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.renameSync(source, target); moved.push(relative);
@@ -540,7 +542,9 @@ function invalidateRoleStages(dir, state, stages, reason) {
   const manifestRef = state.artifacts?.roleAdvisoryManifest;
   const manifestFile = manifestRef && artifactFile(dir, manifestRef);
   const moved = [];
-  const stamp = `${Date.now()}-role-${String(reason).replace(/[^A-Za-z0-9._-]/g, '_')}`;
+  const stamp = `${Date.now()}-role-${crypto.randomUUID()}-${String(reason).replace(/[^A-Za-z0-9._-]/g, '_')}`;
+  const planned = stages.filter(stage => fs.existsSync(path.join(dir, 'advisories', stage))).map(stage => `advisories/${stage}`);
+  if (planned.length) appendEvent(dir, { type: 'role-advisories-invalidation-started', reason, stages, archive: path.join('invalidated', stamp), artifacts: planned });
   for (const stage of stages) {
     const source = path.join(dir, 'advisories', stage);
     if (fs.existsSync(source)) {
@@ -550,10 +554,17 @@ function invalidateRoleStages(dir, state, stages, reason) {
     if (state.artifacts?.roleDecisionSummaries) delete state.artifacts.roleDecisionSummaries[stage];
   }
   if (manifestFile && fs.existsSync(manifestFile)) {
-    try { const manifest = read(manifestFile); for (const stage of stages) delete manifest.stages?.[stage]; write(manifestFile, manifest); }
+    try {
+      const manifest = read(manifestFile);
+      if (stages.some(stage => Object.hasOwn(manifest.stages || {}, stage))) {
+        archiveArtifacts(dir, [manifestRef], 'role-stages-invalidated');
+        for (const stage of stages) delete manifest.stages?.[stage];
+        write(manifestFile, manifest);
+      }
+    }
     catch { state.artifacts.roleAdvisoryManifest = null; }
   }
-  if (moved.length) appendEvent(dir, { type: 'role-advisories-invalidated', reason, stages, artifacts: moved });
+  if (moved.length) appendEvent(dir, { type: 'role-advisories-invalidated', reason, stages, archive: path.join('invalidated', stamp), artifacts: moved });
   return moved;
 }
 function runControllerCommand(command, args) {
