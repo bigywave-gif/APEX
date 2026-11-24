@@ -45,9 +45,12 @@ export const formalJourneyCode = input => `async (page) => await (${runFormalJou
 
 export async function runFormalAuthentication(page, input) {
   const { authentication, credentials, url } = input;
-  if (new URL(page.url()).origin !== new URL(url).origin) throw new Error('authentication page is outside the application origin');
+  const ensureOrigin = () => { if (new URL(page.url()).origin !== new URL(url).origin) throw new Error('authentication page is outside the application origin'); };
+  ensureOrigin();
   await page.locator(authentication.usernameSelector).fill(credentials.username);
+  ensureOrigin();
   await page.locator(authentication.passwordSelector).fill(credentials.password);
+  ensureOrigin();
   await page.locator(authentication.submitSelector).click();
   await page.waitForTimeout(350);
   if (new URL(page.url()).origin !== new URL(url).origin) throw new Error('authentication left the application origin');

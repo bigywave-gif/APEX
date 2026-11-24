@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T18:55:41.311Z",
+  "generatedAt": "2026-11-24T19:03:58.908Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -128,11 +128,11 @@
     "scripts/formal-auth-browser-test.mjs": "e1a63d608b382aa280ec0a2f6f07143483b08668a41b5f603648b1c097608a44",
     "scripts/formal-direct-progress.mjs": "ab3ff77ad89915e5914073b858d6a83fb1f2abf764a373c2a599d2fa4904dc54",
     "scripts/formal-interaction-evidence.mjs": "581d5a356223488892d57a056ade6ffdef67cf16b9b63b4841eab24bd381bdb8",
-    "scripts/formal-interaction.mjs": "828829c5bca9efe347800b19cbfe95bfc41716f29886b5e1685915471d3c180e",
+    "scripts/formal-interaction.mjs": "4f533aa7085420cb7d2556dbe8c09b4666dbf1465565677065a80404b8b10a6b",
     "scripts/formal-route-coverage-test.mjs": "98d3f84c402544a7a3913027e5cbf3458119413ca9cc3e4920433e7c729500b5",
     "scripts/formal-route-coverage.mjs": "f937cbb59005ae5ec7a9d1deee9a810c5f1024d0974b65ba2ec4c9637fb22f32",
     "scripts/formal-stitch-progress.mjs": "967169f16896725c4ec648a8d654e6be2ac2b1262e12c7b845e3cb1f01723510",
-    "scripts/formal-task-coverage-test.mjs": "278986df29047bc3f1ed7e21d11697dbc9fd823d45ae894537766cccf0dd7bdb",
+    "scripts/formal-task-coverage-test.mjs": "3fe777c17ef6fa54f627d3ba4d65570b425c17c536732aa7ee3a209aef335efc",
     "scripts/functional-freeze-compiler.mjs": "a366c474ed4e5cc03bedd2fd57a3de95e154be8d497fcc99d7a4db893da0803d",
     "scripts/implementation-audit.mjs": "c8c73aaa47c50e07c72b64d4991301ee9c7c3872dfba2a02aceb70958ebcd08f",
     "scripts/implementation-coverage-test.mjs": "5424bc7106fe6e25bbfae6a85caa6893c45db52fdcfd31f0a2f6df729f6a5bff",
