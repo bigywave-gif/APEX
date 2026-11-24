@@ -146,7 +146,17 @@ function latestBlockingOperation(runDir, action) {
   const receipts = operationRecords(runDir)
     .filter(item => item.receipt?.action === action && ['succeeded', 'failed', 'interrupted'].includes(item.receipt?.status))
     .sort((left, right) => String(right.receipt.finishedAt || right.receipt.startedAt || '').localeCompare(String(left.receipt.finishedAt || left.receipt.startedAt || '')));
-  const latest = receipts[0];
+  // A different successful sub-operation in the same phase cannot establish
+  // the outcome of an interrupted one. Only a later success with the same
+  // command fingerprint can supersede it; external side-effect registries
+  // still independently enforce their own unresolved-submission barriers.
+  const completedFingerprints = new Set();
+  let unresolved = null;
+  for (const item of receipts) {
+    if (item.receipt.status === 'succeeded' && item.receipt.fingerprint) completedFingerprints.add(item.receipt.fingerprint);
+    if (item.receipt.status === 'interrupted' && (!item.receipt.fingerprint || !completedFingerprints.has(item.receipt.fingerprint))) { unresolved = item; break; }
+  }
+  const latest = unresolved || receipts[0];
   if (!latest || latest.receipt.status === 'succeeded') return null;
   const receipt = latest.receipt;
   const observedError = `${receipt.stderr || receipt.stdout || 'controlled operation failed without stderr'}`.trim().slice(0, 1200);

@@ -51,9 +51,17 @@ try {
   const interruptedDir = path.join(consentBoundary, '.apex', 'runs', 'with-consent', 'operations');
   fs.mkdirSync(interruptedDir, { recursive: true });
   const interruptedFile = path.join(interruptedDir, 'interrupted-fixture.json');
-  fs.writeFileSync(interruptedFile, JSON.stringify({ status: 'interrupted', action: 'analyze_requirement', script: 'contract-recorder.mjs', finishedAt: new Date().toISOString(), stderr: 'local gateway exited; external side effects remain unverified' }));
+  fs.writeFileSync(interruptedFile, JSON.stringify({ status: 'interrupted', action: 'analyze_requirement', script: 'contract-recorder.mjs', fingerprint: 'interrupted-command', finishedAt: new Date(Date.now() - 1000).toISOString(), stderr: 'local gateway exited; external side effects remain unverified' }));
   const interruptedStatus = expect(run(router, ['status', consentBoundary, 'with-consent', 'consent-session']), 'interrupted operation must remain observable');
   if (interruptedStatus.executionDirective?.blockingOperation?.category !== 'operation-interrupted' || interruptedStatus.terminalResponseContract?.allowedKinds?.[0] !== 'blocking-report') throw new Error('Router must stop automatic continuation for the latest interrupted operation and require investigation');
+  const unrelatedFile = path.join(interruptedDir, 'unrelated-success.json');
+  fs.writeFileSync(unrelatedFile, JSON.stringify({ status: 'succeeded', action: 'analyze_requirement', script: 'role-advisory.mjs', fingerprint: 'different-command', finishedAt: new Date().toISOString() }));
+  const stillInterrupted = expect(run(router, ['status', consentBoundary, 'with-consent', 'consent-session']), 'unrelated successful work must not mask an interrupted operation');
+  if (stillInterrupted.executionDirective?.blockingOperation?.category !== 'operation-interrupted') throw new Error('unrelated successful operations must not hide an unresolved interruption');
+  fs.writeFileSync(unrelatedFile, JSON.stringify({ status: 'succeeded', action: 'analyze_requirement', script: 'contract-recorder.mjs', fingerprint: 'interrupted-command', finishedAt: new Date().toISOString() }));
+  const retriedStatus = expect(run(router, ['status', consentBoundary, 'with-consent', 'consent-session']), 'a later successful same-command operation must be recognized');
+  if (retriedStatus.executionDirective?.blockingOperation?.category === 'operation-interrupted') throw new Error('a later successful same-command operation must clear this local continuation block');
+  fs.unlinkSync(unrelatedFile);
   fs.unlinkSync(interruptedFile);
   const apiOnly = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-router-api-only-')); roots.push(apiOnly);
   fs.writeFileSync(path.join(apiOnly, 'server.ts'), 'export const api = true;\n');
