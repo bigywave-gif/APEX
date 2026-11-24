@@ -11,7 +11,9 @@ try {
   const cases = [
     { name: 'vue', dependencies: { vue: '3' }, source: 'src/media/platform/index.ts', adapter: 'vue-enterprise' },
     { name: 'react', dependencies: { react: '19' }, source: 'src/platform/view.tsx', adapter: 'react-saas' },
-    { name: 'micro', dependencies: { vue: '3', qiankun: '2' }, source: 'src/platform/index.ts', adapter: 'platform-shell' }
+    { name: 'micro', dependencies: { vue: '3', qiankun: '2' }, source: 'src/platform/index.ts', adapter: 'platform-shell' },
+    { name: 'angular', dependencies: { '@angular/core': '19' }, source: 'src/index.html', adapter: 'generic-saas', confidence: 'low' },
+    { name: 'html', dependencies: {}, source: 'index.html', adapter: 'legacy-multi-entry', confidence: 'low' }
   ];
   for (const item of cases) {
     const project = path.join(base, item.name), run = 'adapter', session = 'adapter-session', runDir = path.join(project, '.apex/runs', run);
@@ -29,6 +31,7 @@ try {
     call('apex-action.mjs', ['run', project, run, session, authorization.authorizationRef, 'collect_existing_baseline', 'project-intake.mjs', 'scan', runDir, project]);
     const inventory = JSON.parse(fs.readFileSync(path.join(runDir, 'project-inventory.json')));
     assert.equal(inventory.adapterRecommendation.id, item.adapter, item.name);
+    if (item.confidence) assert.equal(inventory.adapterRecommendation.confidence, item.confidence, item.name);
     assert.equal(inventory.scanCoverage.complete, true);
     if (item.name === 'vue') {
       assert.ok(inventory.ignoredPaths.includes('.custom-env'));

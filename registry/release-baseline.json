@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T20:54:52.311Z",
+  "generatedAt": "2026-11-24T21:04:11.861Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -164,9 +164,9 @@
     "scripts/preflight.mjs": "5df44889bb2d8ccc6410d3ee9535bf0305f5252e68748fbd66acd4f84f5e8701",
     "scripts/product-to-demo-browser-test.mjs": "4c1120321d1c11c530662d8374fbe7a1d3b4452a9982f6ab79942d061c13a329",
     "scripts/product-to-visual-handoff-test.mjs": "d50c4a457369dc271291ce916363981b4a47b66256919af53124a70603b50fc9",
-    "scripts/project-adapter-integration-test.mjs": "60b33a9117084c4668f39e61b3eb197e54f8a5783ecf15a78691513ceedf0bf0",
-    "scripts/project-adapter-test.mjs": "49f7baea577c50a510b8b250c910a4b98a91d40282d635510c5179ca9db0d52e",
-    "scripts/project-adapter.mjs": "0d0bbd12a51a5a3894b2a1fafc6c63975bbe1a777cd46805e1192f6bfaa96dcf",
+    "scripts/project-adapter-integration-test.mjs": "797dd739a69fb752ede6a5d5d5fce1d0b4391b244663f87fa4b8c16bc1568ff4",
+    "scripts/project-adapter-test.mjs": "86859f558bf6ef1046f76db1ef4d604a8ac0f8b5dc5dfdf43a4a000ad914c9a8",
+    "scripts/project-adapter.mjs": "da806b14fc61b05412321d5874e415737e32d23b403feda6427e6b5111e3e569",
     "scripts/project-external-inspect.mjs": "cf1ed3e383d809edb4a9fb7291f52d8bfa201ecccdf21e3b01fb92a0442d71ef",
     "scripts/project-external-registry-test.mjs": "e44df8fab808ac9eb77f9fcfd62f315a6f662602b875401ce8d3d0e33f85c6fc",
     "scripts/project-external-registry.mjs": "2936c3c82123ef7cad87d6144ff210f850c2c1d16ce9f1de0718d554248bdf48",

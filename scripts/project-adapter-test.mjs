@@ -6,6 +6,12 @@ assert.equal(select({ dependencies: { vue: '3' } }, ['vue'], ['src/media/platfor
 assert.equal(select({ dependencies: { react: '19' } }, ['react'], ['src/platform/view.tsx']).id, 'react-saas');
 assert.equal(select({ dependencies: { vue: '3', qiankun: '2' } }, ['vue'], ['src/platform/index.ts']).id, 'platform-shell');
 assert.equal(select({ dependencies: { jquery: '3' } }, [], ['index.html']).id, 'legacy-multi-entry');
+assert.equal(select({ dependencies: { jquery: '3' } }, [], ['index.html']).confidence, 'high');
+assert.equal(select({}, [], ['index.html']).confidence, 'low');
+assert.equal(select({}, [], ['index.html', 'docs/old.html']).confidence, 'low');
+assert.equal(select({ dependencies: { '@angular/core': '19' } }, ['angular'], ['index.html']).id, 'generic-saas');
+assert.equal(select({ dependencies: { '@angular/core': '19' } }, ['angular'], ['index.html']).confidence, 'low');
+assert.equal(select({}, ['svelte'], ['index.html']).id, 'generic-saas');
 assert.equal(select({}, [], ['src/platform/index.ts']).confidence, 'low');
 assert.equal(select({}, [], ['src/index.ts']).id, 'generic-saas');
 console.log(JSON.stringify({ status: 'passed', scope: 'framework and ambiguous adapter indicators' }));
