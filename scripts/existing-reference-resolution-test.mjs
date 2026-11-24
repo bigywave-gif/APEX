@@ -17,14 +17,14 @@ function action(script, args) { const auth = call('apex-router.mjs', ['authorize
 try {
   put('package.json', JSON.stringify({ workspaces: ['packages/*'] }));
   put('tsconfig.json', '{ /* alias config */ "compilerOptions": { "baseUrl": ".", "paths": { "~*": ["./src/*",], }, }, }');
-  put('index.html', '<!-- <script>import "./commented-html";</script> --><main>Fixture<img src="/hero.png"></main><link rel="stylesheet" href="/style.css"><script src="/main.js"></script><script type="application/json">import "./json-example";</script><script type="module">import "./inline-html"; import "./";</script>');
+  put('index.html', '<!-- <script>import "./commented-html";</script> --><main>Fixture<img src="/hero.png"></main><link rel="stylesheet" href="/style.css"><script src="/main.js"></script><script type="application/json">import "./json-example";</script><script type="module">import "./inline-html"; import "./"; import("./inline-html-dynamic");</script>');
   put('public/style.css', 'body { background: url("/logo.svg"), url("/late.png"), url("data:image/svg+xml,example") }'); put('public/main.js', "import '../src/main.js';");
   put('public/hero.png', 'fixture image'); put('public/logo.svg', '<svg></svg>');
   put('src/main.ts', "import './App.js?raw'; import './module'; import './module-common'; import Button from '~components/Button.vue'; import './Widget.svelte'; import {ui} from '@fixture/ui';\n");
   put('src/App.tsx', 'export const App = () => <main>Fixture</main>;');
   put('src/module.mts', 'export const moduleValue = true;');
   put('src/module-common.cts', 'export const commonValue = true;');
-  put('src/components/Button.vue', '<template><button>import "./template-example"</button></template><script src="./button.ts"></script><script setup lang="ts" data-type="example" data-src="example" data-description=" src=x type=application/json">import "./vue-inline";</script><style>@import "~shared.css";</style>');
+  put('src/components/Button.vue', '<template><button>import "./template-example"</button></template><script src="./button.ts"></script><script setup lang="ts" data-type="example" data-src="example" data-description=" src=x type=application/json">import "./vue-inline"; require("./vue-required");</script><style>@import "~shared.css";</style>');
   put('src/Widget.svelte', '<script lang="ts">import "./svelte-inline";</script><div>Original</div>');
   put('src/components/button.ts', 'export const button = true;');
   put('src/shared.css', 'button { color: red }');
@@ -37,14 +37,14 @@ try {
   const scope = path.join(dir, 'scope.json'); fs.writeFileSync(scope, JSON.stringify({ routes: ['/'], codeEntrypoints: ['index.html'] }));
   const capture = () => action('existing-code-reference.mjs', ['capture', dir, project, scope]);
   const main = path.join(project, 'src/main.ts');
-  fs.appendFileSync(main, `\n// import './comment-only';\n/* import './block-only'; */\nconst text = "import './string-only'";\nconst template = \`import './template-only'\`;\nimport './missing-local-module';\nimport './second-missing';\n`);
+  fs.appendFileSync(main, `\n// import './comment-only'; require('./commented-require');\n/* import './block-only'; */\nconst text = "import './string-only'";\nconst template = \`import './template-only'\`;\nimport './missing-local-module';\nimport './second-missing';\nimport('./dynamic-missing');\nrequire('./require-missing');\nobject.require('./property-method'); object . require('./spaced-property'); object./* comment */require('./commented-property');\nimport(computedPath);\n`);
   const firstAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
   const captureArgs = ['run', project, run, session, firstAuth.authorizationRef, 'collect_existing_baseline', 'existing-code-reference.mjs', 'capture', dir, project, scope];
   const missing = spawnSync(process.execPath, [path.join(core, 'scripts/apex-action.mjs'), ...captureArgs], { encoding: 'utf8', timeout: 30000 });
   assert.notEqual(missing.status, 0);
   assert.match(missing.stderr, /APEX_UNRESOLVED_LOCAL_IMPORTS:.*missing-local-module/);
-  for (const expected of ['vue-inline', 'svelte-inline', 'inline-html']) assert.match(missing.stderr, new RegExp(expected));
-  assert.doesNotMatch(missing.stderr, /comment-only|block-only|string-only|template-only|commented-html|json-example|template-example/);
+  for (const expected of ['vue-inline', 'svelte-inline', 'inline-html', 'dynamic-missing', 'require-missing', 'vue-required', 'inline-html-dynamic']) assert.match(missing.stderr, new RegExp(expected));
+  assert.doesNotMatch(missing.stderr, /comment-only|block-only|string-only|template-only|commented-html|json-example|template-example|commented-require|property-method|spaced-property|commented-property/);
   assert.equal(fs.existsSync(path.join(dir, 'code-reference.json')), false);
   const failedStatus = call('apex-router.mjs', ['status', project, run, session]);
   assert.equal(failedStatus.terminalResponseContract?.blockingOperation?.category, 'unresolved-local-import');
@@ -60,11 +60,12 @@ try {
   assert.notEqual(partialRepeat.status, 0); assert.match(partialRepeat.stderr, /identical controlled operation/);
   put('src/second-missing.ts', 'export const restoredAgain = true;');
   put('src/components/vue-inline.ts', 'export const vue = true;'); put('src/svelte-inline.ts', 'export const svelte = true;'); put('inline-html.js', 'export const html = true;');
+  put('src/dynamic-missing.ts', 'export const dynamic = true;'); put('src/require-missing.ts', 'export const required = true;'); put('src/components/vue-required.ts', 'export const vueRequired = true;'); put('inline-html-dynamic.js', 'export const dynamicHtml = true;');
   const restoredStatus = call('apex-router.mjs', ['status', project, run, session]);
   assert.equal(restoredStatus.executionDirective?.currentStep?.id, 'freeze-code-reference');
   assert.equal(restoredStatus.terminalResponseContract?.blockingOperation ?? null, null);
   capture();
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).importInspection, 'static-relative-script-v2');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).importInspection, 'literal-relative-script-v3');
   const mainBeforeFailure = fs.readFileSync(main, 'utf8');
   fs.appendFileSync(main, "\nimport './later-unresolved';\n");
   const changedAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
@@ -76,7 +77,7 @@ try {
   assert.equal(revertedStatus.terminalResponseContract?.blockingOperation ?? null, null, 'restoring a valid frozen source must clear the resolved failure');
   capture();
   const paths = () => new Set(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).files.map(item => item.path));
-  for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/module.mts', 'src/module-common.cts', 'src/components/Button.vue', 'src/components/button.ts', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
+  for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/module.mts', 'src/module-common.cts', 'src/components/Button.vue', 'src/components/button.ts', 'src/components/vue-required.ts', 'src/dynamic-missing.ts', 'src/require-missing.ts', 'inline-html-dynamic.js', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
   assert.equal(capture().reused, true);
   const beforePreferred = JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json')));
   assert.ok(!beforePreferred.absentImportCandidates.includes(''), 'the project root is not a file candidate');

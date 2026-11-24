@@ -14,7 +14,7 @@ import { codePositions, embeddedScriptPositions, unresolvedFailure } from './exi
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '13';
+const CAPTURE_VERSION = '14';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -94,13 +94,15 @@ function imports(projectRoot, file, content) {
   // claim coverage they do not have.
   const patterns = [
     /\b(?:import|export)\s+(?:[\w*$\s{},]+\s+from\s+)?['"]([^'"]+)['"]/g,
-    /\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+    /(?<![\w$.])(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g
   ];
   for (const [index, pattern] of patterns.entries()) for (const match of content.matchAll(pattern)) {
+    let preceding = match.index - 1;
+    if (index === 1 && (!positions || positions[match.index])) { while (preceding >= 0 && (/\s/.test(content[preceding]) || (positions && !positions[preceding]))) preceding--; if (content[preceding] === '.') continue; }
     const candidates = new Set();
     const target = resolveImport(projectRoot, file, match[1], candidates);
     if (target) found.add(target);
-    else if (positions?.[match.index] && index === 0 && /^(?:\.\/|\.\.\/)/.test(match[1])) {
+    else if (positions?.[match.index] && /^(?:\.\/|\.\.\/)/.test(match[1])) {
       const source = rel(projectRoot, file), reference = match[1];
       unresolvedImports.set(JSON.stringify([source, reference]), { source, reference, candidates: [...candidates] });
     }
@@ -234,7 +236,7 @@ const pending = [...entries, ...configFiles]; const selected = new Set();
 while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } if (/\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file)) { const content = fs.readFileSync(file, 'utf8'); for (const dependency of imports(projectRoot, file, content)) if (!selected.has(dependency)) pending.push(dependency); } }
 if (unresolvedImports.size) {
   console.error(unresolvedFailure([...unresolvedImports.values()], projectRoot));
-  die('static local imports could not be resolved; inspect the recorded sources and project build configuration before retrying');
+  die('literal local imports could not be resolved; inspect the recorded sources and project build configuration before retrying');
 }
 fs.mkdirSync(copies, { recursive: true });
 const aggregate = crypto.createHash('sha256'); let totalBytes = 0; const nodes = [];
@@ -253,7 +255,7 @@ const files = [...selected].sort((a, b) => rel(projectRoot, a).localeCompare(rel
 });
 if (!nodes.length) die('target code closure has no mappable page skeleton nodes');
 const sourceTreeHash = `sha256:${aggregate.digest('hex')}`; const skeletonPayload = { sourceTreeHash, entrypoints: entries.map(entry => rel(projectRoot, entry)), nodes }; const skeletonHash = sha(Buffer.from(JSON.stringify(skeletonPayload)));
-const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, importInspection: 'static-relative-script-v2', scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
+const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, importInspection: 'literal-relative-script-v3', scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
 if (!reference.scope.routes.length) die('baseline input must declare target routes');
 const output = path.join(runDir, 'code-reference.json'); const skeletonOutput = path.join(runDir, 'page-skeleton.json'); write(output, reference); write(skeletonOutput, { schemaVersion: '3.0', ...skeletonPayload, skeletonHash });
 write(integrityIndexFile, { schemaVersion: '3.0', captureVersion: CAPTURE_VERSION, capturedAt: new Date().toISOString(), purpose: 'fast-path-only; Gate validation recomputes all SHA-256 values', sourceTreeHash, scopeHash: sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints.slice().sort(), configHash, publicRoots }))), entrypoints: skeletonPayload.entrypoints, files: integrityFiles, missingCandidates: [...new Set([...missingResources.values()].flatMap(item => item.candidates))] });

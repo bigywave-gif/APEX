@@ -3,8 +3,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 // Mark positions outside comments and quoted text. This is a conservative
-// scanner, not a JavaScript parser; dynamic imports and aliases need their own
-// runtime/build evidence.
+// scanner, not a JavaScript parser; computed imports and aliases need their
+// own runtime/build evidence.
 export function codePositions(text) {
   const code = new Uint8Array(text.length);
   let state = 'code', escaped = false;

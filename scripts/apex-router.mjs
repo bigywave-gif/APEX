@@ -1189,7 +1189,7 @@ function existingCodeReferenceFreshness(runDir, state) {
     const reference = read(referenceFile), skeleton = read(skeletonFile);
     const projectRoot = path.resolve(reference.projectRoot || path.join(runDir, '..', '..', '..'));
     if (reference.complete !== true || !reference.sourceTreeHash || !Array.isArray(reference.files) || !reference.files.length) return { ready: false, reason: 'code reference is not a complete source snapshot' };
-    if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'static-relative-script-v2') return { ready: false, reason: 'code reference predates embedded script import inspection; recapture before proceeding' };
+    if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'literal-relative-script-v3') return { ready: false, reason: 'code reference predates literal local import inspection; recapture before proceeding' };
     const newResources = newlyAvailableResources(reference, projectRoot);
     if (newResources.length) return { ready: false, reason: `scoped source changed after code reference capture: previously unavailable resource ${newResources[0]}` };
     const newConfigs = newlyAvailableConfigs(reference, projectRoot);
