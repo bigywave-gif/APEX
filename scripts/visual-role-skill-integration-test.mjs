@@ -45,6 +45,8 @@ try {
   const hostUsage = expect(invoke(authorize(), 'agent-runtime.mjs', ['tokens-observed', runDir, 'visual', 'independent_host_0001', '0', '0', 'unknown']), 'record independent host usage');
   assert.equal(hostUsage.budgetScope, 'reported-usage-only');
   assert.equal(hostUsage.idempotent, false);
+  const hostCorrection = { stage: 'visual', inputTokens: 0, outputTokens: 0, usageSource: 'estimated', evidence: 'isolated integration fixture' };
+  assert.equal(expect(invoke(authorize(), 'agent-runtime.mjs', ['reconcile-observed-usage', runDir, 'visual', 'independent_host_0001', JSON.stringify(hostCorrection)]), 'reconcile independent host usage').status, 'reconciled');
   if (process.env.APEX_TEST_SKILL_DRIFT === '1') {
     // This destructive fixture may only change a disposable copied skill.
     const skillFile = fs.realpathSync(queued.payload.tasteSkill.path);
@@ -262,7 +264,7 @@ try {
   advisory.execution.inputTokens = -1; fs.writeFileSync(input, JSON.stringify(advisory));
   const missingControlledReceipt = invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', input]); assert.notEqual(missingControlledReceipt.status, 0); assert.match(missingControlledReceipt.stderr, /successful current-attempt controlled taste-skill load receipt/);
   fs.writeFileSync(requiredReceiptPath, requiredReceiptBytes);
-  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 2, 'invalid usage must be recorded as unknown');
+  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 1, 'invalid usage must be recorded as unknown');
   advisory.execution.inputTokens = 1;
   ({ authorization: replacementAuthorization, claim: replacement } = retryDesigner());
   advisory.execution.leaseToken = replacement.leaseToken;
@@ -302,7 +304,7 @@ try {
   const ux = { ...advisory, roleId: 'ux-architect', execution: { inputTokens: 0, outputTokens: 0, usageSource: 'unknown', model: 'unmetered-fixture', sessionId: uxJob.payload.agentSessionId, skillBindings: uxJob.payload.skillBindings, leaseToken: uxClaim.leaseToken } };
   const uxInput = path.join(runDir, 'ux-advisory.json'); fs.writeFileSync(uxInput, JSON.stringify(ux));
   expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', uxInput]), 'record explicitly unmetered UX advisory');
-  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 2); // independent host and unmetered UX
+  assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 1); // unmetered UX; independent host was reconciled
   const uxUsageDb = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
   const uxUsage = JSON.parse(uxUsageDb.prepare('SELECT metadata_json FROM token_usage WHERE agent_id = ? ORDER BY id DESC LIMIT 1').get(uxJob.agentId).metadata_json); uxUsageDb.close();
   assert.equal(uxUsage.reservedTokens, uxClaim.reservedTokens, 'unmetered role advisory must retain its actual reservation');

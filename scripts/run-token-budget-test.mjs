@@ -5,7 +5,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, reconcileAgentAttemptUsage, rebudgetAgentJobs, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
+import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, rebudgetAgentJobs, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
 import { readRunMetrics } from './run-metrics.mjs';
 
 const run = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-run-token-budget-'));
@@ -32,6 +32,28 @@ try {
   const uncertain = recordObservedTokenUsage(run, { stage: 'gate1', observationKey: 'unknown_run_usage_0001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown' });
   assert.equal(uncertain.runBudget.available, null); assert.equal(uncertain.runBudget.incompleteUsage, true);
   assert.equal(readRunMetrics(run).tokens.runBudget.available, null);
+  const hostUnknown = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-host-unknown-budget-'));
+  try {
+    const hostState = { runId: 'host-unknown', revision: 0, track: 'greenfield', scope: 'standard', gates: {}, artifacts: {} }; fs.writeFileSync(path.join(hostUnknown, 'state.json'), JSON.stringify(hostState)); initializeLedger(hostUnknown, hostState, 'fixture');
+    configureRunTokenBudget(hostUnknown, { limit: 100, verificationReserve: 10 });
+    recordObservedTokenUsage(hostUnknown, { stage: 'gate1', observationKey: 'host_unknown_call_001', inputTokens: 0, outputTokens: 0, usageSource: 'unknown' });
+    registerAgent(hostUnknown, { agentId: 'host-followup', vocation: 'review', stage: 'visual' });
+    const pending = enqueueAgentJob(hostUnknown, { agentId: 'host-followup', stage: 'visual', inputHash: 'fixture', payload: { tokenBudget: 30, stageTokenBudget: 100 } });
+    const held = claimAgentJob(hostUnknown, pending.jobId); assert.equal(held.reason, 'run-budget-unknown-usage'); assert.equal(held.runBudget.unboundedOtherUsage, 1); assert.equal(held.runBudget.admissionAvailable, 0);
+    assert.equal(readRunMetrics(hostUnknown).tokens.runBudget.unboundedOtherUsage, 1); assert.equal(readRunMetrics(hostUnknown).tokens.runBudget.admissionAvailable, 0);
+    const correction = { stage: 'gate1', observationKey: 'host_unknown_call_001', inputTokens: 20, outputTokens: 5, usageSource: 'provider-reported', evidence: 'provider usage receipt' };
+    assert.throws(() => reconcileObservedTokenUsage(hostUnknown, { ...correction, stage: 'visual' }), /identity/);
+    assert.equal(reconcileObservedTokenUsage(hostUnknown, correction).status, 'reconciled'); assert.equal(reconcileObservedTokenUsage(hostUnknown, correction).status, 'already-reconciled');
+    assert.throws(() => reconcileObservedTokenUsage(hostUnknown, { ...correction, inputTokens: 21 }), /already reconciled/);
+    const released = claimAgentJob(hostUnknown, pending.jobId); assert.equal(released.status, 'running'); assert.equal(released.runBudget.used, 25); assert.equal(released.runBudget.unboundedOtherUsage, 0);
+  } finally { fs.rmSync(hostUnknown, { recursive: true, force: true }); }
+  const hostStage = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-host-stage-unknown-'));
+  try {
+    recordObservedTokenUsage(hostStage, { stage: 'visual', observationKey: 'host_stage_unknown_01', inputTokens: 0, outputTokens: 0, usageSource: 'unknown' });
+    registerAgent(hostStage, { agentId: 'stage-followup', vocation: 'review', stage: 'visual' });
+    const pending = enqueueAgentJob(hostStage, { agentId: 'stage-followup', stage: 'visual', inputHash: 'fixture', payload: { tokenBudget: 20, stageTokenBudget: 100 } });
+    assert.equal(claimAgentJob(hostStage, pending.jobId).reason, 'stage-budget-unknown-usage');
+  } finally { fs.rmSync(hostStage, { recursive: true, force: true }); }
   const estimated = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-run-budget-estimate-'));
   try {
     configureRunTokenBudget(estimated, { limit: 100, verificationReserve: 20 });

@@ -94,9 +94,11 @@ export function readRunMetrics(runDirectory) {
       const estimatedUsage = coverage.estimated > 0;
       const reportedAvailable = Math.max(0, config.limit - used - reserved);
       const unknownAttempts = { held: 0, unbounded: 0, attempts: 0, verificationHeld: 0, recoveryHeld: 0, identities: [] };
+      let unboundedOtherUsage = 0;
       for (const row of rows) {
-        let meta; try { meta = JSON.parse(row.metadata_json || '{}'); } catch { continue; }
-        if (!row.agent_id || !meta?.jobId || !['unknown', 'legacy-unverified'].includes(meta.usageSource)) continue;
+        let meta; try { meta = JSON.parse(row.metadata_json || '{}'); } catch { unboundedOtherUsage += 1; continue; }
+        if (['provider-reported', 'estimated'].includes(meta?.usageSource)) continue;
+        if (!row.agent_id || !meta?.jobId || !['unknown', 'legacy-unverified'].includes(meta.usageSource)) { unboundedOtherUsage += 1; continue; }
         unknownAttempts.attempts += 1;
         unknownAttempts.identities.push({ jobId: meta.jobId, attempt: meta.attempt, stage: row.stage });
         const remainder = Math.max(0, Number(meta.reservedTokens) - Number(row.total_tokens));
@@ -107,12 +109,12 @@ export function readRunMetrics(runDirectory) {
         }
         else unknownAttempts.unbounded += 1;
       }
-      const admissionAvailable = unknownAttempts.unbounded ? 0 : Math.max(0, reportedAvailable - unknownAttempts.held);
+      const admissionAvailable = unknownAttempts.unbounded || unboundedOtherUsage ? 0 : Math.max(0, reportedAvailable - unknownAttempts.held);
       const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved - unknownAttempts.verificationHeld);
       const remainingRecoveryReserve = Math.max(0, recoveryReserve - recoveryUsed - recoveryReserved - unknownAttempts.recoveryHeld);
       const reserveShortfall = Math.max(0, used + reserved + remainingVerificationReserve + remainingRecoveryReserve - config.limit);
       const reportedOvercommitted = used + reserved > config.limit;
-      runBudget = { ...config, recoveryReserve, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, unknownAttempts, admissionAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
+      runBudget = { ...config, recoveryReserve, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, unknownAttempts, unboundedOtherUsage, admissionAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
     }
     const opsDir = path.join(root, 'operations'), receipts = [], unreadable = [];
     const operationsPresent = fs.existsSync(opsDir) && fs.statSync(opsDir).isDirectory();

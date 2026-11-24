@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, agentRuntimeStatus, rebudgetAgentJobs, recordObservedTokenUsage } from './run-ledger.mjs';
+import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, agentRuntimeStatus, rebudgetAgentJobs, recordObservedTokenUsage, reconcileObservedTokenUsage } from './run-ledger.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-agent-budget-'));
 try {
   const jobs = Array.from({ length: 4 }, (_, i) => {
@@ -58,10 +58,12 @@ try {
   const eligible = enqueueAgentJob(root, { agentId: 'unknown-budget', stage: 'baseline', inputHash: 'unknown-eligible', payload: { tokenBudget: 40, stageTokenBudget: 100 } });
   const claimKey = 'unknown_claim_fixture_0001';
   const uncertainClaim = claimAgentJob(root, eligible.jobId, { claimKey });
-  assert.equal(uncertainClaim.status, 'running'); assert.equal(uncertainClaim.incompleteUsage, true); assert.equal(uncertainClaim.available, null); assert.equal(uncertainClaim.reportedAvailable, 60); assert.equal(uncertainClaim.overcommitted, null);
-  const replay = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(replay.idempotent, true); assert.equal(replay.available, null); assert.equal(replay.incompleteUsage, true);
+  assert.equal(uncertainClaim.status, 'budget-exhausted'); assert.equal(uncertainClaim.reason, 'stage-budget-unknown-usage'); assert.equal(uncertainClaim.available, null);
+  reconcileObservedTokenUsage(root, { stage: 'baseline', observationKey: 'unknown_usage_00001', inputTokens: 0, outputTokens: 0, usageSource: 'provider-reported', evidence: 'fixture provider receipt' });
+  const correctedClaim = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(correctedClaim.status, 'running'); assert.equal(correctedClaim.available, 60);
+  const replay = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(replay.idempotent, true); assert.equal(replay.available, 60); assert.equal(replay.incompleteUsage, false);
   recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'late_host_usage_0001', inputTokens: 70, outputTokens: 0, usageSource: 'provider-reported', limit: 100 });
-  const lateReplay = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(lateReplay.available, null); assert.equal(lateReplay.reportedAvailable, 0); assert.equal(lateReplay.overcommitted, true);
+  const lateReplay = claimAgentJob(root, eligible.jobId, { claimKey }); assert.equal(lateReplay.available, 0); assert.equal(lateReplay.reportedAvailable, 0); assert.equal(lateReplay.overcommitted, true);
 
 
   const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-legacy-budget-'));

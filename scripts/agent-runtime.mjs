@@ -3,7 +3,7 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { availableAgentSkills, loadTasteSkill, loadAgentSkill } from './required-visual-skill.mjs';
 
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
@@ -63,6 +63,10 @@ try {
     const [stage, jobId, attempt, usageJson] = args, action = stageAction[stage];
     if (!action || !jobId || !attempt || !usageJson) fail('reconcile-attempt-usage requires current stage, job ID, attempt and usage JSON');
     requireRouterAction(runDir, action); console.log(JSON.stringify(reconcileAgentAttemptUsage(runDir, { ...readJson(usageJson), jobId, attempt: Number(attempt) })));
+  } else if (command === 'reconcile-observed-usage') {
+    const [currentStage, observationKey, usageJson] = args, action = stageAction[currentStage];
+    if (!action || !observationKey || !usageJson) fail('reconcile-observed-usage requires current stage, observation key and usage JSON');
+    requireRouterAction(runDir, action); console.log(JSON.stringify(reconcileObservedTokenUsage(runDir, { ...readJson(usageJson), observationKey })));
   } else if (command === 'run-budget') {
     const [stage, limit, verificationReserve, recoveryReserve = '0'] = args, action = stageAction[stage];
     if (!action || limit === undefined || verificationReserve === undefined) fail('run-budget requires stage, total limit, verification reserve and optional recovery reserve');

@@ -672,6 +672,14 @@ function unknownAttemptReservations(database, stage = null) {
   }
   return { held, unbounded, attempts, verificationHeld, recoveryHeld, identities };
 }
+function unboundedOtherUsage(database, stage = null) {
+  const rows = stage ? database.prepare('SELECT agent_id, metadata_json FROM token_usage WHERE stage = ?').all(stage) : database.prepare('SELECT agent_id, metadata_json FROM token_usage').all();
+  return rows.filter(row => {
+    let meta; try { meta = parseJson(row.metadata_json); } catch { return true; }
+    if (['provider-reported', 'estimated'].includes(meta?.usageSource)) return false;
+    return !(row.agent_id && meta?.jobId && ['unknown', 'legacy-unverified'].includes(meta.usageSource));
+  }).length;
+}
 function runBudgetSnapshot(database, stage, recovery = false) {
   const config = runBudgetConfig(database);
   if (!config) return null;
@@ -685,14 +693,15 @@ function runBudgetSnapshot(database, stage, recovery = false) {
   const incompleteUsage = usageRows.some(row => { try { return !['provider-reported', 'estimated'].includes(JSON.parse(row.metadata_json)?.usageSource); } catch { return true; } });
   const estimatedUsage = usageRows.some(row => { try { return JSON.parse(row.metadata_json)?.usageSource === 'estimated'; } catch { return false; } });
   const unknownAttempts = unknownAttemptReservations(database);
+  const unboundedOther = unboundedOtherUsage(database);
   const remainingVerificationReserve = Math.max(0, config.verificationReserve - verificationUsed - verificationReserved - unknownAttempts.verificationHeld);
   const remainingRecoveryReserve = Math.max(0, config.recoveryReserve - recoveryUsed - recoveryReserved - unknownAttempts.recoveryHeld);
   const effectiveLimit = stage === 'verify' ? config.limit : config.limit - remainingVerificationReserve - (recovery ? 0 : remainingRecoveryReserve);
   const reportedAvailable = Math.max(0, effectiveLimit - used - reserved);
-  const admissionAvailable = unknownAttempts.unbounded ? 0 : Math.max(0, reportedAvailable - unknownAttempts.held);
+  const admissionAvailable = unknownAttempts.unbounded || unboundedOther ? 0 : Math.max(0, reportedAvailable - unknownAttempts.held);
   const reserveShortfall = Math.max(0, used + reserved + remainingVerificationReserve + remainingRecoveryReserve - config.limit);
   const reportedOvercommitted = used + reserved > config.limit;
-  return { ...config, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, effectiveLimit, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, unknownAttempts, admissionAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
+  return { ...config, used, reserved, verificationUsed, verificationReserved, recoveryUsed, recoveryReserved, remainingVerificationReserve, remainingRecoveryReserve, reserveShortfall: null, reportedReserveShortfall: reserveShortfall, effectiveLimit, incompleteUsage, estimatedUsage, completeHostUsage: false, available: null, reportedAvailable, unknownAttempts, unboundedOtherUsage: unboundedOther, admissionAvailable, overcommitted: null, reportedOvercommitted, budgetScope: 'reported-and-estimated-usage-only' };
 }
 export function configureRunTokenBudget(runDir, { limit, verificationReserve, recoveryReserve = 0 }) {
   if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(verificationReserve) || verificationReserve < 0 || !Number.isSafeInteger(recoveryReserve) || recoveryReserve < 0 || verificationReserve + recoveryReserve > limit) throw new Error('run token budget requires a positive limit and reserves within it');
@@ -753,9 +762,9 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
     if (runBudget) {
       if (!Number.isSafeInteger(payload.tokenBudget) || payload.tokenBudget < 1) throw new Error('run budget requires an explicit positive attempt reservation');
       if (runBudget.admissionAvailable < payload.tokenBudget) {
-        const waiting = runBudget.reserved > 0 && !runBudget.unknownAttempts.unbounded && runBudget.effectiveLimit - runBudget.used - runBudget.unknownAttempts.held >= payload.tokenBudget;
+        const waiting = runBudget.reserved > 0 && !runBudget.unknownAttempts.unbounded && !runBudget.unboundedOtherUsage && runBudget.effectiveLimit - runBudget.used - runBudget.unknownAttempts.held >= payload.tokenBudget;
         database.exec('COMMIT');
-        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'run-budget-reserved' : runBudget.unknownAttempts.attempts && runBudget.reportedAvailable >= payload.tokenBudget ? 'run-budget-unknown-usage' : 'run-budget-insufficient', requested: payload.tokenBudget, runBudget };
+        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'run-budget-reserved' : (runBudget.unknownAttempts.attempts || runBudget.unboundedOtherUsage) && runBudget.reportedAvailable >= payload.tokenBudget ? 'run-budget-unknown-usage' : 'run-budget-insufficient', requested: payload.tokenBudget, runBudget };
       }
     }
     if (payload.stageTokenBudget !== undefined) {
@@ -764,12 +773,13 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = ?").get(job.stage).total);
       const available = Math.max(0, payload.stageTokenBudget - used - reserved);
       const unknownAttempts = unknownAttemptReservations(database, job.stage);
-      const admissionAvailable = unknownAttempts.unbounded ? 0 : Math.max(0, available - unknownAttempts.held);
+      const unboundedOther = unboundedOtherUsage(database, job.stage);
+      const admissionAvailable = unknownAttempts.unbounded || unboundedOther ? 0 : Math.max(0, available - unknownAttempts.held);
       if (admissionAvailable < payload.tokenBudget) {
         const incompleteUsage = stageUsageIncomplete(database, job.stage);
-        const waiting = reserved > 0 && !unknownAttempts.unbounded && payload.stageTokenBudget - used - unknownAttempts.held >= payload.tokenBudget;
+        const waiting = reserved > 0 && !unknownAttempts.unbounded && !unboundedOther && payload.stageTokenBudget - used - unknownAttempts.held >= payload.tokenBudget;
         database.exec('COMMIT');
-        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'stage-budget-reserved' : unknownAttempts.attempts && available >= payload.tokenBudget ? 'stage-budget-unknown-usage' : 'stage-budget-insufficient', used, reserved, available: incompleteUsage ? null : available, reportedAvailable: available, admissionAvailable, unknownAttempts, incompleteUsage, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only', runBudget };
+        return { jobId, status: waiting ? 'waiting' : 'budget-exhausted', reason: waiting ? 'stage-budget-reserved' : (unknownAttempts.attempts || unboundedOther) && available >= payload.tokenBudget ? 'stage-budget-unknown-usage' : 'stage-budget-insufficient', used, reserved, available: incompleteUsage ? null : available, reportedAvailable: available, admissionAvailable, unknownAttempts, unboundedOtherUsage: unboundedOther, incompleteUsage, requested: payload.tokenBudget, stageBudget: payload.stageTokenBudget, budgetScope: 'reported-usage-only', runBudget };
       }
       reservedTokens = payload.tokenBudget;
     }
@@ -978,6 +988,28 @@ export function recordObservedTokenUsage(runDir, { stage, observationKey, inputT
     const runBudget = runBudgetSnapshot(database, stage);
     database.exec('COMMIT');
     return { stage, used, reserved, limit, available: limit === null || incomplete ? null : Math.max(0, limit - used - reserved), overcommitted: limit === null ? null : used + reserved > limit ? true : incomplete ? null : false, incompleteUsage: incomplete, idempotent: Boolean(existing), budgetScope: 'reported-usage-only', runBudget };
+  } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
+}
+export function reconcileObservedTokenUsage(runDir, { stage, observationKey, inputTokens, outputTokens, usageSource, evidence }) {
+  requireNonEmpty(stage, 'stage');
+  if (typeof observationKey !== 'string' || !/^[a-zA-Z0-9_-]{16,128}$/.test(observationKey) || ![inputTokens, outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(inputTokens + outputTokens) || !['provider-reported', 'estimated'].includes(usageSource) || typeof evidence !== 'string' || !evidence.trim() || evidence.length > 1024) throw new Error('observed usage reconciliation requires stage, stable key, counts, source and evidence');
+  const database = open(runDir), total = inputTokens + outputTokens;
+  try {
+    database.exec('BEGIN IMMEDIATE');
+    const observation = database.prepare('SELECT usage_id FROM token_observations WHERE observation_key = ?').get(observationKey);
+    const row = observation && database.prepare('SELECT * FROM token_usage WHERE id = ?').get(observation.usage_id);
+    const metadata = row && parseJson(row.metadata_json);
+    if (!row || row.agent_id !== null || row.stage !== stage || metadata?.kind !== 'independent-host-call' || metadata.observationKey !== observationKey) throw new Error('observed usage identity does not match the original host call');
+    if (metadata.usageSource !== 'unknown') {
+      if (metadata.reconciled && metadata.usageSource === usageSource && Number(row.input_tokens) === inputTokens && Number(row.output_tokens) === outputTokens && metadata.reconciliationEvidence === evidence) { database.exec('COMMIT'); return { status: 'already-reconciled', observationKey }; }
+      throw new Error('observed usage was already reconciled or is not unknown');
+    }
+    const updated = { ...metadata, usageSource, reconciled: true, previousUsageSource: 'unknown', reconciliationEvidence: evidence, reconciledAt: now() };
+    database.prepare('UPDATE token_usage SET input_tokens = ?, output_tokens = ?, total_tokens = ?, metadata_json = ? WHERE id = ?').run(inputTokens, outputTokens, total, JSON.stringify(updated), row.id);
+    database.prepare('UPDATE token_observations SET fingerprint = ? WHERE observation_key = ?').run(hash(JSON.stringify({ stage, inputTokens, outputTokens, usageSource })), observationKey);
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('host-observed-usage-reconciled', now(), JSON.stringify({ stage, observationKey, inputTokens, outputTokens, usageSource, evidence }));
+    const runBudget = runBudgetSnapshot(database, stage); database.exec('COMMIT');
+    return { status: 'reconciled', stage, observationKey, inputTokens, outputTokens, usageSource, runBudget };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 // Hold the ledger write lock while checking the lease and publishing an advisory.
