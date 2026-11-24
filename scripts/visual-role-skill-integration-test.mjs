@@ -303,6 +303,9 @@ try {
   const uxInput = path.join(runDir, 'ux-advisory.json'); fs.writeFileSync(uxInput, JSON.stringify(ux));
   expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', uxInput]), 'record explicitly unmetered UX advisory');
   assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.unknown, 2); // independent host and unmetered UX
+  const uxUsageDb = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
+  const uxUsage = JSON.parse(uxUsageDb.prepare('SELECT metadata_json FROM token_usage WHERE agent_id = ? ORDER BY id DESC LIMIT 1').get(uxJob.agentId).metadata_json); uxUsageDb.close();
+  assert.equal(uxUsage.reservedTokens, uxClaim.reservedTokens, 'unmetered role advisory must retain its actual reservation');
   reconcileAgentAttemptUsage(runDir, { jobId: uxId, attempt: uxClaim.attempt, inputTokens: 0, outputTokens: 0, usageSource: 'estimated', evidence: 'isolated UX fixture' });
   for (const roleId of savedSelection.selectedRoles.filter(id => !['ui-designer', 'ux-architect'].includes(id))) {
     const selectedJob = agentRuntimeStatus(runDir, savedSelection.agentJobs[roleId]).jobs[0];

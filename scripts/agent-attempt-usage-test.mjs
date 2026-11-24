@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, agentRuntimeStatus, rebudgetAgentJobs, reconcileAgentAttemptUsage, recordObservedTokenUsage } from './run-ledger.mjs';
+import { configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, agentRuntimeStatus, rebudgetAgentJobs, reconcileAgentAttemptUsage, recordObservedTokenUsage } from './run-ledger.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-attempt-usage-'));
 try {
   registerAgent(root, { agentId: 'reviewer', vocation: 'review', stage: 'visual' });
@@ -78,5 +78,19 @@ try {
   recordObservedTokenUsage(root, { stage: 'baseline', observationKey: 'stage_over_host_call_1', inputTokens: 10, outputTokens: 0, usageSource: 'provider-reported' });
   const stageResult = settleAgentJob(root, stageJob.jobId, { status: 'succeeded', leaseToken: stageLease.leaseToken, usage: { inputTokens: 6, outputTokens: 0, usageSource: 'provider-reported' } });
   assert.equal(stageResult.jobs[0].status, 'dead-letter'); assert.equal(stageResult.tokenUsage.baseline, 16);
+  const advisoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-advisory-unknown-budget-'));
+  try {
+    configureRunTokenBudget(advisoryRoot, { limit: 100, verificationReserve: 0 });
+    for (const agentId of ['designer-unknown', 'designer-next']) registerAgent(advisoryRoot, { agentId, vocation: 'design', stage: 'visual' });
+    const first = enqueueAgentJob(advisoryRoot, { agentId: 'designer-unknown', stage: 'visual', inputHash: 'first', payload: { roleId: 'ui-designer', tokenBudget: 70, stageTokenBudget: 100 } });
+    const next = enqueueAgentJob(advisoryRoot, { agentId: 'designer-next', stage: 'visual', inputHash: 'next', payload: { roleId: 'ux-architect', tokenBudget: 40, stageTokenBudget: 100 } });
+    const firstLease = claimAgentJob(advisoryRoot, first.jobId, { claimKey: 'advisory_budget_claim_0001' });
+    completeAgentAdvisory(advisoryRoot, first.jobId, { leaseToken: firstLease.leaseToken, output: path.join(advisoryRoot, 'advisories/visual/designer-unknown.json'), content: '{}', inputTokens: 0, outputTokens: 0, limit: 100, metadata: { usageSource: 'unknown', reservedTokens: 1 } });
+    const blocked = claimAgentJob(advisoryRoot, next.jobId, { claimKey: 'advisory_budget_claim_0002' });
+    assert.equal(blocked.reason, 'run-budget-unknown-usage'); assert.equal(blocked.runBudget.unknownAttempts.held, 70, 'the actual reservation must override caller metadata');
+    const reconciled = reconcileAgentAttemptUsage(advisoryRoot, { jobId: first.jobId, attempt: 1, inputTokens: 60, outputTokens: 11, usageSource: 'provider-reported', evidence: 'isolated advisory fixture' });
+    assert.equal(reconciled.overReservation, true); assert.equal(reconciled.fenced, true);
+    assert.equal(agentRuntimeStatus(advisoryRoot, first.jobId).jobs[0].status, 'dead-letter');
+  } finally { fs.rmSync(advisoryRoot, { recursive: true, force: true }); }
   console.log(JSON.stringify({ status: 'passed', scope: 'failed, interrupted, over-budget accounting, controlled recovery and legacy status' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

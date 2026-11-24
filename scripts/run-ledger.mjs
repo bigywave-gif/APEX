@@ -1001,7 +1001,7 @@ export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, conte
       // Usage has already occurred. Persist it atomically with a terminal job
       // outcome before rejecting the advisory; retries cannot charge it twice.
       const reason = overAttempt ? `agent attempt exceeds its reserved token budget: ${jobId}` : overStage ? `token budget exceeded for ${job.stage}: used=${prior}, requested=${used}, limit=${limit}` : `run token budget exceeded for ${job.stage}: used=${runBudget.used}, requested=${used}, limit=${runBudget.effectiveLimit}`;
-      database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome: 'budget-exceeded' }));
+      database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome: 'budget-exceeded', reservedTokens: Number(job.reserved_tokens || 0) }));
       database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(reason, timestamp, jobId);
       database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, job.attempt, reason, job.payload_json, timestamp);
       database.prepare("UPDATE agent_sessions SET status = 'failed', updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(timestamp, jobId, job.agent_id);
@@ -1009,7 +1009,7 @@ export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, conte
       throw new Error(reason);
     }
     previous = fs.existsSync(destination) ? fs.readFileSync(destination) : null;
-    database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome: 'succeeded' }));
+    database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome: 'succeeded', reservedTokens: Number(job.reserved_tokens || 0) }));
     atomicWrite(destination, content); wrote = true;
     const result = { advisory: path.relative(runDir, destination), sha256: hash(content), tokenUsage: used };
     database.prepare("UPDATE agent_jobs SET status = 'succeeded', result_json = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(JSON.stringify(result), timestamp, jobId);
