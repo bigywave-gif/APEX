@@ -294,7 +294,8 @@ try {
   const mockFiles = Object.fromEntries(screens.map(screen => [screen.screenId, { image: path.join(runDir, screen.imagePath), html: path.join(runDir, screen.htmlPath) }]));
   const mockManifest = write('stitch-mock-files.json', mockFiles), portFile = path.join(runDir, 'stitch-mock-port.txt');
   const raceFlag = path.join(runDir, 'stitch-state-race.flag');
-  mockServer = spawn(process.execPath, [path.join(apexRoot, 'scripts', 'stitch-mock-server-fixture.mjs'), mockManifest, portFile], { stdio: 'ignore', env: { ...process.env, ...(process.env.APEX_TEST_STITCH_STATE_RACE === '1' ? { APEX_STITCH_STATE_RACE_FLAG: raceFlag, APEX_STITCH_STATE_RACE_RUN: runDir } : {}) } });
+  const inputRaceFlag = path.join(runDir, 'stitch-input-race.flag');
+  mockServer = spawn(process.execPath, [path.join(apexRoot, 'scripts', 'stitch-mock-server-fixture.mjs'), mockManifest, portFile], { stdio: 'ignore', env: { ...process.env, ...(process.env.APEX_TEST_STITCH_STATE_RACE === '1' ? { APEX_STITCH_STATE_RACE_FLAG: raceFlag, APEX_STITCH_STATE_RACE_RUN: runDir } : {}), ...(process.env.APEX_TEST_STITCH_INPUT_RACE === '1' ? { APEX_STITCH_INPUT_RACE_FLAG: inputRaceFlag, APEX_STITCH_INPUT_RACE_FILE: path.join(runDir, 'stitch-selection.json') } : {}) } });
   for (let attempt = 0; attempt < 100 && !fs.existsSync(portFile); attempt++) await new Promise(resolve => setTimeout(resolve, 50));
   if (!fs.existsSync(portFile)) throw new Error('local Stitch fixture server did not start');
   mockEndpoint = `http://127.0.0.1:${fs.readFileSync(portFile, 'utf8')}/mcp`;
@@ -322,6 +323,14 @@ try {
     if (raced.status === 0 || !raced.stderr.includes('run state changed during Stitch freeze')) throw new Error(`Stitch freeze must reject a concurrent state change: ${raced.stderr}`);
     if (JSON.parse(fs.readFileSync(stateFile)).artifacts.concurrentFixture !== 'concurrent-marker.json') throw new Error('Stitch freeze must preserve the concurrent state');
     if (previous ? !fs.readFileSync(freezeFile).equals(previous) : fs.existsSync(freezeFile)) throw new Error('stale Stitch freeze must not overwrite the existing freeze');
+  }
+  if (process.env.APEX_TEST_STITCH_INPUT_RACE === '1') {
+    const freezeFile = path.join(runDir, 'stitch-freeze.json'), previous = fs.existsSync(freezeFile) ? fs.readFileSync(freezeFile) : null;
+    fs.writeFileSync(inputRaceFlag, 'inject concurrent input update');
+    const racedAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']);
+    const raced = spawnSync(process.execPath, [path.join(apexRoot, 'scripts', 'apex-action.mjs'), 'run', project, runId, session, racedAuth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'freeze', runDir, selectionFile], { encoding: 'utf8', timeout: 180000, env: { ...process.env, STITCH_HOST: mockEndpoint, STITCH_API_KEY: 'local-fixture-only' } });
+    if (raced.status === 0 || !raced.stderr.includes('Stitch input changed during remote read')) throw new Error(`Stitch freeze must reject a concurrent input change: ${raced.stderr}`);
+    if (previous ? !fs.readFileSync(freezeFile).equals(previous) : fs.existsSync(freezeFile)) throw new Error('stale Stitch input must not overwrite the existing freeze');
   }
   const freezeAuth = run('apex-router.mjs', ['authorize', project, runId, session, 'sync_stitch']);
   run('apex-action.mjs', ['run', project, runId, session, freezeAuth.authorizationRef, 'sync_stitch', 'stitch-sync.mjs', 'freeze', runDir, selectionFile]);

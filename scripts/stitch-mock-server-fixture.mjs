@@ -24,6 +24,11 @@ const server = http.createServer((request, response) => {
           state.artifacts.concurrentFixture = 'concurrent-marker.json'; state.revision += 1;
           commitRunState(runDir, state, { reason: 'stitch-race-fixture' });
         }
+        const inputFlag = process.env.APEX_STITCH_INPUT_RACE_FLAG;
+        if (inputFlag && fs.existsSync(inputFlag)) {
+          fs.unlinkSync(inputFlag);
+          fs.appendFileSync(process.env.APEX_STITCH_INPUT_RACE_FILE, ' \n');
+        }
         structuredContent = { screens: Object.keys(files).map(screenId => ({ screenId })) };
       }
       else if (tool === 'list_design_systems') structuredContent = { systems: [] };

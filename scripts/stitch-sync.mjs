@@ -27,6 +27,25 @@ function stable(value) {
   return value;
 }
 function hash(value) { return 'sha256:' + crypto.createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(stable(value))).digest('hex'); }
+function captureInputs(runDir, references) {
+  const root = fs.realpathSync(runDir), logicalRoot = path.resolve(runDir);
+  const normalize = ref => {
+    const absolute = path.resolve(logicalRoot, ref);
+    if (absolute.startsWith(`${logicalRoot}${path.sep}`)) return path.resolve(root, path.relative(logicalRoot, absolute));
+    return absolute;
+  };
+  return [...new Set(references.filter(Boolean).map(normalize))].map(file => {
+    if (!file.startsWith(`${root}${path.sep}`)) throw new Error('Stitch input must remain inside the current Run');
+    if (!fs.existsSync(file)) return { file, missing: true };
+    const real = fs.realpathSync(file);
+    if (!real.startsWith(`${root}${path.sep}`) || !fs.statSync(real).isFile()) throw new Error('Stitch input must be a Run-local file');
+    return { file, real, sha256: hash(fs.readFileSync(real)) };
+  });
+}
+function assertInputsUnchanged(runDir, captured) {
+  const current = captureInputs(runDir, captured.map(item => item.file));
+  if (JSON.stringify(current) !== JSON.stringify(captured)) throw new Error('Stitch input changed during remote read; preserve and re-evaluate the confirmed Demo before retrying');
+}
 function apiKey() {
   if (process.env.STITCH_API_KEY) return process.env.STITCH_API_KEY;
   try { return execFileSync('/bin/launchctl', ['getenv', 'STITCH_API_KEY'], { encoding: 'utf8' }).trim(); }
@@ -246,14 +265,15 @@ if (command === 'list-projects') {
   const runDir = path.resolve(runDirArg);
   try { requireRouterAction(runDir, 'sync_stitch'); } catch (error) { die(error.message); }
   const selectionFile = path.resolve(selectionArg);
-  const selection = read(selectionFile);
   const stateSnapshot = readRunStateForUpdate(runDir), { state } = stateSnapshot;
+  const pendingJob = path.join(runDir, 'stitch-job.json');
+  const inputs = captureInputs(runDir, [selectionFile, pendingJob, state.artifacts?.runtimeVisualBaseline, state.artifacts?.runtimeDemo, state.artifacts?.visualReference]);
+  const selection = read(selectionFile);
   if (state.roleChain?.confirmationModel === 'two-confirmations' && selection.approvedScreens?.length > 1) {
     const baselineFile = state.artifacts?.runtimeVisualBaseline && path.join(runDir, state.artifacts.runtimeVisualBaseline);
     if (!baselineFile || !fs.existsSync(baselineFile)) die('multi-screen Stitch requires the confirmed Demo baseline');
     try { selection.approvedScreens = autoBindStitchScreens(runDir, read(baselineFile), selection.approvedScreens); } catch (error) { die(error.message); }
   }
-  const pendingJob = path.join(runDir, 'stitch-job.json');
   let skillAdaptation = null;
   if (fs.existsSync(pendingJob)) {
     const job = read(pendingJob);
@@ -263,6 +283,11 @@ if (command === 'list-projects') {
   }
   const snap = await snapshot(selection, runDir);
   if (readRunStateForUpdate(runDir).expectedStateHash !== stateSnapshot.expectedStateHash) die('run state changed during Stitch freeze; preserve and re-evaluate the confirmed Demo before retrying');
+  try {
+    assertInputsUnchanged(runDir, inputs);
+    if (state.roleChain?.confirmationModel === 'two-confirmations' && selection.approvedScreens?.length > 1) autoBindStitchScreens(runDir, read(path.join(runDir, state.artifacts.runtimeVisualBaseline)), selection.approvedScreens);
+    if (skillAdaptation) stitchAdaptationForFreeze(runDir, state, read(pendingJob), selection);
+  } catch (error) { die(error.message); }
   const freeze = { schemaVersion: '3.0', projectId: selection.projectId, canvasUrl: selection.canvasUrl, approval: selection.approval, approvedScreens: snap.approvedScreens, excludedScreens: selection.excludedScreens, ...(selection.generationInput ? { generationInput: selection.generationInput } : {}), ...(skillAdaptation ? { skillAdaptation } : {}), fingerprints: { screenSetHash: hash({ listed: snap.listedHash, approved: snap.approvedScreens }), designSystemHash: snap.designSystemHash }, syncedAt: new Date().toISOString() };
   const freezeFile = path.join(runDir, 'stitch-freeze.json');
   write(freezeFile, freeze);
