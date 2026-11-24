@@ -23,6 +23,19 @@ try {
     assert.ok(discovered.some(skill => skill.name === name), `${name} must be discoverable`);
     assert.ok(supportedVisualSkillNames.has(name), `${name} must be accepted by the plan and source manifest`);
   }
+  const extraFile = path.join(root, 'skills', 'team-visual', 'SKILL.md');
+  fs.mkdirSync(path.dirname(extraFile), { recursive: true });
+  fs.writeFileSync(extraFile, '---\nname: team-visual-language\ndescription: Use for product visual design and brand direction.\n---\n# Team design rules\n');
+  const extra = availableAgentSkills('visual', 'ui-designer', root).find(item => item.name === 'team-visual-language');
+  assert.ok(extra, 'an installed design skill outside the curated catalog must be offered');
+  assert.match(loadAgentSkill('visual', 'ui-designer', extra.name, extra.sha256, root).content, /Team design rules/);
+  assert.throws(() => loadAgentSkill('visual', 'ux-architect', extra.name, extra.sha256, root), /missing or changed/);
+  fs.appendFileSync(extraFile, 'changed'); assert.throws(() => loadAgentSkill('visual', 'ui-designer', extra.name, extra.sha256, root), /missing or changed/);
+  const duplicate = path.join(root, 'skills', 'another-visual', 'SKILL.md'); fs.mkdirSync(path.dirname(duplicate), { recursive: true });
+  fs.writeFileSync(duplicate, '---\nname: team-visual-language\ndescription: UI design direction.\n---\n# Duplicate\n');
+  assert.ok(!availableVisualSkills(root).some(item => item.name === 'team-visual-language'), 'ambiguous names cannot be loaded silently');
+  fs.writeFileSync(duplicate, '---\nname: team-visual-language\ndescription: General data processing.\n---\n# Duplicate\n');
+  assert.ok(!availableVisualSkills(root).some(item => item.name === 'team-visual-language'), 'a same-named nonvisual skill is still ambiguous');
   for (const name of ['research-intake', 'ponytail', 'react', 'tailwind', 'heroui', 'radix', 'storybook', 'andrej-karpathy-skills']) {
     const skill = path.join(root, 'skills', name, 'SKILL.md'); fs.mkdirSync(path.dirname(skill), { recursive: true }); fs.writeFileSync(skill, `# ${name}\nactual instructions\n`);
   }

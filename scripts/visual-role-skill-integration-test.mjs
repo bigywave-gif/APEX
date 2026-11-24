@@ -150,11 +150,12 @@ try {
   assert.equal(replayedClaim.leaseToken, claimed.leaseToken); assert.equal(replayedClaim.attempt, claimed.attempt); assert.equal(replayedClaim.idempotent, true);
   assert.equal(claimed.requiredSkill.sha256, queued.payload.tasteSkill.sha256);
   assert.match(claimed.requiredSkill.content, /tasteskill/i);
-  const optional = claimed.optionalSkills.find(item => item.name === 'impeccable');
+  const optionalName = process.env.APEX_TEST_EXTRA_VISUAL_SKILL === '1' ? 'brandkit' : 'impeccable';
+  const optional = claimed.optionalSkills.find(item => item.name === optionalName);
   assert.ok(optional && optional.sha256, 'designer must discover installed optional visual skills without loading all instructions');
   const loaded = expect(invoke(authorize(), 'agent-runtime.mjs', ['skill', runDir, jobId, 'visual', claimed.leaseToken, optional.name, optional.sha256]), 'load applicable visual skill');
   assert.equal(loaded.skill.sha256, optional.sha256);
-  assert.match(loaded.skill.content, /impeccable/i);
+  assert.match(loaded.skill.content, new RegExp(optionalName, 'i'));
   const ledger = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true });
   const loadedEvents = ledger.prepare("SELECT payload_json FROM events WHERE event_type = 'agent-visual-skill-loaded'").all().map(row => JSON.parse(row.payload_json)); ledger.close();
   assert.ok(loadedEvents.some(event => event.jobId === jobId && event.name === optional.name && event.sha256 === optional.sha256), 'actual optional skill loading must be auditable');
@@ -236,17 +237,17 @@ try {
   fs.writeFileSync(input, JSON.stringify(advisory));
   expect(invoke(authorize(), 'role-advisory.mjs', ['record', runDir, 'visual', input]), 'record designer advisory');
   assert.equal(agentRuntimeStatus(runDir, jobId).jobs[0].status, 'succeeded');
-  assert.deepEqual(assertVisualCapabilityEvidence(runDir, ['taste-skill', 'impeccable', 'google-design-md']).applied, ['google-design-md', 'impeccable', 'taste-skill']);
-  fs.writeFileSync(requiredReceiptPath, JSON.stringify(failedRequiredReceipt)); assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', 'impeccable', 'google-design-md']), /current successful taste-skill load receipt/); fs.writeFileSync(requiredReceiptPath, requiredReceiptBytes);
+  assert.deepEqual(assertVisualCapabilityEvidence(runDir, ['taste-skill', optionalName, 'google-design-md']).applied, ['google-design-md', optionalName, 'taste-skill'].sort());
+  fs.writeFileSync(requiredReceiptPath, JSON.stringify(failedRequiredReceipt)); assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', optionalName, 'google-design-md']), /current successful taste-skill load receipt/); fs.writeFileSync(requiredReceiptPath, requiredReceiptBytes);
   const currentSkillDb = new DatabaseSync(runLedgerPaths(runDir).ledger, { readOnly: true }); const currentSkillEvents = currentSkillDb.prepare("SELECT payload_json FROM events WHERE event_type='agent-visual-skill-loaded' ORDER BY id DESC").all().map(row => JSON.parse(row.payload_json)); currentSkillDb.close();
   const currentOptional = currentSkillEvents.find(event => event.jobId === jobId && event.attempt === replacement.attempt && event.name === optional.name), currentOptionalPath = path.join(runDir, currentOptional.operationReceipt), currentOptionalBytes = fs.readFileSync(currentOptionalPath), failedOptional = JSON.parse(currentOptionalBytes); failedOptional.status = 'failed'; fs.writeFileSync(currentOptionalPath, JSON.stringify(failedOptional));
-  assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', 'impeccable', 'google-design-md']), /current successful receipts for cited optional Skills/); fs.writeFileSync(currentOptionalPath, currentOptionalBytes);
+  assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', optionalName, 'google-design-md']), /current successful receipts for cited optional Skills/); fs.writeFileSync(currentOptionalPath, currentOptionalBytes);
 
-  assert.throws(() => assertVisualCapabilityEvidence(runDir, ['impeccable', 'google-design-md']), /mandatory taste-skill/);
-  assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', 'impeccable', 'google-design-md', 'minimalist-ui']), /unproven=minimalist-ui/);
-  assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', 'google-design-md']), /missing=impeccable/);
+  assert.throws(() => assertVisualCapabilityEvidence(runDir, [optionalName, 'google-design-md']), /mandatory taste-skill/);
+  assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', optionalName, 'google-design-md', 'minimalist-ui']), /unproven=minimalist-ui/);
+  assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', 'google-design-md']), new RegExp('missing=' + optionalName));
   const designerFile = path.join(runDir, 'advisories', 'visual', 'ui-designer.json'), designerBytes = fs.readFileSync(designerFile);
-  fs.appendFileSync(designerFile, ' '); assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', 'impeccable', 'google-design-md']), /current completed designer job/); fs.writeFileSync(designerFile, designerBytes);
+  fs.appendFileSync(designerFile, ' '); assert.throws(() => assertVisualCapabilityEvidence(runDir, ['taste-skill', optionalName, 'google-design-md']), /current completed designer job/); fs.writeFileSync(designerFile, designerBytes);
 
   assert.equal(agentRuntimeStatus(runDir).tokenUsageCoverage.visual.providerReported, 3);
   const uxId = savedSelection.agentJobs['ux-architect'];
@@ -273,7 +274,7 @@ try {
   const candidate = (kind, decision) => ({ sourceId: decision === 'selected' ? 'web' : 'alternative', resourceId: kind, version: 'current', platformFit: 'native', visualFit: 'clear', deliveryFit: 'compatible', decision });
   const responsive = { contractId: 'responsive', viewports: [{ class: 'mobile', minWidth: 320, maxWidth: 767, layoutMode: 'single' }, { class: 'tablet', minWidth: 768, maxWidth: 1023, layoutMode: 'two' }, { class: 'desktop', minWidth: 1024, maxWidth: 1920, layoutMode: 'wide' }], reflowRules: ['mobile', 'tablet', 'desktop'], overflowPolicy: { noUnintendedHorizontalOverflow: true, exceptions: [] }, typographyScale: 'readable', mediaBehavior: 'scale', acceptance: ['mobile', 'tablet', 'desktop'] };
   const benchmark = JSON.parse(fs.readFileSync(path.join(apexRoot, 'registry/industry-design-benchmarks.json'))).benchmarks[0];
-  const plan = { schemaVersion: '3.0', deliveryNarrative: { mode: 'greenfield-selection', selections: [{ category: 'layout', sourceSelectionIds: ['layout'], selectionBasis: 'task hierarchy' }] }, layout: { informationArchitecture: ['task'], grid: 'single', responsive }, visualSystem: { styleDirection: 'clear', colors: ['white'], typography: 'system', effects: 'none' }, content: { hierarchy: ['task'], dataExpression: ['count'], states: ['default'] }, components: [{ visualNode: 'main' }], motion: [], dependencies: [], selectionAnalysis: { designCapabilities: ['taste-skill', 'impeccable', 'google-design-md'], designContract: { path: 'DESIGN.md', sha256: designHash, rules: ['hierarchy', 'spacing', 'color', 'responsive'] }, aestheticAssessment: { qualityRationale: 'Clear hierarchy supports the task.', coherenceChecks: ['layout', 'color', 'type', 'space', 'state'], rejectedPatterns: ['noise', 'clutter'] }, libraryComparisons: ['layout', 'style', 'component', 'font'].map(kind => ({ category: kind, candidates: [candidate(kind, 'selected'), candidate(kind, 'rejected')], decisionRationale: 'native source supports the task' })), userNeedFit: [{ need: 'complete task', selectedSourceIds: ['layout'], rationale: 'clear layout' }], alternatives: [{ candidate: 'complex layout', decision: 'unnecessary' }], industryBenchmark: { id: benchmark.id, scores: benchmark.criteria.map(criterion => ({ criterion, score: 4, sourceSelectionIds: ['layout'], rationale: 'task aligned' })) } }, sourceSelections: selections, risks: [], status: 'ready-for-user-confirmation' };
+  const plan = { schemaVersion: '3.0', deliveryNarrative: { mode: 'greenfield-selection', selections: [{ category: 'layout', sourceSelectionIds: ['layout'], selectionBasis: 'task hierarchy' }] }, layout: { informationArchitecture: ['task'], grid: 'single', responsive }, visualSystem: { styleDirection: 'clear', colors: ['white'], typography: 'system', effects: 'none' }, content: { hierarchy: ['task'], dataExpression: ['count'], states: ['default'] }, components: [{ visualNode: 'main' }], motion: [], dependencies: [], selectionAnalysis: { designCapabilities: ['taste-skill', optionalName, 'google-design-md'], designContract: { path: 'DESIGN.md', sha256: designHash, rules: ['hierarchy', 'spacing', 'color', 'responsive'] }, aestheticAssessment: { qualityRationale: 'Clear hierarchy supports the task.', coherenceChecks: ['layout', 'color', 'type', 'space', 'state'], rejectedPatterns: ['noise', 'clutter'] }, libraryComparisons: ['layout', 'style', 'component', 'font'].map(kind => ({ category: kind, candidates: [candidate(kind, 'selected'), candidate(kind, 'rejected')], decisionRationale: 'native source supports the task' })), userNeedFit: [{ need: 'complete task', selectedSourceIds: ['layout'], rationale: 'clear layout' }], alternatives: [{ candidate: 'complex layout', decision: 'unnecessary' }], industryBenchmark: { id: benchmark.id, scores: benchmark.criteria.map(criterion => ({ criterion, score: 4, sourceSelectionIds: ['layout'], rationale: 'task aligned' })) } }, sourceSelections: selections, risks: [], status: 'ready-for-user-confirmation' };
   { const designer = JSON.parse(fs.readFileSync(path.join(runDir, 'advisories/visual/ui-designer.json'))); const rules = [{ skill: 'taste-skill', rules: designer.execution.tasteSkillUsage.appliedRules }, ...(designer.execution.optionalSkillUsage || []).filter(item => item.decision === 'applied').map(item => ({ skill: item.name, rules: item.appliedRules }))]; plan.selectionAnalysis.skillRuleDecisions = rules.flatMap(item => item.rules.map(rule => ({ skill: item.skill, rule, decision: 'Use task-oriented hierarchy in the selected layout.', rationale: 'The product task must remain clear and usable.', sourceSelectionIds: ['layout'] }))); }
   const planInput = path.join(runDir, 'visual-plan-input.json'); fs.writeFileSync(planInput, JSON.stringify(plan));
   const jobLedger = new DatabaseSync(path.join(runDir, 'run-ledger.sqlite'));
@@ -296,7 +297,16 @@ try {
   assert.notEqual(staleStage.status, 0);
   assert.match(staleStage.stderr, /controlled role decision summary is missing or stale/);
   fs.writeFileSync(summaryFile, summaryText);
-  const compiled = expect(invoke(authorize(), 'visual-execution-plan.mjs', ['compile', runDir, planInput]), 'compile visual plan with completed designer evidence');
+  let compiled;
+  if (process.env.APEX_TEST_EXTRA_VISUAL_SKILL === '1') {
+    const skillFile = fs.realpathSync(optional.path), temporaryRoots = [os.tmpdir(), '/private/tmp'].filter(fs.existsSync).map(base => fs.realpathSync(base));
+    assert.ok(temporaryRoots.some(base => skillFile.startsWith(base + path.sep)), 'optional skill removal test requires an isolated temporary CODEX_HOME');
+    const skillBytes = fs.readFileSync(skillFile);
+    try {
+      fs.unlinkSync(skillFile);
+      compiled = expect(invoke(authorize(), 'visual-execution-plan.mjs', ['compile', runDir, planInput]), 'compile using the previously loaded optional skill receipt');
+    } finally { fs.writeFileSync(skillFile, skillBytes); }
+  } else compiled = expect(invoke(authorize(), 'visual-execution-plan.mjs', ['compile', runDir, planInput]), 'compile visual plan with completed designer evidence');
   assert.ok(fs.existsSync(compiled.visualExecutionPlan));
   const compiledPlan = JSON.parse(fs.readFileSync(compiled.visualExecutionPlan));
   assert.deepEqual(compiledPlan.selectionAnalysis.designCapabilities, plan.selectionAnalysis.designCapabilities);

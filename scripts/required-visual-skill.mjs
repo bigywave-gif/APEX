@@ -74,11 +74,36 @@ const optionalVisualSkills = [
 // visual-plan and source-manifest validation. Availability is checked at load.
 export const supportedVisualSkillNames = new Set(['taste-skill', 'shadcn-ui-reference', ...optionalVisualSkills.map(item => item.name)]);
 export function availableVisualSkills(home = codexHome) {
-  return optionalVisualSkills.flatMap(item => {
+  const curated = optionalVisualSkills.flatMap(item => {
     const file = item.aliases.map(name => path.join(home, 'skills', name, 'SKILL.md')).find(candidate => fs.existsSync(candidate));
     if (!file) return [];
     try { const content = fs.readFileSync(file, 'utf8'); return content.trim() ? [{ name: item.name, scope: item.scope, path: file, sha256: digest(content) }] : []; } catch { return []; }
   });
+  // Offer additional locally installed design skills by metadata only. The
+  // designer still explicitly loads an applicable skill before claiming it.
+  const reserved = new Set(['apex', 'taste-skill', 'design-taste-frontend', 'stitch-design-taste', 'stitch-skill', 'pdf', 'playwright', 'hatch-pet', ...optionalVisualSkills.flatMap(item => [item.name, ...item.aliases])]);
+  const discovered = new Map(), seenNames = new Set(), ambiguous = new Set(), directory = path.join(home, 'skills');
+  let entries; try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return curated; }
+  for (const entry of entries) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(entry.name) || reserved.has(entry.name)) continue;
+    try {
+      const file = path.join(directory, entry.name, 'SKILL.md'), stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size < 1) continue;
+      const fd = fs.openSync(file, 'r');
+      let head; try { const buffer = Buffer.alloc(8192); head = buffer.subarray(0, fs.readSync(fd, buffer, 0, buffer.length, 0)).toString('utf8'); } finally { fs.closeSync(fd); }
+      const front = head.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+      const name = front?.match(/^name:\s*["']?([a-z0-9][a-z0-9-]*)["']?\s*$/m)?.[1];
+      const description = front?.match(/^description:\s*([^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*)/m)?.[1]?.replace(/^[>|][-+]?\s*/, '').replace(/\s+/g, ' ').replace(/^['"]|['"]$/g, '').trim();
+      if (!name || reserved.has(name)) continue;
+      if (seenNames.has(name)) { ambiguous.add(name); continue; }
+      seenNames.add(name);
+      if (stat.size > 1024 * 1024) continue;
+      if (!description || !/\b(?:ui|ux|frontend|visual|design|brand|typography|iconography)\b|设计|视觉|界面|品牌|交互/i.test(description)) continue;
+      const content = fs.readFileSync(file, 'utf8');
+      discovered.set(name, { name, scope: description.slice(0, 240), path: file, sha256: digest(content) });
+    } catch { /* Unreadable or malformed optional skills are not advertised. */ }
+  }
+  return [...curated, ...[...discovered.values()].filter(item => !ambiguous.has(item.name)).sort((a, b) => a.name.localeCompare(b.name))];
 }
 export function loadVisualSkill(name, expectedSha256, home = codexHome) {
   const binding = availableVisualSkills(home).find(item => item.name === name);
