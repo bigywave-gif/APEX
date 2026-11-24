@@ -5,7 +5,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, reconcileAgentAttemptUsage, rebudgetAgentJobs, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
+import { initializeLedger, configureRunTokenBudget, registerAgent, enqueueAgentJob, claimAgentJob, settleAgentJob, recoverAgentJobs, completeAgentAdvisory, reconcileAgentAttemptUsage, rebudgetAgentJobs, recordObservedTokenUsage, agentRuntimeStatus } from './run-ledger.mjs';
 import { readRunMetrics } from './run-metrics.mjs';
 
 const run = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-run-token-budget-'));
@@ -166,6 +166,35 @@ try {
     rebudgetAgentJobs(lateOverrun, { stage: 'visual', jobIds: [job.jobId], perAgentBudget: 100, stageBudget: 200 });
     assert.equal(claimAgentJob(lateOverrun, job.jobId).status, 'running', 'late overrun needs an explicit budget change before retry');
   } finally { fs.rmSync(lateOverrun, { recursive: true, force: true }); }
+  for (const mode of ['queued', 'running', 'succeeded', 'advisory', 'interrupted']) {
+    const olderOverrun = fs.mkdtempSync(path.join(os.tmpdir(), `apex-older-overrun-${mode}-`));
+    try {
+      configureRunTokenBudget(olderOverrun, { limit: 500, verificationReserve: 0 });
+      registerAgent(olderOverrun, { agentId: 'reviewer', vocation: 'review', stage: 'visual' });
+      const job = enqueueAgentJob(olderOverrun, { agentId: 'reviewer', stage: 'visual', inputHash: mode, payload: { tokenBudget: 40, stageTokenBudget: 500 }, maxAttempts: 4 });
+      const first = claimAgentJob(olderOverrun, job.jobId);
+      settleAgentJob(olderOverrun, job.jobId, { status: 'failed', leaseToken: first.leaseToken, error: 'fixture', retryDelayMs: 0 });
+      const second = claimAgentJob(olderOverrun, job.jobId); assert.equal(second.status, 'running');
+      if (mode === 'queued' || mode === 'succeeded') settleAgentJob(olderOverrun, job.jobId, { status: mode === 'queued' ? 'failed' : 'succeeded', leaseToken: second.leaseToken, error: 'fixture', retryDelayMs: 0, usage: { inputTokens: 2, outputTokens: 3, usageSource: 'provider-reported' } });
+      const observation = { jobId: job.jobId, attempt: 1, inputTokens: 30, outputTokens: 20, usageSource: 'provider-reported', evidence: 'isolated older attempt fixture' };
+      const correction = reconcileAgentAttemptUsage(olderOverrun, observation);
+      assert.equal(correction.overReservation, true);
+      if (['queued', 'succeeded'].includes(mode)) assert.equal(correction.fenced, true);
+      else {
+        assert.equal(correction.pendingRunning, true); assert.equal(agentRuntimeStatus(olderOverrun, job.jobId).jobs[0].status, 'running');
+        assert.equal(reconcileAgentAttemptUsage(olderOverrun, observation).pendingRunning, true, 'replay must expose the pending running attempt');
+        if (mode === 'advisory') {
+          const output = path.join(olderOverrun, 'advisories/visual/reviewer.json');
+          assert.throws(() => completeAgentAdvisory(olderOverrun, job.jobId, { leaseToken: second.leaseToken, output, content: '{}', inputTokens: 2, outputTokens: 3, limit: 500, metadata: { usageSource: 'provider-reported' } }), /earlier agent attempt/);
+          assert.equal(fs.existsSync(output), false);
+        } else if (mode === 'interrupted') recoverAgentJobs(olderOverrun, { force: true });
+        else settleAgentJob(olderOverrun, job.jobId, { status: 'succeeded', leaseToken: second.leaseToken, usage: { inputTokens: 2, outputTokens: 3, usageSource: 'provider-reported' } });
+      }
+      assert.equal(agentRuntimeStatus(olderOverrun, job.jobId).jobs[0].status, 'dead-letter', `${mode} must wait for controlled budget recovery`);
+      rebudgetAgentJobs(olderOverrun, { stage: 'visual', jobIds: [job.jobId], perAgentBudget: 80, stageBudget: 500 });
+      assert.equal(claimAgentJob(olderOverrun, job.jobId).status, 'running', `${mode} must continue after an authorized allowance change`);
+    } finally { fs.rmSync(olderOverrun, { recursive: true, force: true }); }
+  }
   const historical = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-unknown-historical-budget-'));
   try {
     registerAgent(historical, { agentId: 'historical', vocation: 'review', stage: 'visual' });

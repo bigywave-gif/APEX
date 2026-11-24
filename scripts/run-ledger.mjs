@@ -800,6 +800,12 @@ function recordSettledAttemptUsage(database, job, usage, outcome, timestamp) {
   if (report.usageSource === 'unknown' && (report.inputTokens !== 0 || report.outputTokens !== 0)) throw new Error('unknown Agent attempt usage requires zero placeholders');
   database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, report.inputTokens, report.outputTokens, report.inputTokens + report.outputTokens, timestamp, JSON.stringify({ jobId: job.job_id, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome, usageSource: report.usageSource, reservedTokens: Number(job.reserved_tokens || 0) }));
 }
+function earlierBudgetOverruns(database, job) {
+  return database.prepare('SELECT id, metadata_json FROM token_usage WHERE stage = ? AND agent_id = ?').all(job.stage, job.agent_id).filter(row => {
+    const meta = parseJson(row.metadata_json);
+    return meta?.jobId === job.job_id && Number(meta.attempt) < Number(job.attempt) && meta.overReservation === true && meta.budgetOverrunHandled !== true;
+  });
+}
 export function reconcileAgentAttemptUsage(runDir, { jobId, attempt, inputTokens, outputTokens, usageSource, evidence }) {
   requireNonEmpty(jobId, 'jobId');
   if (!Number.isSafeInteger(attempt) || attempt < 1 || ![inputTokens, outputTokens].every(value => Number.isSafeInteger(value) && value >= 0) || !Number.isSafeInteger(inputTokens + outputTokens) || !['provider-reported', 'estimated'].includes(usageSource) || typeof evidence !== 'string' || !evidence.trim() || evidence.length > 1024) throw new Error('attempt usage reconciliation requires a valid attempt, usage source, counts and evidence');
@@ -812,23 +818,30 @@ export function reconcileAgentAttemptUsage(runDir, { jobId, attempt, inputTokens
     if (matches.length !== 1) throw new Error('attempt usage record is missing or ambiguous');
     const row = matches[0], previous = parseJson(row.metadata_json);
     if (!['unknown', 'legacy-unverified'].includes(previous.usageSource)) {
-      if (previous.reconciled && previous.usageSource === usageSource && Number(row.input_tokens) === inputTokens && Number(row.output_tokens) === outputTokens && previous.reconciliationEvidence === evidence) { database.exec('COMMIT'); return { status: 'already-reconciled', jobId, attempt, overReservation: Boolean(previous.overReservation) }; }
+      if (previous.reconciled && previous.usageSource === usageSource && Number(row.input_tokens) === inputTokens && Number(row.output_tokens) === outputTokens && previous.reconciliationEvidence === evidence) { database.exec('COMMIT'); return { status: 'already-reconciled', jobId, attempt, overReservation: Boolean(previous.overReservation), pendingRunning: previous.overReservation === true && previous.budgetOverrunHandled !== true && job.status === 'running' && Number(job.attempt) > attempt }; }
       throw new Error('attempt usage has already been recorded with different values');
     }
     const overReservation = Number(previous.reservedTokens || 0) > 0 && inputTokens + outputTokens > Number(previous.reservedTokens);
-    const fenceJob = overReservation && Number(job.attempt) === attempt && ['succeeded', 'queued'].includes(job.status);
-    const metadata = { ...previous, ...(fenceJob ? { outcome: 'budget-exceeded', priorOutcome: previous.outcome } : {}), usageSource, reconciled: true, previousUsageSource: previous.usageSource, reconciliationEvidence: evidence, reconciledAt: now(), overReservation };
+    const fenceJob = overReservation && ['succeeded', 'queued'].includes(job.status);
+    const pendingRunning = overReservation && Number(job.attempt) > attempt && job.status === 'running';
+    const metadata = { ...previous, ...(fenceJob && Number(job.attempt) === attempt ? { outcome: 'budget-exceeded', priorOutcome: previous.outcome } : {}), usageSource, reconciled: true, previousUsageSource: previous.usageSource, reconciliationEvidence: evidence, reconciledAt: now(), overReservation };
     database.prepare('UPDATE token_usage SET input_tokens = ?, output_tokens = ?, total_tokens = ?, metadata_json = ? WHERE id = ?').run(inputTokens, outputTokens, inputTokens + outputTokens, JSON.stringify(metadata), row.id);
     if (fenceJob) {
+      if (Number(job.attempt) !== attempt) {
+        const latest = database.prepare('SELECT id, metadata_json FROM token_usage WHERE stage = ? AND agent_id = ?').all(job.stage, job.agent_id).filter(item => { const meta = parseJson(item.metadata_json); return meta?.jobId === jobId && Number(meta.attempt) === Number(job.attempt); });
+        if (latest.length !== 1) throw new Error('latest settled attempt is missing or ambiguous');
+        const old = parseJson(latest[0].metadata_json);
+        database.prepare('UPDATE token_usage SET metadata_json = ? WHERE id = ?').run(JSON.stringify({ ...old, priorOutcome: old.outcome, outcome: 'budget-exceeded', earlierOverrunAttempt: attempt }), latest[0].id);
+      }
       const reason = 'late-reconciled agent attempt exceeded its recorded token budget', timestamp = now();
       database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(reason, timestamp, jobId);
-      database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, attempt, reason, job.payload_json, timestamp);
+      database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, job.attempt, reason, job.payload_json, timestamp);
       database.prepare("UPDATE agent_sessions SET status = 'failed', updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(timestamp, jobId, job.agent_id);
     }
     const previousUsage = { inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens), totalTokens: Number(row.total_tokens), recordedAt: row.recorded_at, metadata: previous };
-    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('agent-attempt-usage-reconciled', now(), JSON.stringify({ jobId, attempt, previousUsage, inputTokens, outputTokens, usageSource, evidence, overReservation, fenced: fenceJob }));
+    database.prepare('INSERT INTO events (event_type, created_at, payload_json) VALUES (?, ?, ?)').run('agent-attempt-usage-reconciled', now(), JSON.stringify({ jobId, attempt, previousUsage, inputTokens, outputTokens, usageSource, evidence, overReservation, fenced: fenceJob, pendingRunning }));
     const runBudget = runBudgetSnapshot(database, job.stage);
-    database.exec('COMMIT'); return { status: 'reconciled', jobId, attempt, overReservation, fenced: fenceJob, runBudget };
+    database.exec('COMMIT'); return { status: 'reconciled', jobId, attempt, overReservation, fenced: fenceJob, pendingRunning, runBudget };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 export function settleAgentJob(runDir, jobId, { status, result = null, error = null, retryDelayMs = null, leaseToken = null, usage = null, budgetExceeded = false, expectedStage = null, directCompletion = false } = {}) {
@@ -843,8 +856,9 @@ export function settleAgentJob(runDir, jobId, { status, result = null, error = n
     const payload = parseJson(job.payload_json), reported = usage && Number.isInteger(usage.inputTokens) && Number.isInteger(usage.outputTokens) ? usage.inputTokens + usage.outputTokens : 0;
     const prior = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
     const runBudget = runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job));
-    const exceeded = budgetExceeded || (Number(job.reserved_tokens || 0) > 0 && reported > Number(job.reserved_tokens)) || (Number.isInteger(payload.stageTokenBudget) && prior + reported > payload.stageTokenBudget) || (runBudget && runBudget.used + reported > runBudget.effectiveLimit);
-    const reason = exceeded ? 'agent attempt exceeded its recorded token budget' : String(error || 'agent job failed');
+    const priorOverrun = earlierBudgetOverruns(database, job).length > 0;
+    const exceeded = priorOverrun || budgetExceeded || (Number(job.reserved_tokens || 0) > 0 && reported > Number(job.reserved_tokens)) || (Number.isInteger(payload.stageTokenBudget) && prior + reported > payload.stageTokenBudget) || (runBudget && runBudget.used + reported > runBudget.effectiveLimit);
+    const reason = exceeded ? (priorOverrun ? 'earlier agent attempt exceeded its recorded token budget' : 'agent attempt exceeded its recorded token budget') : String(error || 'agent job failed');
     recordSettledAttemptUsage(database, job, usage, exceeded ? 'budget-exceeded' : status, timestamp);
     if (status === 'succeeded' && !exceeded) database.prepare("UPDATE agent_jobs SET status = 'succeeded', result_json = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(JSON.stringify(result || {}), timestamp, jobId);
     else if (exceeded || Number(job.attempt) >= Number(job.max_attempts)) {
@@ -882,7 +896,7 @@ export function rebudgetAgentJobs(runDir, { stage, jobIds, perAgentBudget, perJo
       const payload = parseJson(job.payload_json);
       const nextBudget = perJobBudgets ? perJobBudgets[jobId] : perAgentBudget;
       if (!Number.isInteger(nextBudget) || nextBudget < 1) throw new Error(`rebudget per-job budget is invalid: ${jobId}`);
-      const budgetFailure = job.status === 'dead-letter' && database.prepare('SELECT metadata_json FROM token_usage WHERE stage = ? AND agent_id = ? ORDER BY id DESC LIMIT 1').get(job.stage, job.agent_id);
+      const budgetFailure = job.status === 'dead-letter' && database.prepare('SELECT metadata_json FROM token_usage WHERE stage = ? AND agent_id = ? ORDER BY id DESC').all(job.stage, job.agent_id).find(row => parseJson(row.metadata_json)?.jobId === jobId);
       const failure = budgetFailure && parseJson(budgetFailure.metadata_json);
       if (!['queued', 'running'].includes(job.status) && !(failure?.jobId === jobId && failure.attempt === Number(job.attempt) && failure.outcome === 'budget-exceeded')) throw new Error(`rebudget only permits active or budget-exceeded jobs: ${jobId}/${job.status}`);
       if (failure?.outcome === 'budget-exceeded') {
@@ -893,6 +907,10 @@ export function rebudgetAgentJobs(runDir, { stage, jobIds, perAgentBudget, perJo
         const reserved = Number(database.prepare("SELECT COALESCE(SUM(reserved_tokens), 0) AS total FROM agent_jobs WHERE status = 'running' AND stage = ?").get(stage).total);
         if (nextStageBudget < used + reserved + nextBudget) throw new Error(`budget recovery lacks capacity after recorded usage: ${jobId}`);
         if (Number(job.attempt) >= 5) throw new Error(`budget recovery exhausted maximum attempts: ${jobId}`);
+        for (const row of database.prepare('SELECT id, metadata_json FROM token_usage WHERE stage = ? AND agent_id = ?').all(job.stage, job.agent_id)) {
+          const meta = parseJson(row.metadata_json);
+          if (meta?.jobId === jobId && meta.overReservation === true && meta.budgetOverrunHandled !== true) database.prepare('UPDATE token_usage SET metadata_json = ? WHERE id = ?').run(JSON.stringify({ ...meta, budgetOverrunHandled: true, budgetRecoveryAt: timestamp }), row.id);
+        }
         database.prepare("UPDATE agent_jobs SET status = 'queued', available_at = ?, started_at = NULL, finished_at = NULL, last_error = NULL, max_attempts = MAX(max_attempts, ?), claim_key = NULL WHERE job_id = ?").run(timestamp, Number(job.attempt) + 1, jobId);
         database.prepare("UPDATE agent_sessions SET status = 'ready', updated_at = ? WHERE agent_id = ?").run(timestamp, job.agent_id);
       }
@@ -994,13 +1012,14 @@ export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, conte
     const prior = Number(database.prepare('SELECT COALESCE(SUM(total_tokens), 0) AS total FROM token_usage WHERE stage = ?').get(job.stage).total);
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) throw new Error('token budget limit must be a non-negative integer or null');
     const overAttempt = Number(job.reserved_tokens || 0) && used > Number(job.reserved_tokens);
+    const overPriorAttempt = earlierBudgetOverruns(database, job).length > 0;
     const overStage = limit !== null && prior + used > limit;
     const runBudget = runBudgetSnapshot(database, job.stage, isRecoveryJob(database, job));
     const overRun = runBudget && runBudget.used + used > runBudget.effectiveLimit;
-    if (overAttempt || overStage || overRun) {
+    if (overPriorAttempt || overAttempt || overStage || overRun) {
       // Usage has already occurred. Persist it atomically with a terminal job
       // outcome before rejecting the advisory; retries cannot charge it twice.
-      const reason = overAttempt ? `agent attempt exceeds its reserved token budget: ${jobId}` : overStage ? `token budget exceeded for ${job.stage}: used=${prior}, requested=${used}, limit=${limit}` : `run token budget exceeded for ${job.stage}: used=${runBudget.used}, requested=${used}, limit=${runBudget.effectiveLimit}`;
+      const reason = overPriorAttempt ? `earlier agent attempt exceeded its recorded token budget: ${jobId}` : overAttempt ? `agent attempt exceeds its reserved token budget: ${jobId}` : overStage ? `token budget exceeded for ${job.stage}: used=${prior}, requested=${used}, limit=${limit}` : `run token budget exceeded for ${job.stage}: used=${runBudget.used}, requested=${used}, limit=${runBudget.effectiveLimit}`;
       database.prepare('INSERT INTO token_usage (stage, agent_id, input_tokens, output_tokens, total_tokens, recorded_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.stage, job.agent_id, inputTokens, outputTokens, used, timestamp, JSON.stringify({ ...metadata, jobId, attempt: Number(job.attempt), budgetRecovery: isRecoveryJob(database, job), outcome: 'budget-exceeded', reservedTokens: Number(job.reserved_tokens || 0) }));
       database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(reason, timestamp, jobId);
       database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(jobId, job.agent_id, job.stage, job.attempt, reason, job.payload_json, timestamp);
@@ -1064,10 +1083,12 @@ export function recoverAgentJobs(runDir, { force = false } = {}) {
     }
     const running = candidates.filter(job => force || (job.lease_expires_at ? Date.parse(job.lease_expires_at) : Date.parse(job.started_at) + AGENT_JOB_LEASE_MS) <= Date.now());
     for (const job of running) {
-      recordSettledAttemptUsage(database, job, null, 'interrupted', timestamp);
-      if (Number(job.attempt) >= Number(job.max_attempts)) {
-        database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run('agent process interrupted after final attempt', timestamp, job.job_id);
-        database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.job_id, job.agent_id, job.stage, job.attempt, 'agent process interrupted after final attempt', job.payload_json, timestamp);
+      const priorOverrun = earlierBudgetOverruns(database, job).length > 0;
+      recordSettledAttemptUsage(database, job, null, priorOverrun ? 'budget-exceeded' : 'interrupted', timestamp);
+      if (priorOverrun || Number(job.attempt) >= Number(job.max_attempts)) {
+        const reason = priorOverrun ? 'earlier agent attempt exceeded its recorded token budget' : 'agent process interrupted after final attempt';
+        database.prepare("UPDATE agent_jobs SET status = 'dead-letter', last_error = ?, finished_at = ?, lease_token = NULL, lease_expires_at = NULL, reserved_tokens = 0 WHERE job_id = ?").run(reason, timestamp, job.job_id);
+        database.prepare('INSERT OR REPLACE INTO dead_letters (job_id, agent_id, stage, attempts, reason, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(job.job_id, job.agent_id, job.stage, job.attempt, reason, job.payload_json, timestamp);
         database.prepare("UPDATE agent_sessions SET status = 'failed', updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(timestamp, job.job_id, job.agent_id);
         recovered.push({ jobId: job.job_id, status: 'dead-letter' });
       } else {

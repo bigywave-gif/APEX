@@ -86,5 +86,17 @@ try {
   r = claim3(); assert.notEqual(r.status, 0); assert.match(r.stderr, /identical controlled operation already failed/);
   r = action3(['agent-runtime.mjs', 'run-budget', d3, 'gate1', '500000', '50000', '25000']); assert.equal(r.status, 0, r.stderr || r.stdout);
   r = claim3(); assert.equal(r.status, 0, r.stderr || r.stdout); assert.equal(JSON.parse(r.stdout).status, 'running', 'a changed Run budget must permit a fresh claim');
+  const p4 = path.join(project, 'older-overrun-project'); fs.mkdirSync(p4);
+  r = run('apex-router.mjs', ['intake', p4, 'older-overrun', 'greenfield', 'standard', 'interactive', 'older-session', '确认调用 APEX']); assert.equal(r.status, 0, r.stderr);
+  const d4 = path.join(p4, '.apex/runs/older-overrun');
+  registerAgent(d4, { agentId: 'older-agent', vocation: 'test', stage: 'gate1' });
+  const older = enqueueAgentJob(d4, { agentId: 'older-agent', stage: 'gate1', inputHash: 'older', payload: { tokenBudget: 40, stageTokenBudget: 500 } });
+  const first = claimAgentJob(d4, older.jobId); settleAgentJob(d4, older.jobId, { status: 'failed', error: 'fixture', leaseToken: first.leaseToken, retryDelayMs: 0 });
+  const second = claimAgentJob(d4, older.jobId);
+  const action4 = args => { const auth = run('apex-router.mjs', ['authorize', p4, 'older-overrun', 'older-session', 'analyze_requirement']); assert.equal(auth.status, 0, auth.stderr); return run('apex-action.mjs', ['run', p4, 'older-overrun', 'older-session', JSON.parse(auth.stdout).authorizationRef, 'analyze_requirement', ...args]); };
+  const correction = JSON.stringify({ inputTokens: 30, outputTokens: 20, usageSource: 'provider-reported', evidence: 'isolated older attempt fixture' });
+  r = action4(['agent-runtime.mjs', 'reconcile-attempt-usage', d4, 'gate1', older.jobId, '1', correction]); assert.equal(r.status, 0, r.stderr); assert.equal(JSON.parse(r.stdout).pendingRunning, true);
+  r = action4(['agent-runtime.mjs', 'succeed', d4, older.jobId, 'gate1', '{}', second.leaseToken, JSON.stringify({ inputTokens: 2, outputTokens: 3, usageSource: 'provider-reported' })]); assert.notEqual(r.status, 0); assert.match(r.stderr, /not accepted as succeeded/);
+  r = run('apex-router.mjs', ['status', p4, 'older-overrun', 'older-session']); assert.equal(JSON.parse(r.stdout).nextRequiredAction, 'recover');
   console.log(JSON.stringify({ status: 'passed', scope: 'Router-controlled role submission, simulated over-budget usage, policy rebudget, new lease and retained usage' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }
