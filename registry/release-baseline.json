@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-24T10:26:17.471Z",
+  "generatedAt": "2026-11-24T10:34:39.272Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -81,8 +81,8 @@
     "scripts/api-http-observation-test.mjs": "c712cadf97317fa83ed14bc99754408a537e8fdbf935c6052e76401d73280fa7",
     "scripts/api-http-observation.mjs": "3a3b6bb5979a509843a1093f6bea0a986ae8f4b4bad7869a935e495a1a38c909",
     "scripts/api-mutation-journal.mjs": "940f35a7291908e423cd03355c37581357bb9143cb0a25e279e78f28485b2013",
-    "scripts/api-sample-schema-test.mjs": "83f69cd8a0b509b7bc0aaee0228cf83fe3642cb91463f34d98d749efb51b259c",
-    "scripts/api-sample-schema.mjs": "5cc78c7fc8bb03fff4804adc92177179c8d54646e11fabe293be466b9516b111",
+    "scripts/api-sample-schema-test.mjs": "35ceabdb36f38bd7a4d8e1fa868d9250bb9503ef95591711425b1e6ff5ab80f2",
+    "scripts/api-sample-schema.mjs": "09690e72ef313a881d31ce5b861bd5bc06fda4dd6911cfc6dd2dd015df9b10bf",
     "scripts/asset-materializer-contract-test.mjs": "fec45504b77e362d3871109e5b5bab5c044e7e00b6b17f5bab51cd63bae7619e",
     "scripts/asset-materializer.mjs": "1ce624c9f77944adb48bfdc00d1c3b4f6acb2f5d04512338bd8e740837c5957d",
     "scripts/asset-resolver.mjs": "10a3f54f223e2d51596ef5b8f3255b0b5751e28fa0f9061e4dda8e6047fb4ee1",
@@ -160,7 +160,7 @@
     "scripts/portable-install-contract-test.mjs": "7909ec69b6983034413e592506a039d7e5077f36df97fd45a9f7ec544a2c7468",
     "scripts/preflight-contract-test.mjs": "5acebc66bf723777a7e0b0f3acf9af89c6ef9c9302a25b92b9cb2d1bd296a228",
     "scripts/preflight.mjs": "5df44889bb2d8ccc6410d3ee9535bf0305f5252e68748fbd66acd4f84f5e8701",
-    "scripts/product-to-demo-browser-test.mjs": "ca74b50fd269c5c391e4d78f97f1facf6d11dcd78ae30ce619d0a4d953313519",
+    "scripts/product-to-demo-browser-test.mjs": "cf4ff451b85aa57cc9eb6706720576ef94fb7ecf7d3ef8930c95530130295e47",
     "scripts/product-to-visual-handoff-test.mjs": "8382fea59fd5f777ac06f96e63810b8e8005a1a9f98bfb9fa256f35f3db1779b",
     "scripts/project-adapter-integration-test.mjs": "60b33a9117084c4668f39e61b3eb197e54f8a5783ecf15a78691513ceedf0bf0",
     "scripts/project-adapter-test.mjs": "49f7baea577c50a510b8b250c910a4b98a91d40282d635510c5179ca9db0d52e",
