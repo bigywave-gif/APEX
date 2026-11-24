@@ -697,7 +697,7 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
       assertCurrentAgentLease(job, jobId, job.lease_token);
       const budget = agentBudgetSnapshot(database, job);
       database.exec('COMMIT');
-      return { ...job, leaseToken: job.lease_token, leaseExpiresAt: job.lease_expires_at, reservedTokens: Number(job.reserved_tokens || 0), ...budget, payload: parseJson(job.payload_json), idempotent: true };
+      return { ...job, leaseToken: job.lease_token, leaseExpiresAt: job.lease_expires_at, reservedTokens: Number(job.reserved_tokens || 0), ...budget, payload: parseJson(job.payload_json), idempotent: true, dispatchDirective: 'reconcile-existing-execution-before-start' };
     }
     if (job.status !== 'queued') throw new Error(`agent job is not queued: ${jobId}/${job.status}`);
     const registration = database.prepare('SELECT stage FROM agents WHERE agent_id = ?').get(job.agent_id);
@@ -746,7 +746,7 @@ export function claimAgentJob(runDir, jobId, { claimKey = null } = {}) {
     database.prepare("UPDATE agent_sessions SET status = 'working', updated_at = ?, last_job_id = ? WHERE agent_id = ?").run(timestamp, jobId, job.agent_id);
     const budget = agentBudgetSnapshot(database, job);
     database.exec('COMMIT');
-    return { ...job, status: 'running', attempt: Number(job.attempt) + 1, leaseToken, leaseExpiresAt, reservedTokens, ...budget, payload };
+    return { ...job, status: 'running', attempt: Number(job.attempt) + 1, leaseToken, leaseExpiresAt, reservedTokens, ...budget, payload, idempotent: false, dispatchDirective: 'start-once' };
   } catch (error) { try { database.exec('ROLLBACK'); } catch {} throw error; } finally { database.close(); }
 }
 function assertCurrentAgentLease(job, jobId, leaseToken) {

@@ -137,6 +137,7 @@ try {
   const claimKey = 'designer_claim_key_2026';
   const claimAuth = authorize();
   const claimed = expect(invoke(claimAuth, 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'claim design role');
+  assert.equal(claimed.dispatchDirective, 'start-once'); assert.equal(claimed.idempotent, false);
   // Recover a lost selection projection while an already-claimed designer is running.
   archiveArtifacts(runDir, ['advisories/visual/selection.json'], 'simulate-selection-projection-loss');
   fs.rmSync(selectionPath);
@@ -148,6 +149,7 @@ try {
   assert.notEqual(cachedClaim.status, 0); assert.match(cachedClaim.stderr, /fresh Router authorization/);
   const replayedClaim = expect(invoke(authorize(), 'agent-runtime.mjs', ['claim', runDir, jobId, 'visual', claimKey]), 'recover a lost claim response with a current authorization');
   assert.equal(replayedClaim.leaseToken, claimed.leaseToken); assert.equal(replayedClaim.attempt, claimed.attempt); assert.equal(replayedClaim.idempotent, true);
+  assert.equal(replayedClaim.dispatchDirective, 'reconcile-existing-execution-before-start');
   assert.equal(claimed.requiredSkill.sha256, queued.payload.tasteSkill.sha256);
   assert.match(claimed.requiredSkill.content, /tasteskill/i);
   const optionalName = process.env.APEX_TEST_EXTRA_VISUAL_SKILL === '1' ? 'brandkit' : 'impeccable';

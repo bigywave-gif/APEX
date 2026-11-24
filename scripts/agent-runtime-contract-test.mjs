@@ -55,8 +55,10 @@ try {
   const interrupted = enqueueAgentJob(root, { agentId: 'backend-engineer', stage: 'gate1', inputHash: 'sha256:interrupted' });
   const firstKey = 'claim_key_first_0001', secondKey = 'claim_key_second_002', thirdKey = 'claim_key_third_0003';
   const oldClaim = claimAgentJob(root, interrupted.jobId, { claimKey: firstKey });
+  assert.equal(oldClaim.idempotent, false); assert.equal(oldClaim.dispatchDirective, 'start-once');
   const replayed = claimAgentJob(root, interrupted.jobId, { claimKey: firstKey });
   assert.equal(replayed.leaseToken, oldClaim.leaseToken); assert.equal(replayed.attempt, oldClaim.attempt); assert.equal(replayed.idempotent, true);
+  assert.equal(replayed.dispatchDirective, 'reconcile-existing-execution-before-start');
   assert.throws(() => claimAgentJob(root, interrupted.jobId, { claimKey: secondKey }), /not queued/);
   assert.ok(renewAgentJobLease(root, interrupted.jobId, oldClaim.leaseToken).leaseExpiresAt);
   assert.equal(recoverAgentJobs(root, { force: true }).find(item => item.jobId === interrupted.jobId)?.status, 'queued');
