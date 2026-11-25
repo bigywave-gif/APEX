@@ -121,6 +121,7 @@ for (const [name, script] of [
   ['default-confirmation-contract', 'default-confirmation-contract-test.mjs'],
   ['combined-plan-contract', 'combined-plan-contract-test.mjs'],
   ['implementation-seal-contract', 'implementation-seal-test.mjs'],
+  ['legacy-demo-recapture-contract', 'legacy-demo-recapture-test.mjs'],
   ['agent-concurrency-contract', 'agent-concurrency-contract-test.mjs'],
   ['run-ledger-init-race', 'run-ledger-init-race-test.mjs'],
   ['cancelled-operation-finalizer', 'cancelled-operation-finalizer-test.mjs'],

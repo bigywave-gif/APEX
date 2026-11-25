@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-25T03:37:22.827Z",
+  "generatedAt": "2026-11-25T03:51:42.228Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -157,6 +157,8 @@
     "scripts/interactive-demo-test-fixture.mjs": "f4c436ec536caf6fd26c0227cbac5af9e29d3d7ff1ce4aa2bd821ac6e4345b56",
     "scripts/interactive-demo.mjs": "eda42f22223983bba5721c7f48a6f05c4812e0033364bfcd1dbcd52cc507d680",
     "scripts/ledger-marker-test.mjs": "cebfdf18a47002b689bd8ab087a69d0385c19fd23dd04af6589bf372b7778c87",
+    "scripts/legacy-demo-recapture-test.mjs": "4ef021981077d45a40314ef6a74a0d61d9900b3207dc858a20094de75f3fb48c",
+    "scripts/legacy-demo-recapture.mjs": "e2089528d301d6f5ee917b16de3e995e5c6e59bdcd430078919e279604f32cb8",
     "scripts/legacy-upgrade-browser-test.mjs": "6a03cc185406259f145515bc5ebf12a6e1c335c7b2c1586b5b87035d986dba85",
     "scripts/materialization-current.mjs": "9deb907f7edab687cf4de2a29d6cff77cd8a4fc255058809ad6f9cb57bfbd485",
     "scripts/motion-capability.mjs": "fa7859ee77018cc023703654e16ee04d76e0f535b5162b738277e81712882902",
