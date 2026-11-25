@@ -872,7 +872,7 @@ function registerRuntimeDemo(root, run, sessionId, authorizationRef) {
   appendEvent(run.runDir, { type: 'runtime-demo-registration-verified', sessionId, receipt: relative, artifacts: records.map(item => item.artifact) });
   return { receipt: relative, ...routerState(root, { ...run, state: stateOf(run.runDir) }, sessionId) };
 }
-function runtimeDemoPresentationReady(root, run, state, sessionId = null) {
+function runtimeDemoPresentationReady(root, run, state, sessionId = null, { allowUnverifiedInteractive = false } = {}) {
   const receiptFile = artifactFile(run.runDir, state.artifacts?.runtimeDemoPresentation);
   const runtimeDemoFile = artifactFile(run.runDir, state.artifacts?.runtimeDemo);
   const runtimeFile = artifactFile(run.runDir, state.artifacts?.visualSandboxRuntime);
@@ -891,7 +891,7 @@ function runtimeDemoPresentationReady(root, run, state, sessionId = null) {
       && receipt.runtimeDemo?.sha256 === sha256File(runtimeDemoFile)
       && receipt.visualSandboxRuntime?.sha256 === sha256File(runtimeFile)
       && receipt.visualSandboxFiles?.sha256 === sha256File(sandboxFiles);
-    return ready && (!demo.chatPreview || verifyChatPresentation(run.runDir, demo, manifest, receipt.presentation || {})) && (demo.kind !== 'interactive-ui-prototype' || interactiveDemoReady(state, run.runDir));
+    return ready && (!demo.chatPreview || verifyChatPresentation(run.runDir, demo, manifest, receipt.presentation || {})) && (allowUnverifiedInteractive || demo.kind !== 'interactive-ui-prototype' || interactiveDemoReady(state, run.runDir));
   } catch { return false; }
 }
 // Bind the actual sandbox files as well as their manifest: hashing only the
@@ -1018,12 +1018,37 @@ function intactRecordedDemoDecision(root, run, state) {
   } catch { /* Missing or invalid historical evidence never grants authority. */ }
   return false;
 }
+function intactVisualPlanDecision(root, run, state) {
+  try {
+    if (!state.locks?.visualPlanApproved || state.gates?.gate1?.status !== 'passed' || !usesCombinedPlan(state)) return false;
+    const refs = (state.gates.gate1.evidence || []).filter(ref => /^approvals\/visual-plan-[^/]+\.json$/.test(ref));
+    if (refs.length !== 1) return false;
+    const file = artifactFile(run.runDir, refs[0]), receipt = read(file), entries = receipt.artifactHashes;
+    if (receipt.schemaVersion !== '3.0' || receipt.gate !== 'visual-plan' || receipt.status !== 'approved' || receipt.scope !== 'requirements-and-visual-plan' || receipt.projectId !== projectId(root) || receipt.runId !== run.runId || Number(receipt.confirmationEpoch || 0) !== confirmationEpoch(state, 'visual-plan') || !Array.isArray(entries) || !entries.length) return false;
+    const seen = new Set();
+    for (const item of entries) { const target = artifactFile(run.runDir, item?.path); if (!target || seen.has(item.path) || hashFile(target) !== item.sha256) return false; seen.add(item.path); }
+    if (![state.artifacts?.visualExecutionPlan, state.artifacts?.visualPlanPresentation, state.artifacts?.intentBrief, state.artifacts?.deliveryContract].every(ref => ref && seen.has(ref))) return false;
+    const legacy = receipt.presentation?.renderPolicy === 'concise-issues-changes-and-style-sources';
+    const rendered = combinedPlanPresentation(state, run.runDir, { legacy });
+    if (!rendered || receipt.presentation?.renderPolicy !== rendered.renderPolicy || receipt.presentation.sha256 !== sha256Text(rendered.content)) return false;
+    return refs[0];
+  } catch { return false; }
+}
+function hasRecordedDemoDecision(runDir) {
+  try { return fs.readdirSync(path.join(runDir, 'approvals')).some(name => /^demo-.*\.json$/.test(name)); }
+  catch { return true; }
+}
+function pendingLegacyDemoApproval(root, run, state) {
+  if (state.deliveryRoute || state.locks?.stitchApproved || state.locks?.stitchSkipped || hasRecordedDemoDecision(run.runDir)) return false;
+  if (!intactVisualPlanDecision(root, run, state) || !runtimeDemoPresentationReady(root, run, state, null, { allowUnverifiedInteractive: true }) || !demoConfirmationReferences(run, state)) return false;
+  return ['runtimeDemo', 'visualSandboxRuntime', 'visualSandboxFiles', 'designCandidates', 'visualReference', 'gate1VisualOutput'].every(name => { const file = artifactFile(run.runDir, state.artifacts?.[name]); return file && actionOutputReceiptFor(run.runDir, file, 'generate_visual', true); });
+}
 function legacyDemoRecaptureCurrent(state, runDir) {
   if (!runDir || state.gates?.gate1?.status !== 'passed' || !state.locks?.effectApproved || !usesCombinedPlan(state)) return false;
   try {
     const root = path.dirname(path.dirname(path.dirname(runDir))), run = { runDir, runId: state.runId };
-    const approval = intactRecordedDemoDecision(root, run, state);
-    if (!approval) return false;
+    const demoApproval = intactRecordedDemoDecision(root, run, state), visualApproval = intactVisualPlanDecision(root, run, state);
+    if (!demoApproval && !(visualApproval && pendingLegacyDemoApproval(root, run, state))) return false;
     const demoFile = artifactFile(runDir, state.artifacts?.runtimeDemo), demo = read(demoFile);
     const originalFile = artifactFile(runDir, demo.interactionEvidence?.path);
     if (!originalFile || sha256File(originalFile) !== demo.interactionEvidence.sha256) return false;
@@ -1032,7 +1057,9 @@ function legacyDemoRecaptureCurrent(state, runDir) {
       for (const [reference, digest] of Object.entries(receipt.outputFileHashes || {})) {
         if (!/^evidence\/legacy-demo-recapture\/[a-f0-9-]{36}\/binding\.json$/.test(reference.split(path.sep).join('/'))) continue;
         const file = artifactFile(runDir, reference); if (!file || sha256File(file) !== digest || !ledgerBoundOutput(runDir, receipt, reference, digest, true)) continue;
-        const binding = read(file), captureFile = artifactFile(runDir, binding.recapture?.path), approvalFile = artifactFile(runDir, approval);
+        const binding = read(file), captureFile = artifactFile(runDir, binding.recapture?.path);
+        const approval = binding.approvalKind === 'visual-plan' ? visualApproval : demoApproval, approvalFile = artifactFile(runDir, approval);
+        if (!approval || (binding.approvalKind === 'visual-plan' && hasRecordedDemoDecision(runDir) && !demoApproval)) continue;
         if (binding.schemaVersion !== '1.0' || binding.type !== 'legacy-demo-recapture' || binding.status !== 'captured' || binding.runId !== state.runId || binding.approval?.path !== approval || binding.approval.sha256 !== sha256File(approvalFile) || binding.originalDemo?.path !== state.artifacts.runtimeDemo || binding.originalDemo.sha256 !== sha256File(demoFile) || binding.originalCapture?.path !== demo.interactionEvidence.path || binding.originalCapture.sha256 !== sha256File(originalFile) || !captureFile || binding.recapture.sha256 !== sha256File(captureFile) || receipt.outputFileHashes?.[binding.recapture.path] !== binding.recapture.sha256 || !ledgerBoundOutput(runDir, receipt, binding.recapture.path, binding.recapture.sha256, true)) continue;
         try { validateLegacyDemoRecapture(runDir, read(originalFile), read(captureFile)); return true; }
         catch { /* An invalid older recapture must not hide a later valid one. */ }
@@ -1055,7 +1082,8 @@ function legacyDemoRecaptureRequired(state, runDir) {
 function confirmedPreGateLegacyRecaptureRequired(state, runDir) {
   if (!runDir || state.lifecycle !== 'active' || !usesCombinedPlan(state) || state.gates?.gate1?.status !== 'passed' || state.gates?.gate2?.status === 'passed' || !state.locks?.effectApproved || interactiveDemoReady(state, runDir)) return false;
   const root = path.dirname(path.dirname(path.dirname(runDir)));
-  return Boolean(intactRecordedDemoDecision(root, { runDir, runId: state.runId }, state) && legacyDemoRecaptureRequired(state, runDir));
+  const run = { runDir, runId: state.runId };
+  return Boolean((intactRecordedDemoDecision(root, run, state) || pendingLegacyDemoApproval(root, run, state)) && legacyDemoRecaptureRequired(state, runDir));
 }
 function unresolvedPostGateRecovery(runDir, state) {
   if (!runDir || !usesCombinedPlan(state) || state.gates?.gate2?.status !== 'passed' || !state.locks?.implementationAllowed || postGateImplementationCurrent(state, runDir)) return null;
@@ -2013,7 +2041,11 @@ function automaticWorkStep(state, runDir, action) {
       }
     };
   };
-  if (action === 'recapture_legacy_demo') return step('recapture-legacy-demo', '补采已确认 Demo 的浏览器证据', ['evidence/legacy-demo-recapture/*/binding.json'], '从原确认绑定的 Demo 源码启动隔离服务，重新采集原页面、视口与交互；保留原确认和截图，并以受控操作回执绑定新增证据。');
+  if (action === 'recapture_legacy_demo') {
+    const root = path.dirname(path.dirname(path.dirname(runDir))), run = { runDir, runId: state.runId };
+    const demoApproval = intactRecordedDemoDecision(root, run, state), visualApproval = demoApproval ? null : intactVisualPlanDecision(root, run, state);
+    return { ...step('recapture-legacy-demo', '补采旧版 Demo 的浏览器证据', ['evidence/legacy-demo-recapture/*/binding.json'], '从原方案绑定的 Demo 源码启动隔离服务，重新采集原页面、视口与交互；保留已有确认和截图，并以受控操作回执绑定新增证据。若 Demo 尚未获用户确认，补采后仍须展示并等待明确确认。'), legacyApprovalRef: demoApproval || visualApproval, legacyApprovalKind: demoApproval ? 'demo' : 'visual-plan' };
+  }
   if (action === 'recover') {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
     const retainedDecision = state.gates?.gate2?.status === 'passed' && !postGateImplementationCurrent(state, runDir) && intactRecordedDemoDecision(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);

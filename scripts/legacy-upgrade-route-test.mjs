@@ -21,11 +21,21 @@ try {
   assert.equal(source.split(marker).length, 2);
   const inject = mode === 'unconfirmed' ? `
   {
+  const planBefore=fs.readFileSync(path.join(dir,'approvals/visual-plan-visual-confirmation.json'));
   fs.renameSync(core,core+'-previous'); fs.cpSync(process.env.APEX_CANDIDATE_CORE,core,{recursive:true,filter:file=>!['.git','node_modules','.DS_Store'].includes(path.basename(file))});
   const state=route(['status',project,id,session]);
-  assert.ok(!state.allowedActions.includes('recapture_legacy_demo')&&!state.allowedActions.includes('select_delivery_route'));
+  assert.equal(state.nextRequiredAction,'recapture_legacy_demo'); assert.ok(!state.allowedActions.includes('revoke_visual')&&!state.allowedActions.includes('select_delivery_route'));
   assert.ok(!fs.existsSync(path.join(dir,'approvals/demo-demo-approved.json')));
-  console.log(JSON.stringify({status:'passed',mode:'unconfirmed',next:state.nextRequiredAction,gate2:state.gates.gate2}));
+  const planFile=path.join(dir,'approvals/visual-plan-visual-confirmation.json');
+  try{fs.appendFileSync(planFile,'tamper');const stale=route(['status',project,id,session]);assert.ok(!stale.allowedActions.includes('recapture_legacy_demo')&&!stale.allowedActions.includes('select_delivery_route'));}finally{fs.writeFileSync(planFile,planBefore)}
+  const supplement=invoke('recapture_legacy_demo','legacy-demo-recapture-run.mjs',[dir]);
+  const presented=route(['status',project,id,session]); assert.equal(presented.nextRequiredDecision?.id,'demo-confirmation');
+  assert.ok(!presented.allowedActions.includes('select_delivery_route')); assert.deepEqual(fs.readFileSync(path.join(dir,'approvals/visual-plan-visual-confirmation.json')),planBefore);
+  const recaptured=JSON.parse(fs.readFileSync(supplement.capture)), screenshot=path.join(dir,recaptured.evidence[0].screenshot), screenshotBytes=fs.readFileSync(screenshot);
+  try{fs.appendFileSync(screenshot,'tamper');const stale=route(['status',project,id,session]);assert.notEqual(stale.nextRequiredDecision?.id,'demo-confirmation');}finally{fs.writeFileSync(screenshot,screenshotBytes)}
+  const confirmed=route(['confirm-demo',project,id,session,'after-upgrade','确认交互式 Demo']); assert.equal(confirmed.nextRequiredDecision?.id,'delivery-route');
+  const selected=route(['select-route',project,id,session,'direct-code','after-upgrade-route','用户选择直接代码']); assert.equal(selected.nextRequiredAction,'compile_visual_bundle');
+  console.log(JSON.stringify({status:'passed',mode:'unconfirmed',after:'demo-confirmation-then-direct-code',gate2:state.gates.gate2}));
   if(runtimePid){try{process.kill(runtimePid,'SIGTERM')}catch{}} process.exit(0);
   }
 ` : `

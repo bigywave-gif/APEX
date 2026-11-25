@@ -23,12 +23,11 @@ try {
   if (!state.locks?.effectApproved) fail('the original Demo decision must exist');
   const captureFile = path.resolve(dir, demo.interactionEvidence?.path || '');
   if (!captureFile.startsWith(`${dir}${path.sep}`) || hash(captureFile) !== demo.interactionEvidence.sha256) fail('original capture changed');
-  const original = read(captureFile), approvals = path.join(dir, 'approvals');
-  const candidates = fs.readdirSync(approvals).filter(name => /^demo-.*\.json$/.test(name)).filter(name => {
-    try { const value = read(path.join(approvals, name)); return value.type === 'runtime-demo-confirmation' && value.status === 'approved' && value.runId === state.runId && value.artifactHashes?.some(item => item.path === state.artifacts.runtimeDemo && item.sha256 === hash(demoFile).slice(7)); } catch { return false; }
-  });
-  if (candidates.length !== 1) fail('original Demo approval is missing or ambiguous');
-  const approval = path.join(approvals, candidates[0]), approvalHash = hash(approval), originalHash = hash(captureFile), demoHash = hash(demoFile);
+  const original = read(captureFile), approvalRef = snapshot.executionDirective?.currentStep?.legacyApprovalRef, approvalKind = snapshot.executionDirective?.currentStep?.legacyApprovalKind;
+  if (!['demo', 'visual-plan'].includes(approvalKind) || typeof approvalRef !== 'string' || !new RegExp(`^approvals/${approvalKind}-[^/]+\\.json$`).test(approvalRef.split(path.sep).join('/'))) fail('original approval is missing or invalid');
+  const approval = fs.realpathSync(path.resolve(dir, approvalRef));
+  if (!approval.startsWith(`${fs.realpathSync(dir)}${path.sep}`)) fail('original approval is outside the Run');
+  const approvalHash = hash(approval), originalHash = hash(captureFile), demoHash = hash(demoFile);
   const token = path.basename(process.env.APEX_ROUTER_AUTHORIZATION_REF || '', '.json');
   if (!/^[a-f0-9-]{36}$/.test(token)) fail('invalid authorization identity');
   const output = path.join(dir, 'evidence', 'legacy-demo-recapture', token);
@@ -50,7 +49,7 @@ try {
   const result = validateLegacyDemoRecapture(dir, original, recaptured);
   if (hash(approval) !== approvalHash || hash(captureFile) !== originalHash || hash(demoFile) !== demoHash) fail('original confirmation evidence changed during capture');
   const binding = path.join(output, 'binding.json');
-  fs.writeFileSync(binding, `${JSON.stringify({ schemaVersion: '1.0', type: 'legacy-demo-recapture', status: 'captured', runId: state.runId, approval: { path: path.relative(dir, approval), sha256: approvalHash }, originalDemo: { path: state.artifacts.runtimeDemo, sha256: demoHash }, originalCapture: { path: path.relative(dir, captureFile), sha256: originalHash }, recapture: { path: path.relative(dir, capturePath), sha256: hash(capturePath) }, result }, null, 2)}\n`, { flag: 'wx' });
+  fs.writeFileSync(binding, `${JSON.stringify({ schemaVersion: '1.0', type: 'legacy-demo-recapture', status: 'captured', runId: state.runId, approvalKind, approval: { path: path.relative(dir, approval), sha256: approvalHash }, originalDemo: { path: state.artifacts.runtimeDemo, sha256: demoHash }, originalCapture: { path: path.relative(dir, captureFile), sha256: originalHash }, recapture: { path: path.relative(dir, capturePath), sha256: hash(capturePath) }, result }, null, 2)}\n`, { flag: 'wx' });
   console.log(JSON.stringify({ status: 'captured', binding, capture: capturePath }));
 } catch (error) { console.error(error.message); process.exitCode = 1; }
 finally { if (server) server.kill('SIGTERM'); }
