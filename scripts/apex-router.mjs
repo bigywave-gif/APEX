@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
+import { observeLocalListener } from './local-listener-observation.mjs';
 import { controlledOutput, ledgerBoundOutput, declaredVerificationCommand } from './verification-policy.mjs';
 import { qualityVerificationPending } from './quality-workflow.mjs';
 import { industryReviewFailures } from './industry-review-progress.mjs';
@@ -1314,7 +1315,7 @@ function failedImportScope(runDir, failure) {
 }
 function prebaselineImportRoleState(runDir, state) {
   try {
-    const inFlight = operationRecords(runDir).some(item => item.receipt?.action === 'collect_existing_baseline' && item.receipt?.prebaselineContext?.stage === 'prebaseline' && item.receipt.status === 'running');
+    const inFlight = operationRecords(runDir).some(item => item.receipt?.action === 'collect_existing_baseline' && item.receipt.status === 'running' && item.receipt.authorizationRef !== process.env.APEX_ROUTER_AUTHORIZATION_REF && (item.receipt?.prebaselineContext?.stage === 'prebaseline' || ['prebaseline-import-runtime.mjs', 'prebaseline-import-build.mjs'].includes(item.receipt.script)));
     if (inFlight) return { status: 'operation-wait' };
     const file = path.join(runDir, 'advisories', 'prebaseline', 'selection.json');
     if (!fs.existsSync(file)) return { status: 'select' };
@@ -1364,14 +1365,29 @@ function prebaselineImportRoleState(runDir, state) {
 }
 function prebaselineRuntimeObservation(runDir, binding) {
   try {
-    for (const { receipt } of operationRecords(runDir)) {
+    const records = operationRecords(runDir).sort((a, b) => String(b.receipt?.finishedAt || '').localeCompare(String(a.receipt?.finishedAt || '')));
+    for (const { receipt } of records) {
       if (receipt.status !== 'succeeded' || receipt.action !== 'collect_existing_baseline' || receipt.script !== 'prebaseline-import-runtime.mjs') continue;
       for (const [reference, digest] of Object.entries(receipt.outputFileHashes || {})) {
         if (!/^evidence\/prebaseline-runtime\/[a-f0-9-]{36}\.json$/.test(reference.split(path.sep).join('/'))) continue;
         const file = artifactFile(runDir, reference);
         if (!file || sha256File(file) !== digest || !ledgerBoundOutput(runDir, receipt, reference, digest, true)) continue;
         const observation = read(file);
-        if (observation.schemaVersion === '1.0' && observation.type === 'prebaseline-runtime-observation' && observation.status === 'observed' && JSON.stringify(observation.binding) === JSON.stringify(binding) && Array.isArray(observation.routes) && Array.isArray(observation.sources)) return { status: 'observed-not-authorized', reference, sha256: digest, serviceOwnership: observation.serviceOwnership || 'unverified', routeCount: observation.routes.length, incompleteRoutes: observation.routes.filter(item => item.status !== 'observed').length, sourceCount: observation.sources.length, unobservedSources: observation.sources.filter(item => !Array.isArray(item.loadedAt) || !item.loadedAt.length).length, failedResources: observation.routes.reduce((sum, item) => sum + (item.failedResources?.length || 0), 0), pageErrors: observation.routes.reduce((sum, item) => sum + (item.pageErrors || 0), 0), consoleErrors: observation.routes.reduce((sum, item) => sum + (item.consoleErrors || 0), 0), blockedRequests: observation.routes.reduce((sum, item) => sum + (item.blockedRequests?.length || 0), 0), permitsBaseline: false };
+        if (observation.schemaVersion === '1.0' && observation.type === 'prebaseline-runtime-observation' && observation.status === 'observed' && JSON.stringify(observation.binding) === JSON.stringify(binding) && Array.isArray(observation.routes) && Array.isArray(observation.sources)) {
+          let needsReobservation = false;
+          const problematic = observation.serviceOwnership === 'changed-during-observation' || observation.routes.some(item => item.status !== 'observed' || item.failedResources?.length || item.pageErrors || item.consoleErrors || item.blockedRequests?.length) || observation.sources.some(item => !Array.isArray(item.loadedAt) || !item.loadedAt.length);
+          if (problematic) try {
+            const url = new URL(observation.origin), previous = observation.serviceProcesses?.before || observation.serviceProcess;
+            if (url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.port && url.pathname === '/' && !url.username && !url.password && !url.search && !url.hash && previous) {
+              const current = observeLocalListener(Number(url.port), path.resolve(runDir, '..', '..', '..'));
+              // A stable replacement listener is a changed input. If the first
+              // observation straddled a restart, its after-listener can itself
+              // be used for one fresh observation; an unchanged failure cannot.
+              needsReobservation = Boolean(current && JSON.stringify(current) !== JSON.stringify(previous));
+            }
+          } catch { /* An unavailable listener never authorizes a retry. */ }
+          return { needsReobservation, status: 'observed-not-authorized', reference, sha256: digest, serviceOwnership: observation.serviceOwnership || 'unverified', routeCount: observation.routes.length, incompleteRoutes: observation.routes.filter(item => item.status !== 'observed').length, sourceCount: observation.sources.length, unobservedSources: observation.sources.filter(item => !Array.isArray(item.loadedAt) || !item.loadedAt.length).length, failedResources: observation.routes.reduce((sum, item) => sum + (item.failedResources?.length || 0), 0), pageErrors: observation.routes.reduce((sum, item) => sum + (item.pageErrors || 0), 0), consoleErrors: observation.routes.reduce((sum, item) => sum + (item.consoleErrors || 0), 0), blockedRequests: observation.routes.reduce((sum, item) => sum + (item.blockedRequests?.length || 0), 0), permitsBaseline: false };
+        }
       }
     }
   } catch { /* Missing or stale observations do not grant an exception. */ }
@@ -2122,6 +2138,7 @@ function automaticWorkStep(state, runDir, action) {
               catch { return step('prebaseline-role-repair', '修复基线分析角色绑定', [], '当前角色回执或检查绑定已变化；先受控对账，再重新读取 Router。'); }
               const observation = prebaselineRuntimeObservation(runDir, binding);
               if (!observation) return { ...step('prebaseline-runtime-observe', '观察候选依赖的实际页面加载', ['evidence/prebaseline-runtime/*.json'], '以当前项目的本机 HTTP 服务和检查范围中的全部路由运行受控浏览器观察，记录实际加载源码、失败与控制台错误；观察不等于构建通过或例外许可。'), observationBinding: binding };
+              if (observation.needsReobservation) return { ...step('prebaseline-runtime-observe', '在已变化的项目服务上重新观察', ['evidence/prebaseline-runtime/*.json'], '已核验监听进程发生变化；使用原检查范围重新观察一次，不得将重试视为依赖例外许可。'), observationBinding: binding };
               completedReview = { ...completedReview, runtimeObservation: observation };
               const clean = observation.serviceOwnership !== 'changed-during-observation' && !observation.incompleteRoutes && !observation.unobservedSources && !observation.failedResources && !observation.pageErrors && !observation.consoleErrors && !observation.blockedRequests;
               const build = clean ? prebaselineDeclaredBuild(runDir, state) : null;

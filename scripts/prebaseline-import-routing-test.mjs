@@ -59,8 +59,8 @@ try {
   assert.equal(status().currentStep.id, 'prebaseline-runtime-observe', 'candidate judgments require independent observations');
   assert.equal(status().blockingOperation, null);
   if (process.env.APEX_TEST_PREBASELINE_BROWSER === '1') {
-    const serverCode = `const http=require('http'),fs=require('fs'),path=require('path');const root=process.argv[1],broken=process.argv[2]==='1',different=process.argv[3]==='1';http.createServer((req,res)=>{if(req.method==='POST'){fs.writeFileSync(path.join(root,'unexpected-post.txt'),'write');res.end('written');return}if(req.url==='/main.js'&&broken){res.writeHead(404);res.end('missing');return}if(req.url==='/main.js'&&different){res.setHeader('content-type','text/javascript');res.end('console.log("different source")');return}if(req.url==='/main.js'&&process.argv[4]==='1'){fs.writeFileSync(path.join(root,'request-started'),'yes');setTimeout(()=>res.end(fs.readFileSync(path.join(root,'main.js'))),15000);return}const file=req.url==='/main.js'?'main.js':'index.html';res.setHeader('content-type',file.endsWith('.js')?'text/javascript':'text/html');res.end(fs.readFileSync(path.join(root,file)))}).listen(0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port+'/')});`;
-    const server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_BROKEN || '0', process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE || '0', process.env.APEX_TEST_PREBASELINE_CANCEL || '0'], { cwd: process.env.APEX_TEST_PREBASELINE_OWNERSHIP === '1' ? project : core, stdio: ['ignore', 'pipe', 'pipe'] });
+    const serverCode = `const http=require('http'),fs=require('fs'),path=require('path');const root=process.argv[1],broken=process.argv[2]==='1',different=process.argv[3]==='1';http.createServer((req,res)=>{if(req.method==='POST'){fs.writeFileSync(path.join(root,'unexpected-post.txt'),'write');res.end('written');return}if(req.url==='/main.js'&&broken&&process.argv[4]!=='2'){res.writeHead(404);res.end('missing');return}if(req.url==='/main.js'&&different){res.setHeader('content-type','text/javascript');res.end('console.log("different source")');return}if(req.url==='/main.js'&&['1','2'].includes(process.argv[4])){fs.writeFileSync(path.join(root,'request-started'),'yes');setTimeout(()=>{if(broken){res.writeHead(404);res.end('missing')}else res.end(fs.readFileSync(path.join(root,'main.js')))},process.argv[4]==='2'?3500:15000);return}const file=req.url==='/main.js'?'main.js':'index.html';res.setHeader('content-type',file.endsWith('.js')?'text/javascript':'text/html');res.end(fs.readFileSync(path.join(root,file)))}).listen(Number(process.argv[5]) || 0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port+'/')});`;
+    let server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_BROKEN || '0', process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE || '0', process.env.APEX_TEST_PREBASELINE_CANCEL || '0'], { cwd: process.env.APEX_TEST_PREBASELINE_OWNERSHIP === '1' ? project : core, stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       const url = await new Promise((resolve, reject) => { let value = ''; server.stdout.on('data', chunk => { value += chunk; if (value.includes('\n')) resolve(value.trim()); }); server.on('error', reject); server.on('exit', code => reject(new Error(`fixture server exited: ${code}`))); });
       if (process.env.APEX_TEST_PREBASELINE_CANCEL === '1') {
@@ -96,6 +96,32 @@ try {
       if (process.env.APEX_TEST_PREBASELINE_POST === '1') { assert.ok(evidence.routes[0].blockedRequests.some(item => item.method === 'POST')); assert.equal(fs.existsSync(path.join(project, 'unexpected-post.txt')), false); }
       if (process.env.APEX_TEST_PREBASELINE_JSERROR === '1') assert.ok(evidence.routes[0].pageErrors > 0, 'uncaught page errors must be observed');
       if (process.env.APEX_TEST_PREBASELINE_BIG === '1') { assert.equal(evidence.routes[0].overflow, true); assert.equal(evidence.routes[0].status, 'incomplete'); }
+      if (process.env.APEX_TEST_PREBASELINE_SERVICE_RECOVERY === '1') {
+        assert.equal(process.env.APEX_TEST_PREBASELINE_BROKEN, '1');
+        assert.equal(status().blockingOperation.category, 'unresolved-local-import');
+        assert.notEqual(status().currentStep.id, 'prebaseline-runtime-observe', 'unchanged failed input must not repeat');
+        const stopped = new Promise(resolve => server.once('exit', resolve)); server.kill('SIGTERM'); await stopped;
+        server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_RECOVERY_STILL_BROKEN === '1' ? '1' : '0', '0', '2', new URL(url).port], { cwd: project, stdio: ['ignore', 'pipe', 'pipe'] });
+        await new Promise((resolve, reject) => { server.stdout.once('data', resolve); server.once('error', reject); server.once('exit', code => reject(new Error(`replacement server exited: ${code}`))); });
+        assert.equal(status().currentStep.id, 'prebaseline-runtime-observe', 'a proven replacement service permits one new observation');
+        const auth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
+        const active = spawn(process.execPath, [path.join(core, 'scripts/apex-action.mjs'), 'run', project, run, session, auth.authorizationRef, 'collect_existing_baseline', 'prebaseline-import-runtime.mjs', 'observe', dir, url], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let output = '', errors = ''; active.stdout.on('data', value => { output += value; }); active.stderr.on('data', value => { errors += value; });
+        const finished = new Promise(resolve => active.on('close', code => resolve(code)));
+        const deadline = Date.now() + 30000;
+        while (!fs.existsSync(path.join(project, 'request-started')) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+        assert.ok(fs.existsSync(path.join(project, 'request-started')), 'replacement observation must be running');
+        assert.equal(status().currentStep.id, 'prebaseline-operation-wait', 'a live observation must not be dispatched twice');
+        assert.equal(await finished, 0, errors || output);
+        const repeated = JSON.parse(output);
+        assert.notEqual(repeated.observation, observed.observation);
+        const latest = JSON.parse(fs.readFileSync(repeated.observation));
+        assert.equal(latest.serviceOwnership, 'project-cwd-observed');
+        assert.equal(Boolean(latest.sources.find(item => item.source === 'main.js').loadedAt.length), process.env.APEX_TEST_PREBASELINE_RECOVERY_STILL_BROKEN !== '1');
+        if (process.env.APEX_TEST_PREBASELINE_RECOVERY_STILL_BROKEN === '1') assert.notEqual(status().currentStep.id, 'prebaseline-runtime-observe', 'the same replacement service failure must not be retried repeatedly');
+        assert.equal(status().blockingOperation.category, 'unresolved-local-import', 'new observation does not authorize an exception');
+        assert.equal(status().blockingOperation.professionalReview.runtimeObservation.reference, path.relative(fs.realpathSync(dir), fs.realpathSync(repeated.observation)));
+      } else {
       if (process.env.APEX_TEST_PREBASELINE_BUILD === '1') {
         assert.equal(status().currentStep.id, 'prebaseline-build-observe');
         const built = action('prebaseline-import-build.mjs', ['observe', dir]);
@@ -119,6 +145,7 @@ try {
       assert.equal(status().blockingOperation.professionalReview.runtimeObservation.status, 'observed-not-authorized');
       try { fs.appendFileSync(source, '\n// source changed\n'); assert.equal(status()?.blockingOperation?.professionalReview?.runtimeObservation, undefined); }
       finally { fs.writeFileSync(source, original); }
+      }
       }
     } finally { server.kill('SIGTERM'); }
   }
