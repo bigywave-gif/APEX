@@ -18,8 +18,9 @@ let server;
 try {
   if (fs.realpathSync(apex) !== fs.realpathSync(canonicalApexRoot)) fail('not the canonical Core');
   const snapshot = requireRouterAction(dir, 'recapture_legacy_demo');
-  if (snapshot.gates?.gate2 !== 'passed') fail('the original Gate 2 must be passed');
+  if (snapshot.gates?.gate1 !== 'passed') fail('the original visual plan must be approved');
   const state = read(path.join(dir, 'state.json')), demoFile = path.join(dir, state.artifacts.runtimeDemo), demo = read(demoFile);
+  if (!state.locks?.effectApproved) fail('the original Demo decision must exist');
   const captureFile = path.resolve(dir, demo.interactionEvidence?.path || '');
   if (!captureFile.startsWith(`${dir}${path.sep}`) || hash(captureFile) !== demo.interactionEvidence.sha256) fail('original capture changed');
   const original = read(captureFile), approvals = path.join(dir, 'approvals');

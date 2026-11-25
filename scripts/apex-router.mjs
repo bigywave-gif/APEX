@@ -1019,7 +1019,7 @@ function intactRecordedDemoDecision(root, run, state) {
   return false;
 }
 function legacyDemoRecaptureCurrent(state, runDir) {
-  if (!runDir || state.gates?.gate2?.status !== 'passed' || !usesCombinedPlan(state)) return false;
+  if (!runDir || state.gates?.gate1?.status !== 'passed' || !state.locks?.effectApproved || !usesCombinedPlan(state)) return false;
   try {
     const root = path.dirname(path.dirname(path.dirname(runDir))), run = { runDir, runId: state.runId };
     const approval = intactRecordedDemoDecision(root, run, state);
@@ -1051,6 +1051,11 @@ function legacyDemoRecaptureRequired(state, runDir) {
     if (journeys.some(item => item.failedResources !== undefined && (!Array.isArray(item.failedResources) || item.failedResources.length)) || screens.some(item => item.resourceObservation && (item.resourceObservation.status !== 'passed' || !Array.isArray(item.resourceObservation.failedResources) || item.resourceObservation.failedResources.length || !Array.isArray(item.resourceObservation.blockedRequests) || item.resourceObservation.blockedRequests.length))) return false;
     return journeys.some(item => item.failedResources === undefined || item.controlInventoryVersion !== '1.2') || screens.some(item => !item.resourceObservation || !item.controlInventory);
   } catch { return false; }
+}
+function confirmedPreGateLegacyRecaptureRequired(state, runDir) {
+  if (!runDir || state.lifecycle !== 'active' || !usesCombinedPlan(state) || state.gates?.gate1?.status !== 'passed' || state.gates?.gate2?.status === 'passed' || !state.locks?.effectApproved || interactiveDemoReady(state, runDir)) return false;
+  const root = path.dirname(path.dirname(path.dirname(runDir)));
+  return Boolean(intactRecordedDemoDecision(root, { runDir, runId: state.runId }, state) && legacyDemoRecaptureRequired(state, runDir));
 }
 function unresolvedPostGateRecovery(runDir, state) {
   if (!runDir || !usesCombinedPlan(state) || state.gates?.gate2?.status !== 'passed' || !state.locks?.implementationAllowed || postGateImplementationCurrent(state, runDir)) return null;
@@ -2301,6 +2306,7 @@ function allowedActions(state, runDir = null) {
     if (retainedDecision && unresolvedPostGateRecovery(runDir, state) && legacyDemoRecaptureRequired(state, runDir)) actions.add('recapture_legacy_demo');
     return [...actions].sort();
   }
+  if (confirmedPreGateLegacyRecaptureRequired(state, runDir)) { actions.add('recapture_legacy_demo'); return [...actions].sort(); }
   if (!gate1) {
     actions.add('analyze_requirement');
     // Gate 1 production is governed by analyze_requirement.  Do not expose a
@@ -2387,6 +2393,7 @@ function nextRequiredAction(state, runDir = null) {
     if (retainedDecision && unresolvedPostGateRecovery(runDir, state) && legacyDemoRecaptureRequired(state, runDir)) return 'recapture_legacy_demo';
     return approval || retainedDecision ? 'recover' : 'revoke_visual';
   }
+  if (confirmedPreGateLegacyRecaptureRequired(state, runDir)) return 'recapture_legacy_demo';
   if (state.lifecycle === 'active' && state.gates?.gate1?.status !== 'passed') {
     const existingBaseline = runDir ? existingVisualBaselineStatus(runDir, state) : { ready: state.track !== 'existing' };
     if (state.track === 'existing' && !existingBaseline.ready) return 'collect_existing_baseline';
