@@ -189,7 +189,8 @@ function select(runDir, stage) {
       if (stage === 'prebaseline' && (job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(reviewContexts?.[roleId] || reviewContext))) die('existing prebaseline review job has stale or inconsistent inspection context');
       if (stage === 'visual' && roleId === 'ui-designer' && (JSON.stringify(job.payload.tasteSkill) !== JSON.stringify(existing.tasteSkill) || !job.payload.skillBindings?.includes('taste-skill'))) die('visual UI designer job is missing or has an inconsistent required taste-skill binding');
     }
-    console.log(JSON.stringify({ stage, selection: output, selectedRoles, inputBindings: bindings.length, jobs: existing.agentJobs || {}, idempotent: true }));
+    const visibleRoles = reviewContexts ? selectedRoles.slice(0, 20) : selectedRoles;
+    console.log(JSON.stringify({ stage, selection: output, selectedRoles: visibleRoles, ...(reviewContexts && selectedRoles.length > visibleRoles.length ? { selectedRolesTotal: selectedRoles.length, selectedRolesOmitted: selectedRoles.length - visibleRoles.length, fullSelection: 'selection.json' } : {}), inputBindings: bindings.length, jobs: reviewContexts ? Object.fromEntries(visibleRoles.map(id => [id, existing.agentJobs[id]])) : existing.agentJobs || {}, idempotent: true }));
     return;
   }
   // A token cap must be achievable by the frozen inputs it asks an Agent to
@@ -217,7 +218,8 @@ function select(runDir, stage) {
     return enqueueAgentJob(runDir, { jobId, agentId: roleId, stage, inputHash, payload, maxAttempts: 3 });
   });
   selection.agentJobs = Object.fromEntries(selectedRoles.map((roleId, index) => [roleId, jobs[index].jobId])); write(output, selection);
-  console.log(JSON.stringify({ stage, selection: output, selectedRoles, inputBindings: bindings.length, jobs: reviewContexts ? jobs.map(job => ({ jobId: job.jobId, agentId: job.agentId, status: job.status })) : jobs }));
+  const visibleRoles = reviewContexts ? selectedRoles.slice(0, 20) : selectedRoles;
+  console.log(JSON.stringify({ stage, selection: output, selectedRoles: visibleRoles, ...(reviewContexts && selectedRoles.length > visibleRoles.length ? { selectedRolesTotal: selectedRoles.length, selectedRolesOmitted: selectedRoles.length - visibleRoles.length, fullSelection: 'selection.json' } : {}), inputBindings: bindings.length, jobs: reviewContexts ? jobs.slice(0, 20).map(job => ({ jobId: job.jobId, status: job.status })) : jobs }));
 }
 function rebudget(runDir, stage) {
   const selection = loadSelection(runDir, stage);

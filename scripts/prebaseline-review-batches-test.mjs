@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { partitionPrebaselineReviewContext, PREBASELINE_BATCH_MAX_BYTES, PREBASELINE_BATCH_MAX_ITEMS } from './prebaseline-import-review.mjs';
+import { publicAgentRuntimeStatus } from './run-ledger.mjs';
 const context = { inspection: 'inspections/imports-test.json', inspectionSha256: `sha256:${'a'.repeat(64)}`, scope: { inputReference: 'scope.json', routes: ['/'] }, requirementRevision: { observed: 'absent', authorized: 'absent' }, unresolvedImports: Array.from({ length: 127 }, (_, index) => ({ source: `src/file-${index}.js`, reference: './missing-module', candidates: [{ path: `src/missing-${index}.js`, state: 'absent' }] })) };
 const batches = partitionPrebaselineReviewContext(context);
 assert.equal(batches.length, 3);
@@ -19,4 +20,13 @@ assert.ok(byteBatches.every(batch => Buffer.byteLength(JSON.stringify(batch)) <=
 assert.throws(() => partitionPrebaselineReviewContext({ ...context, unresolvedImports: [{ ...context.unresolvedImports[0], padding: 'x'.repeat(PREBASELINE_BATCH_MAX_BYTES) }] }), /single prebaseline reference exceeds/);
 assert.throws(() => partitionPrebaselineReviewContext({ ...context, unresolvedImports: [context.unresolvedImports[0], context.unresolvedImports[0]] }), /duplicate references/);
 assert.throws(() => partitionPrebaselineReviewContext({ ...context, unresolvedImports: [] }), /invalid/);
+const jobs = Array.from({ length: 30 }, (_, i) => ({ jobId: `job-${i}`, agentId: `agent-${i}`, stage: 'prebaseline', payload: { reviewContext: batches[i % batches.length] } }));
+const sessions = jobs.map(job => ({ agentId: job.agentId, registrationStage: 'prebaseline' }));
+const view = publicAgentRuntimeStatus({ jobs: [...jobs, { jobId: 'visual', stage: 'visual', payload: {} }], sessions });
+assert.equal(view.jobs.length, 21); assert.equal(view.sessions.length, 20);
+assert.deepEqual(view.prebaselineJobs, { total: 30, returned: 20, omitted: 10, retrieval: 'agent-runtime.mjs status <run-dir> <job-id>' });
+assert.equal(view.prebaselineSessions.omitted, 10); assert.equal(view.jobs[0].payload.reviewContext, undefined);
+assert.equal(view.jobs[20].jobId, 'visual', 'other stages are not truncated');
+const targeted = publicAgentRuntimeStatus({ jobs: [jobs[29]], sessions }, { jobId: 'job-29' });
+assert.equal(targeted.jobs[0].jobId, 'job-29'); assert.deepEqual(targeted.sessions.map(session => session.agentId), ['agent-29']);
 console.log(JSON.stringify({ status: 'passed', test: 'prebaseline-review-batches' }));

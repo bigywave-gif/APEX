@@ -1110,13 +1110,29 @@ export function agentRuntimeStatus(runDir, jobId = null) {
 // A status response must not retransmit the complete frozen review context
 // for every queued batch. Internal ledger callers still receive the original
 // payload; a first authorized claim remains the delivery boundary.
-export function publicAgentRuntimeStatus(status) {
-  return { ...status, jobs: (status.jobs || []).map(job => {
+export function publicAgentRuntimeStatus(status, { prebaselineLimit = 20, jobId = null } = {}) {
+  let total = 0, returned = 0;
+  const jobs = (status.jobs || []).filter(job => {
+    if (job.stage !== 'prebaseline') return true;
+    total += 1;
+    if (returned >= prebaselineLimit) return false;
+    returned += 1;
+    return true;
+  }).map(job => {
     const context = job.stage === 'prebaseline' && job.payload?.reviewContext;
     if (!context) return job;
     const { reviewContext, ...payload } = job.payload;
     return { ...job, payload, reviewContextBinding: { sha256: hash(JSON.stringify(reviewContext)), inspection: reviewContext.inspection || null, inspectionSha256: reviewContext.inspectionSha256 || null, batch: reviewContext.batch || null, referenceCount: Array.isArray(reviewContext.unresolvedImports) ? reviewContext.unresolvedImports.length : null } };
-  }) };
+  });
+  let sessionTotal = 0, sessionReturned = 0;
+  const requestedAgent = jobId ? jobs.find(job => job.jobId === jobId)?.agentId : null;
+  const sessions = (status.sessions || []).filter(session => {
+    if (session.registrationStage !== 'prebaseline') return true;
+    sessionTotal += 1;
+    if ((requestedAgent && session.agentId !== requestedAgent) || (!jobId && sessionReturned >= prebaselineLimit) || (jobId && !requestedAgent)) return false;
+    sessionReturned += 1; return true;
+  });
+  return { ...status, jobs, sessions, ...(total > returned ? { prebaselineJobs: { total, returned, omitted: total - returned, retrieval: 'agent-runtime.mjs status <run-dir> <job-id>' } } : {}), ...(sessionTotal > sessionReturned ? { prebaselineSessions: { total: sessionTotal, returned: sessionReturned, omitted: sessionTotal - sessionReturned } } : {}) };
 }
 
 export function recoverAgentJobs(runDir, { force = false } = {}) {

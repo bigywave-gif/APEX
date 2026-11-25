@@ -29,7 +29,7 @@ try {
   action('existing-code-reference.mjs', ['inspect-imports', dir, project, scope]);
   assert.equal(status().currentStep.id, 'prebaseline-role-select');
   action('role-advisory.mjs', ['select', dir, 'prebaseline']);
-  const selection = JSON.parse(fs.readFileSync(path.join(dir, 'advisories/prebaseline/selection.json')));
+  let selection = JSON.parse(fs.readFileSync(path.join(dir, 'advisories/prebaseline/selection.json')));
   assert.equal(selection.selectedRoles.length, 2);
   const routerStatus = call('apex-router.mjs', ['status', project, run, session]);
   for (const job of routerStatus.agentRuntime.jobs.filter(item => item.stage === 'prebaseline')) {
@@ -41,8 +41,21 @@ try {
   }
   const runtimeStatus = action('agent-runtime.mjs', ['status', dir]);
   for (const job of runtimeStatus.jobs.filter(item => item.stage === 'prebaseline')) assert.equal(job.payload.reviewContext, undefined, 'runtime status must not repeat Agent contexts');
+  const targetJob = selection.agentJobs[selection.selectedRoles[1]], targetedStatus = action('agent-runtime.mjs', ['status', dir, targetJob]);
+  assert.deepEqual(targetedStatus.jobs.map(job => job.jobId), [targetJob]);
+  assert.equal(targetedStatus.sessions.filter(item => item.registrationStage === 'prebaseline').length, 1);
   assert.equal(action('role-advisory.mjs', ['select', dir, 'prebaseline']).idempotent, true);
   assert.equal(agentRuntimeStatus(dir).jobs.filter(job => job.stage === 'prebaseline').length, 2);
+  const staleJobs = Object.values(selection.agentJobs), sourcePath = path.join(project, 'main.js'), originalSource = fs.readFileSync(sourcePath);
+  fs.appendFileSync(sourcePath, '\n// changed while jobs are queued\n');
+  assert.equal(status().currentStep.id, 'prebaseline-role-repair', 'changed source must fence the old queued batches');
+  action('role-advisory.mjs', ['repair', dir, 'prebaseline']);
+  for (const jobId of staleJobs) assert.equal(agentRuntimeStatus(dir, jobId).jobs[0].status, 'cancelled');
+  fs.writeFileSync(sourcePath, originalSource);
+  assert.equal(status().currentStep.id, 'prebaseline-role-select');
+  action('role-advisory.mjs', ['select', dir, 'prebaseline']);
+  selection = JSON.parse(fs.readFileSync(path.join(dir, 'advisories/prebaseline/selection.json')));
+  assert.ok(Object.values(selection.agentJobs).every(jobId => !staleJobs.includes(jobId)), 'replacement batches must use fresh durable job identities');
   for (const [i, roleId] of selection.selectedRoles.entries()) {
     const route = status(); assert.equal(route.currentStep.id, 'prebaseline-batch-record'); assert.match(route.currentStep.details, new RegExp(roleId));
     const jobId = selection.agentJobs[roleId];
