@@ -33,7 +33,7 @@ const permitted = {
   prepare_workspace: new Set(['apex-workspace.mjs']),
   compile_visual_bundle: new Set(['visual-reference-compiler.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'bundle-compiler.mjs', 'asset-resolver.mjs', 'asset-materializer.mjs', 'experience-evaluator.mjs', 'motion-contract.mjs', 'motion-capability.mjs', 'visual-source.mjs', 'role-advisory.mjs', 'contract-recorder.mjs', 'confirmation-presentation.mjs', 'agent-runtime.mjs']),
   implement: new Set(['asset-materializer.mjs', 'runtime-materializer.mjs']),
-  verify: new Set(['project-intake.mjs', 'browser-capture.mjs', 'visual-reference-compiler.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'api-contract-capture.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
+  verify: new Set(['existing-code-reference.mjs', 'project-intake.mjs', 'browser-capture.mjs', 'visual-reference-compiler.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'api-contract-capture.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
   record_context: new Set(['contract-recorder.mjs', 'context-compiler.mjs', 'evidence-provenance.mjs']),
   recover: new Set(['apex-recover.mjs', 'run-migrate.mjs', 'role-advisory.mjs']),
   recapture_legacy_demo: new Set(['legacy-demo-recapture-run.mjs'])
@@ -139,7 +139,7 @@ function updateOperationIndex(receiptPath, receipt) {
   fs.writeFileSync(temporary, `${JSON.stringify(previous, null, 2)}\n`);
   fs.renameSync(temporary, operationIndexFile);
 }
-function inputFileHashes() { const hashes = {}; for (const argument of scriptArgs) { const candidate = path.resolve(argument); if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports' && argument === scriptArgs[3]) { try { if (!fs.realpathSync(candidate).startsWith(`${fs.realpathSync(runDirectory)}${path.sep}`)) continue; } catch { continue; } } if (candidate.startsWith(`${runDirectory}${path.sep}`) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) hashes[path.relative(runDirectory, candidate)] = fileHash(candidate); } return hashes; }
+function inputFileHashes() { const hashes = {}; for (const argument of scriptArgs) { const candidate = path.resolve(argument); if (script === 'existing-code-reference.mjs' && ['inspect-imports', 'inspect-legacy-snapshot'].includes(scriptArgs[0]) && argument === scriptArgs[3]) { try { if (!fs.realpathSync(candidate).startsWith(`${fs.realpathSync(runDirectory)}${path.sep}`)) continue; } catch { continue; } } if (candidate.startsWith(`${runDirectory}${path.sep}`) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) hashes[path.relative(runDirectory, candidate)] = fileHash(candidate); } return hashes; }
 function runInputHashes() {
   // Many guarded scripts intentionally read current run evidence by convention
   // (for example evidence/runtime-browser-capture.json) rather than receiving
@@ -239,7 +239,7 @@ function outputFileHashes(stdout) {
   return Object.fromEntries([...paths].sort().map(file => [path.relative(runRoot, file), fileHash(file)]));
 }
 const currentInputHashes = inputFileHashes();
-if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports' && scriptArgs[3]) {
+if (script === 'existing-code-reference.mjs' && ['inspect-imports', 'inspect-legacy-snapshot'].includes(scriptArgs[0]) && scriptArgs[3]) {
   try { const root = fs.realpathSync(runDirectory), input = fs.realpathSync(path.resolve(scriptArgs[3])); if (input.startsWith(`${root}${path.sep}`) && fs.statSync(input).isFile()) currentInputHashes[path.relative(root, input)] = fileHash(input); } catch {}
 }
 const currentRunInputHashes = runInputHashes();
@@ -281,11 +281,11 @@ if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'skill') {
   } catch { optionalSkillInput = { status: 'unavailable' }; }
 }
 let inspectionBoundary;
-if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports') {
+if (script === 'existing-code-reference.mjs' && ['inspect-imports', 'inspect-legacy-snapshot'].includes(scriptArgs[0])) {
   inspectionBoundary = inspectionBoundaryState(runDirectory);
 }
 let prebaselineInspection;
-if ((script === 'role-advisory.mjs' && scriptArgs[2] === 'prebaseline') || (script === 'agent-runtime.mjs' && scriptArgs[3] === 'prebaseline') || (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports')) {
+if ((script === 'role-advisory.mjs' && scriptArgs[2] === 'prebaseline') || (script === 'agent-runtime.mjs' && scriptArgs[3] === 'prebaseline') || (script === 'existing-code-reference.mjs' && ['inspect-imports', 'inspect-legacy-snapshot'].includes(scriptArgs[0]))) {
   try { const state = readRunState(runDirectory); prebaselineInspection = currentImportInspection(runDirectory, projectRoot, state.artifacts?.unresolvedImportInspection); }
   catch (error) { prebaselineInspection = { status: 'stale-or-unverified', reason: error.message }; }
 }
@@ -308,7 +308,7 @@ const startedAt = new Date().toISOString();
 fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), ...(prebaselineContext ? { prebaselineContext } : {}), status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
 let localProcessIdentity = null;
 let inspectionScopeHash;
-if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports') {
+if (script === 'existing-code-reference.mjs' && ['inspect-imports', 'inspect-legacy-snapshot'].includes(scriptArgs[0])) {
   try { inspectionScopeHash = currentInputHashes[path.relative(fs.realpathSync(runDirectory), fs.realpathSync(path.resolve(scriptArgs[3])))] || ''; } catch { inspectionScopeHash = ''; }
 }
 const execution = await runControlledSubprocess(process.execPath, [target, ...scriptArgs], {

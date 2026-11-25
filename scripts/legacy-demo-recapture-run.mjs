@@ -49,7 +49,7 @@ try {
   const result = validateLegacyDemoRecapture(dir, original, recaptured);
   if (hash(approval) !== approvalHash || hash(captureFile) !== originalHash || hash(demoFile) !== demoHash) fail('original confirmation evidence changed during capture');
   const binding = path.join(output, 'binding.json');
-  fs.writeFileSync(binding, `${JSON.stringify({ schemaVersion: '1.0', type: 'legacy-demo-recapture', status: 'captured', runId: state.runId, approvalKind, approval: { path: path.relative(dir, approval), sha256: approvalHash }, originalDemo: { path: state.artifacts.runtimeDemo, sha256: demoHash }, originalCapture: { path: path.relative(dir, captureFile), sha256: originalHash }, recapture: { path: path.relative(dir, capturePath), sha256: hash(capturePath) }, result }, null, 2)}\n`, { flag: 'wx' });
+  fs.writeFileSync(binding, `${JSON.stringify({ schemaVersion: '1.0', type: 'legacy-demo-recapture', status: 'captured', runId: state.runId, approvalKind, approval: { path: approvalRef, sha256: approvalHash }, originalDemo: { path: state.artifacts.runtimeDemo, sha256: demoHash }, originalCapture: { path: path.relative(dir, captureFile), sha256: originalHash }, recapture: { path: path.relative(dir, capturePath), sha256: hash(capturePath) }, result }, null, 2)}\n`, { flag: 'wx' });
   console.log(JSON.stringify({ status: 'captured', binding, capture: capturePath }));
 } catch (error) { console.error(error.message); process.exitCode = 1; }
 finally { if (server) server.kill('SIGTERM'); }

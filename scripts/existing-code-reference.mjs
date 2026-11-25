@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { newlyAvailableConfigs, newlyAvailableResources, newlyPreferredImports } from './existing-resource-freshness.mjs';
 import { codePositions, embeddedScriptPositions, unresolvedFailure, unresolvedSnapshot, currentImportInspection, requirementRevisionState } from './existing-import-inspection.mjs';
+import { legacyExistingSnapshotInputs } from './legacy-existing-inspection.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
@@ -119,7 +120,7 @@ function imports(projectRoot, file, content, sourceBytes) {
       const source = rel(projectRoot, file), reference = match[1];
       sourceState ||= `file:${sha(sourceBytes).slice('sha256:'.length)}`;
       unresolvedImports.set(JSON.stringify([source, reference]), { source, reference, sourceState, candidates: [...candidates].map(([path, state]) => ({ path, state })) });
-      if (command === 'inspect-imports' && unresolvedImports.size > 10000) die('unresolved import inspection exceeds the 10000-reference limit');
+      if (isInspection && unresolvedImports.size > 10000) die('unresolved import inspection exceeds the 10000-reference limit');
     }
   }
   // HTML entrypoints often load their real styles/scripts outside JS imports.
@@ -156,31 +157,51 @@ function imports(projectRoot, file, content, sourceBytes) {
 }
 function markers(content) { const text = content.toString('utf8'); const result = []; const tags = [...text.matchAll(/<([A-Za-z][\w.-]*)\b[^>]*>/g)].map(match => match[1]); const tests = [...text.matchAll(/data-testid=["']([^"']+)["']/g)].map(match => `testid:${match[1]}`); [...tags, ...tests].forEach((marker, index) => result.push({ marker: `${marker}#${index + 1}`, kind: marker.startsWith('testid:') ? 'test-anchor' : 'dom-element' })); return result; }
 const [command, runArg, projectArg, scopeArg] = process.argv.slice(2);
-if (!['capture', 'inspect-imports', 'verify-inspection'].includes(command) || !runArg || !projectArg || !scopeArg) die('usage: capture|inspect-imports <run-dir> <project-root> <baseline-input.json> or verify-inspection <run-dir> <project-root> <run-relative-inspection>');
-const runDir = path.resolve(runArg); const projectRoot = path.resolve(projectArg);
-try { requireRouterAction(runDir, 'collect_existing_baseline'); } catch (error) { die(error.message); }
+if (!['capture', 'inspect-imports', 'inspect-legacy-snapshot', 'verify-inspection'].includes(command) || !runArg || !projectArg || !scopeArg) die('usage: capture|inspect-imports|inspect-legacy-snapshot <run-dir> <project-root> <baseline-input.json> or verify-inspection <run-dir> <project-root> <run-relative-inspection>');
+const snapshotMode = command === 'inspect-legacy-snapshot', isInspection = command === 'inspect-imports' || snapshotMode;
+const runDir = path.resolve(runArg), actualProjectRoot = path.resolve(projectArg); let projectRoot = actualProjectRoot, routerSnapshot;
+try { routerSnapshot = requireRouterAction(runDir, snapshotMode ? 'verify' : 'collect_existing_baseline'); } catch (error) { die(error.message); }
+if (snapshotMode && routerSnapshot.executionDirective?.currentStep?.id !== 'inspect-legacy-existing-snapshot') die('current Router step does not authorize a legacy snapshot inspection');
 if (command === 'verify-inspection') {
   if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot) || fs.realpathSync(projectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('inspection verification requires the canonical Core and Router-authorized project');
   console.log(JSON.stringify(currentImportInspection(runDir, projectRoot, scopeArg)));
   process.exit(0);
 }
 let scopePath = path.resolve(scopeArg);
-if (command === 'inspect-imports') {
+if (isInspection) {
   try { const input = fs.realpathSync(scopePath), root = fs.realpathSync(runDir); if (!input.startsWith(`${root}${path.sep}`) || !fs.statSync(input).isFile()) throw new Error('outside Run'); scopePath = input; }
   catch { die('import inspection scope input must be a Run-local file'); }
 }
 const scopeBytes = fs.readFileSync(scopePath); const scope = JSON.parse(scopeBytes.toString('utf8'));
-const requirementRevision = command === 'inspect-imports' ? { observed: requirementRevisionState(runDir), authorized: process.env.APEX_ROUTER_INSPECTION_REVISION_STATE || 'unavailable:missing-authorization' } : null;
+const requirementRevision = isInspection ? { observed: requirementRevisionState(runDir), authorized: process.env.APEX_ROUTER_INSPECTION_REVISION_STATE || 'unavailable:missing-authorization' } : null;
 if (fs.realpathSync(apexRoot) !== fs.realpathSync(canonicalApexRoot)) die(`APEX must run from canonical root: ${canonicalApexRoot}`);
 const stateFile = path.join(runDir, 'state.json'); const { state, expectedStateHash } = readRunStateForUpdate(runDir); if (state.track !== 'existing') die('code reference is only valid for Existing runs');
+let snapshotInputs = null, snapshotDirectory = null;
+if (snapshotMode) {
+  snapshotInputs = legacyExistingSnapshotInputs(runDir, state);
+  if (!snapshotInputs.ready || fs.realpathSync(actualProjectRoot) !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die(`legacy snapshot is unavailable: ${snapshotInputs.reason || 'project mismatch'}`);
+  const expected = routerSnapshot.executionDirective.currentStep.legacySnapshotBinding;
+  if (JSON.stringify(expected) !== JSON.stringify({ reference: snapshotInputs.reference, scope: snapshotInputs.scope, implementationMap: snapshotInputs.implementationMap })) die('legacy snapshot inputs changed after Router authorization');
+  const root = fs.realpathSync(runDir), cache = path.join(root, 'cache', 'legacy-existing-snapshots'); fs.mkdirSync(cache, { recursive: true });
+  if (fs.realpathSync(cache) !== cache || !cache.startsWith(`${root}${path.sep}`)) die('legacy snapshot cache is unsafe');
+  const token = path.basename(process.env.APEX_ROUTER_AUTHORIZATION_REF || '', '.json'); if (!/^[a-f0-9-]{36}$/.test(token)) die('invalid authorization identity');
+  snapshotDirectory = path.join(cache, token); fs.mkdirSync(snapshotDirectory, { recursive: false });
+  process.on('exit', () => { try { fs.rmSync(snapshotDirectory, { recursive: true, force: true }); } catch {} });
+  for (const item of snapshotInputs.files) {
+    const target = path.resolve(snapshotDirectory, item.path), source = fs.realpathSync(path.resolve(root, item.copyPath));
+    if (!target.startsWith(`${snapshotDirectory}${path.sep}`) || !source.startsWith(`${root}${path.sep}`) || sha(fs.readFileSync(source)) !== item.sha256) die('legacy snapshot source changed or escapes its boundary');
+    fs.mkdirSync(path.dirname(target), { recursive: true }); fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
+  }
+  projectRoot = snapshotDirectory;
+}
 const entries = [...new Set(scope.codeEntrypoints || [])].map(item => path.resolve(projectRoot, item));
 if (!entries.length) die('baseline input must declare target codeEntrypoints');
 const realProjectRoot = fs.realpathSync(projectRoot);
-if (realProjectRoot !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('code reference must use the Router-authorized project');
+if (!snapshotMode && realProjectRoot !== fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || '')) die('code reference must use the Router-authorized project');
 tsconfigFile = path.join(projectRoot, 'tsconfig.json');
 const absentConfigCandidates = new Set();
 const inspectionConfigVersions = new Map();
-function projectConfig(file) { const real = fs.realpathSync(file); if (!inside(realProjectRoot, real)) throw new Error(`project configuration is outside the project: ${rel(projectRoot, file)}`); const bytes = fs.readFileSync(real); if (command === 'inspect-imports') { const relative = rel(projectRoot, file), versions = inspectionConfigVersions.get(relative) || new Set(); versions.add(sha(bytes)); inspectionConfigVersions.set(relative, versions); } return bytes.toString('utf8'); }
+function projectConfig(file) { const real = fs.realpathSync(file); if (!inside(realProjectRoot, real)) throw new Error(`project configuration is outside the project: ${rel(projectRoot, file)}`); const bytes = fs.readFileSync(real); if (isInspection) { const relative = rel(projectRoot, file), versions = inspectionConfigVersions.get(relative) || new Set(); versions.add(sha(bytes)); inspectionConfigVersions.set(relative, versions); } return bytes.toString('utf8'); }
 const checkedConfigDirectories = new Set();
 function collectAncestorConfigs(source) {
   const found = []; let current = path.dirname(source);
@@ -261,8 +282,8 @@ if (command === 'capture' && fs.existsSync(priorReferenceFile) && fs.existsSync(
   } catch { /* A malformed cache is never trusted; rebuild it below. */ }
 }
 const pending = [...entries, ...configFiles]; const selected = new Set(), sourceObservations = [];
-while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); if (command === 'inspect-imports' && selected.size > 10000) die('unresolved import inspection exceeds the 10000-source limit'); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } const parseable = /\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file); if (parseable || command === 'inspect-imports') { const bytes = fs.readFileSync(file); if (command === 'inspect-imports') sourceObservations.push({ path: rel(projectRoot, file), sha256: sha(bytes) }); if (parseable) { const content = bytes.toString('utf8'); for (const dependency of imports(projectRoot, file, content, bytes)) if (!selected.has(dependency)) pending.push(dependency); } } }
-if (command === 'inspect-imports') {
+while (pending.length) { const file = pending.pop(); if (selected.has(file)) continue; requireProjectSource(file); selected.add(file); if (isInspection && selected.size > 10000) die('unresolved import inspection exceeds the 10000-source limit'); try { for (const config of collectAncestorConfigs(file)) if (!selected.has(config)) pending.push(config); } catch (error) { die(`cannot inspect scoped dependency configuration: ${error.message}`); } const parseable = /\.(?:[cm]?[jt]sx?|vue|svelte|css|scss|sass|less|html?|json|ya?ml)$/i.test(file); if (parseable || isInspection) { const bytes = fs.readFileSync(file); if (isInspection) sourceObservations.push({ path: rel(projectRoot, file), sha256: sha(bytes) }); if (parseable) { const content = bytes.toString('utf8'); for (const dependency of imports(projectRoot, file, content, bytes)) if (!selected.has(dependency)) pending.push(dependency); } } }
+if (isInspection) {
   if (!Array.isArray(scope.routes) || !scope.routes.length) die('baseline input must declare target routes');
   const configurationObservations = [...inspectionConfigVersions].map(([path, versions]) => ({ path, sha256Versions: [...versions].sort() })).sort((a, b) => a.path.localeCompare(b.path));
   const missing = [...unresolvedImports.values()];
@@ -276,7 +297,11 @@ if (command === 'inspect-imports') {
     const unresolvedCurrent = !references.length || JSON.stringify(unresolvedSnapshot(projectRoot, references)) === JSON.stringify(missing);
     if (!inputsCurrent || !configsCurrent || newConfigs.length || newImports.length || newResources.length || !unresolvedCurrent) observationDrift = 'detected';
   } catch { observationDrift = 'detected'; }
-  const inspection = { schemaVersion: '1.0', status: 'unverified', observationDrift, projectRoot, requirementRevision, scope: { routes: scope.routes, entrypoints: entries.map(entry => rel(projectRoot, entry)).sort(), inputReference: rel(fs.realpathSync(runDir), scopePath), inputSha256: sha(scopeBytes), authorizedInputSha256: process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 || 'unavailable' }, scanner: 'literal-relative-script-v5', sourceObservations: sourceObservations.sort((a, b) => a.path.localeCompare(b.path)), configurationObservations, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedImports: missing, unresolvedResources: [...missingResources.values()], limitations: ['partial-static-analysis', 'computed-paths-and-build-plugins-not-verified', 'no-drift-detected-is-not-an-atomic-snapshot', 'not-a-review-or-permission-to-proceed'] };
+  if (snapshotMode) {
+    const current = legacyExistingSnapshotInputs(runDir, state);
+    if (!current.ready || JSON.stringify({ reference: current.reference, scope: current.scope, implementationMap: current.implementationMap }) !== JSON.stringify({ reference: snapshotInputs.reference, scope: snapshotInputs.scope, implementationMap: snapshotInputs.implementationMap })) observationDrift = 'detected';
+  }
+  const inspection = { schemaVersion: '1.0', status: 'unverified', observationDrift, projectRoot: snapshotMode ? actualProjectRoot : projectRoot, ...(snapshotMode ? { sourceMode: 'legacy-frozen-snapshot', legacySnapshot: { reference: snapshotInputs.reference, scope: snapshotInputs.scope, implementationMap: snapshotInputs.implementationMap } } : {}), requirementRevision, scope: { routes: scope.routes, entrypoints: entries.map(entry => rel(projectRoot, entry)).sort(), inputReference: rel(fs.realpathSync(runDir), scopePath), inputSha256: sha(scopeBytes), authorizedInputSha256: process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 || 'unavailable' }, scanner: 'literal-relative-script-v5', sourceObservations: sourceObservations.sort((a, b) => a.path.localeCompare(b.path)), configurationObservations, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedImports: missing, unresolvedResources: [...missingResources.values()], limitations: ['partial-static-analysis', 'computed-paths-and-build-plugins-not-verified', 'no-drift-detected-is-not-an-atomic-snapshot', 'not-a-review-or-permission-to-proceed'] };
   const serialized = `${JSON.stringify(inspection, null, 2)}\n`;
   if (Buffer.byteLength(serialized) > 4 * 1024 * 1024) die('unresolved import inspection exceeds the 4 MiB evidence limit');
   const inspectionHash = sha(serialized), reference = `inspections/imports-${inspectionHash.slice('sha256:'.length)}.json`, output = path.join(runDir, reference);

@@ -21,9 +21,9 @@ export function validateLegacyDemoRecapture(runDir, original, recapture) {
   const oldBase = new URL(oldDemo?.url), base = new URL(nextDemo?.url);
   const validBase = url => url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.port && url.pathname === '/' && !url.search && !url.hash && !url.username && !url.password;
   requireFact(validBase(oldBase) && validBase(base), 'both captures must use a loopback Demo root');
-  const verified = verifyDemoInteractions(runDir, recapture, base.href, { requireJourneyLocation: true });
+  const verified = verifyDemoInteractions(runDir, recapture, base.href, { requireJourneyLocation: true, allowSupplemental: true });
   const coverage = observedControlCoverageStatus(verified.controlCoverage, { requireScreens: true });
-  requireFact(coverage.ready, `observed controls are incomplete: ${coverage.reason}`);
+  requireFact(coverage.ready, `observed controls are incomplete: ${coverage.reason}${coverage.controls.length ? ` (${coverage.controls.slice(0, 8).join(', ')})` : ''}`);
   requireFact(Array.isArray(original.evidence) && original.evidence.length > 0 && Array.isArray(recapture.evidence) && recapture.evidence.length === original.evidence.length, 'screen coverage changed');
   const ids = new Set();
   for (const screen of original.evidence) {

@@ -290,7 +290,48 @@ if (demoSource) {
       journeys.push({ ...record, screenshot: fs.existsSync(screenshot) ? { path: path.relative(runDir, screenshot), sha256: fileHash(screenshot) } : null, dom: { path: path.relative(runDir, domFile), sha256: fileHash(domFile) } });
     }
   } finally { call(session, artifactDir, ['close'], runDir); }
-  interactiveDemo = { kind: 'interactive-ui-prototype', url: baseUrl, contractHash: demoSource.contractHash, sourceManifestHash: demoSource.sourceManifestHash, journeys, status: journeys.length === demoSource.contract.journeys.length && journeys.every(item => item.status === 'passed' && item.screenshot && item.dom) ? 'passed' : 'failed' };
+  // Old contracts may cover a shared control on only one of several routes.
+  // Probe the exact approved transitions on the additional recorded screens;
+  // failed probes never count as coverage and do not alter the approved contract.
+  const supplementalJourneys = [];
+  if (legacyRecapture) {
+    const routes = [...new Set(spec.screens.map(screen => screen.route))];
+    const transitions = demoSource.contract.journeys.flatMap(journey => journey.steps.map((step, index) => ({ journey, step, index })));
+    if (routes.length * transitions.length * (1 + 2 * transitions.length) > 20000) die('legacy supplemental candidate planning limit exceeded');
+    const matchingProbe = (a, b) => a.selector === b.selector && a.property === b.property && a.attribute === b.attribute && a.equals === b.equals;
+    const candidates = routes.flatMap(route => transitions.flatMap(item => [
+      { route, ...item },
+      ...[...transitions].sort((a, b) => Number(matchingProbe(b.step.after, item.step.before)) - Number(matchingProbe(a.step.after, item.step.before))).map(prefix => ({ route, ...item, prefixes: [prefix] })),
+      ...(item.index === 1 ? transitions.map(prefix => ({ route, ...item, prefixes: [prefix, { journey: item.journey, step: item.journey.steps[0], index: 0 }] })) : [])
+    ])).filter(candidate => candidate.route !== candidate.journey.route).sort((a, b) => (a.prefixes?.length || 0) - (b.prefixes?.length || 0));
+    let attempted = 0;
+    const exercised = new Set(journeys.flatMap(journey => journey.exercisedControls || []));
+    const initialTransitions = new Set(), transitionKey = (route, step) => JSON.stringify([route, step]);
+    const routeControls = new Map(routes.map(route => [route, new Set(captured.filter(screen => screen.route === route).flatMap(screen => (screen.controlInventory?.observedControls || []).map(control => control.key)))]));
+    const extraSession = `apex-legacy-extra-${crypto.createHash('sha1').update(runDir).digest('hex').slice(0, 12)}`;
+    const extraOpen = call(extraSession, artifactDir, ['open', 'about:blank'], runDir);
+    try {
+      for (const [number, candidate] of candidates.entries()) {
+        if ([...(routeControls.get(candidate.route) || [])].every(key => exercised.has(key))) continue;
+        if (candidate.prefixes?.length && !initialTransitions.has(transitionKey(candidate.route, candidate.prefixes[0].step))) continue;
+        const simpleId = /^#([A-Za-z][\w-]*)$/.exec(candidate.step.selector);
+        if (simpleId && exercised.has(`route:${encodeURIComponent(candidate.route)}|id:${encodeURIComponent(simpleId[1])}`)) continue;
+        if (attempted++ >= 200) break;
+        const id = `supplement-${number}`, screenshot = path.join(artifactDir, `journey-${id}.png`);
+        const journey = { ...candidate.journey, id, route: candidate.route, steps: [...(candidate.prefixes || []).map(prefix => prefix.step), candidate.step] };
+        const probe = extraOpen.ok ? call(extraSession, artifactDir, ['run-code', journeyCode({ journey, url: baseUrl, notice: demoSource.contract.notice, screenshotPath: screenshot, controlInventoryLimit })], runDir, 2000000) : extraOpen;
+        const observed = resultValueFrom(probe.output);
+        if (!probe.ok || observed?.status !== 'passed' || typeof observed.html !== 'string' || !fs.existsSync(screenshot)) continue;
+        const { html, ...record } = observed, domFile = path.join(artifactDir, `journey-${id}.dom.html`);
+        fs.writeFileSync(domFile, html);
+        initialTransitions.add(transitionKey(candidate.route, candidate.prefixes?.[0]?.step || candidate.step));
+        for (const key of record.exercisedControls || []) exercised.add(key);
+        for (const control of record.observedControls || []) routeControls.get(candidate.route)?.add(control.key);
+        supplementalJourneys.push({ ...record, originalJourneyId: candidate.journey.id, originalStepIndex: candidate.index, ...(candidate.prefixes ? { prefixes: candidate.prefixes.map(prefix => ({ journeyId: prefix.journey.id, stepIndex: prefix.index })) } : {}), screenshot: { path: path.relative(runDir, screenshot), sha256: fileHash(screenshot) }, dom: { path: path.relative(runDir, domFile), sha256: fileHash(domFile) } });
+      }
+    } finally { call(extraSession, artifactDir, ['close'], runDir); }
+  }
+  interactiveDemo = { kind: 'interactive-ui-prototype', url: baseUrl, contractHash: demoSource.contractHash, sourceManifestHash: demoSource.sourceManifestHash, journeys, ...(legacyRecapture ? { supplementalJourneys } : {}), status: journeys.length === demoSource.contract.journeys.length && journeys.every(item => item.status === 'passed' && item.screenshot && item.dom) ? 'passed' : 'failed' };
 }
 let formalInteractions = null;
 if (captureAction === 'verify' && spec.formalJourneys !== undefined) {

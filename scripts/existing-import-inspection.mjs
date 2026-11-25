@@ -155,7 +155,7 @@ export function unresolvedFailureSummary(stderr) {
 
 // This establishes only that the unverified inspection still matches its
 // bound inputs. It never accepts an exception or proves runtime coverage.
-export function currentImportInspection(runDir, projectRoot, reference, { allowedSourceChanges = new Set() } = {}) {
+export function currentImportInspection(runDir, projectRoot, reference, { allowedSourceChanges = new Set(), allowLegacySnapshot = false } = {}) {
   try {
     const root = fs.realpathSync(runDir), project = fs.realpathSync(projectRoot);
     if (typeof reference !== 'string' || !reference || path.isAbsolute(reference)) throw new Error('inspection reference is invalid');
@@ -166,6 +166,14 @@ export function currentImportInspection(runDir, projectRoot, reference, { allowe
     if (state.artifacts?.unresolvedImportInspection !== reference) throw new Error('inspection is not the current Run artifact');
     if (inspection.schemaVersion !== '1.0' || inspection.status !== 'unverified' || inspection.scanner !== 'literal-relative-script-v5' || inspection.observationDrift !== 'no-drift-detected') throw new Error('inspection is invalid or recorded drift');
     if (fs.realpathSync(inspection.projectRoot) !== project) throw new Error('inspection belongs to another project');
+    const snapshotMode = inspection.sourceMode === 'legacy-frozen-snapshot';
+    if (snapshotMode) {
+      if (!allowLegacySnapshot || state.gates?.gate2?.status !== 'passed' || !state.locks?.implementationAllowed) throw new Error('legacy snapshot inspection is not authorized for this phase');
+      for (const [key, artifact] of [['reference', 'codeReference'], ['scope', 'changeScope'], ['implementationMap', 'implementationMap']]) {
+        const binding = inspection.legacySnapshot?.[key];
+        if (!binding || binding.path !== state.artifacts?.[artifact] || `sha256:${digest(fs.readFileSync(safePath(root, binding.path)))}` !== binding.sha256) throw new Error('legacy snapshot binding changed');
+      }
+    } else if (inspection.sourceMode !== undefined || inspection.legacySnapshot !== undefined) throw new Error('inspection source mode is invalid');
     const revision = requirementRevisionState(root);
     if (revision.startsWith('unavailable:') || inspection.requirementRevision?.observed !== revision || inspection.requirementRevision?.authorized !== revision) throw new Error('requirement revision record changed or is unavailable');
     const scope = inspection.scope, scopeReference = scope?.inputReference;
@@ -173,19 +181,20 @@ export function currentImportInspection(runDir, projectRoot, reference, { allowe
     const scopeFile = fs.realpathSync(path.resolve(root, scopeReference));
     if (!scopeFile.startsWith(`${root}${path.sep}`) || !fs.statSync(scopeFile).isFile()) throw new Error('scope input is outside the Run');
     const scopeHash = `sha256:${digest(fs.readFileSync(scopeFile))}`;
-    if (scope.inputSha256 !== scopeHash || scope.authorizedInputSha256 !== scopeHash || !controlledOutput(root, reference, ['existing-code-reference.mjs'], [scopeReference], ['collect_existing_baseline'])) throw new Error('inspection lacks current controlled scope and receipt binding');
+    if (scope.inputSha256 !== scopeHash || scope.authorizedInputSha256 !== scopeHash || !controlledOutput(root, reference, ['existing-code-reference.mjs'], [scopeReference], [snapshotMode ? 'verify' : 'collect_existing_baseline'])) throw new Error('inspection lacks current controlled scope and receipt binding');
     if (!Array.isArray(inspection.sourceObservations) || !inspection.sourceObservations.length || inspection.sourceObservations.length > 10000 || !Array.isArray(inspection.configurationObservations) || !Array.isArray(inspection.unresolvedImports) || inspection.unresolvedImports.length > 10000) throw new Error('inspection observations are invalid');
     if (!(allowedSourceChanges instanceof Set)) throw new Error('allowed source changes are invalid');
-    const frozen = allowedSourceChanges.size ? JSON.parse(fs.readFileSync(safePath(root, state.artifacts?.codeReference), 'utf8')) : null;
+    const frozen = allowedSourceChanges.size || snapshotMode ? JSON.parse(fs.readFileSync(safePath(root, state.artifacts?.codeReference), 'utf8')) : null;
     const frozenFiles = new Map((frozen?.files || []).map(item => [item.path, item]));
     const sources = new Map();
     for (const item of inspection.sourceObservations) {
       const file = safePath(path.resolve(projectRoot), item?.path), real = fs.realpathSync(file);
       if (sources.has(item.path) || !real.startsWith(`${project}${path.sep}`) || !fs.statSync(real).isFile() || !/^sha256:[a-f0-9]{64}$/.test(item.sha256 || '')) throw new Error('inspected source changed or is invalid');
-      if (allowedSourceChanges.has(item.path)) {
+      if (allowedSourceChanges.has(item.path) || snapshotMode) {
         const frozenItem = frozenFiles.get(item.path), copy = frozenItem && fs.realpathSync(safePath(root, frozenItem.copyPath));
         if (!frozenItem || frozenItem.sha256 !== item.sha256 || !copy.startsWith(`${root}${path.sep}`) || `sha256:${digest(fs.readFileSync(copy))}` !== item.sha256) throw new Error('approved source change has no matching immutable original');
-      } else if (`sha256:${digest(fs.readFileSync(real))}` !== item.sha256) throw new Error('inspected source changed or is invalid');
+      }
+      if (!allowedSourceChanges.has(item.path) && `sha256:${digest(fs.readFileSync(real))}` !== item.sha256) throw new Error('inspected source changed or is invalid');
       sources.set(item.path, item.sha256);
     }
     for (const item of inspection.configurationObservations) if (!Array.isArray(item?.sha256Versions) || item.sha256Versions.length !== 1 || sources.get(item.path) !== item.sha256Versions[0]) throw new Error('inspected configuration is inconsistent');

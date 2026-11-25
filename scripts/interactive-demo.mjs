@@ -88,7 +88,7 @@ export function interactionSource(runDir) {
   return { contract, contractHash: objectHash(contract), sourceManifestHash: demoHash(fs.readFileSync(manifestFile)), requireResourceObservation: state.roleChain?.confirmationModel === 'two-confirmations' };
 }
 
-export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLocation = false } = {}) {
+export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLocation = false, allowSupplemental = false } = {}) {
   const source = interactionSource(runDir), evidence = capture?.interactiveDemo;
   assert(capture?.status === 'passed' && evidence?.status === 'passed', 'passed real-browser interaction evidence is required');
   assert(evidence.contractHash === source.contractHash && evidence.sourceManifestHash === source.sourceManifestHash, 'interaction evidence is stale for the current source/contract');
@@ -112,11 +112,26 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
     });
     for (const ref of [actual.screenshot, actual.dom]) assert(ref && demoHash(fs.readFileSync(localFile(runDir, ref.path))) === ref.sha256, `missing or changed browser artifact: ${expected.id}`);
   }
+  const supplemental = allowSupplemental ? (evidence.supplementalJourneys || []) : [];
+  assert(Array.isArray(supplemental) && supplemental.length <= 200, 'invalid supplemental journeys');
+  const screenRoutes = new Set((capture.evidence || []).map(screen => screen.route));
+  for (const actual of supplemental) {
+    const original = source.contract.journeys.find(item => item.id === actual.originalJourneyId), step = original?.steps?.[actual.originalStepIndex];
+    const route = actual.url && new URL(actual.url).pathname + new URL(actual.url).search + new URL(actual.url).hash;
+    assert(step && screenRoutes.has(route) && actual.url === new URL(route, url).href && actual.status === 'passed' && actual.noticeVisible === true && Array.isArray(actual.blockedRequests) && !actual.blockedRequests.length && Array.isArray(actual.failedResources) && !actual.failedResources.length && new URL(actual.finalUrl).origin === new URL(url).origin, 'invalid supplemental journey location or resources');
+    assert(actual.prefixes === undefined || (Array.isArray(actual.prefixes) && actual.prefixes.length <= 2), 'invalid supplemental prefix count');
+    const prefixes = (actual.prefixes || []).map(ref => source.contract.journeys.find(item => item.id === ref.journeyId)?.steps?.[ref.stepIndex]);
+    assert(prefixes.every(Boolean), 'supplemental prefix is not an approved transition');
+    const expectedSteps = [...prefixes, step];
+    assert(Array.isArray(actual.steps) && actual.steps.length === expectedSteps.length && expectedSteps.every((expected, index) => { const observed = actual.steps[index]; return observed?.passed === true && observed.action === expected.action && observed.selector === expected.selector && observed.before === expected.before.equals && observed.after === expected.after.equals; }), 'supplemental journey differs from approved transition');
+    for (const ref of [actual.screenshot, actual.dom]) assert(ref && demoHash(fs.readFileSync(localFile(runDir, ref.path))) === ref.sha256, 'supplemental browser artifact changed');
+    assert(actual.controlInventoryVersion === '1.2' && Array.isArray(actual.observedControls) && Array.isArray(actual.exercisedControls) && Array.isArray(actual.controlIdentityConflicts) && typeof actual.controlInventoryTruncated === 'boolean', 'supplemental inventory missing');
+  }
   const testedActions = source.contract.journeys.flatMap(journey => journey.steps.map(step => ({ journeyId: journey.id, selector: step.selector, action: step.action })));
   const inventoryAvailable = evidence.journeys.every(journey => journey.controlInventoryVersion === '1.2' && Array.isArray(journey.observedControls) && Array.isArray(journey.exercisedControls) && Array.isArray(journey.controlIdentityConflicts) && typeof journey.controlInventoryTruncated === 'boolean');
   const observed = new Map(), exercised = new Set(), identityConflicts = new Set();
   const addObserved = control => { assert(nonempty(control?.key), 'invalid observed control identity'); const old = observed.get(control.key); if (old && ['tag', 'role', 'type'].some(field => (old[field] ?? null) !== (control[field] ?? null))) identityConflicts.add(control.key); observed.set(control.key, control); };
-  if (inventoryAvailable) for (const journey of evidence.journeys) {
+  if (inventoryAvailable) for (const journey of [...evidence.journeys, ...supplemental]) {
     for (const control of journey.observedControls) addObserved(control);
     for (const key of journey.controlIdentityConflicts) { assert(nonempty(key), 'invalid control identity conflict'); identityConflicts.add(key); }
     for (const key of journey.exercisedControls) { assert(nonempty(key), 'invalid exercised control identity'); exercised.add(key); }
@@ -125,7 +140,7 @@ export function verifyDemoInteractions(runDir, capture, url, { requireJourneyLoc
   if (source.requireResourceObservation) for (const screen of screens) assert(screen.resourceObservation?.status === 'passed' && screen.resourceObservation.url === screen.url && Array.isArray(screen.resourceObservation.failedResources) && screen.resourceObservation.failedResources.length === 0 && Array.isArray(screen.resourceObservation.blockedRequests) && screen.resourceObservation.blockedRequests.length === 0, `screen has missing or failed browser resource observations: ${screen.id || '<unknown>'}`);
   const screenInventoryAvailable = screens.length > 0 && screens.every(screen => screen.controlInventory?.version === '1.2' && screen.controlInventory.status === 'captured' && Array.isArray(screen.controlInventory.observedControls) && Array.isArray(screen.controlInventory.identityConflicts) && typeof screen.controlInventory.truncated === 'boolean' && screen.controlInventory.url === screen.url && screen.controlInventory.viewport === screen.viewport);
   if (inventoryAvailable && screenInventoryAvailable) for (const screen of screens) { for (const control of screen.controlInventory.observedControls) addObserved(control); for (const key of screen.controlInventory.identityConflicts) { assert(nonempty(key), 'invalid control identity conflict'); identityConflicts.add(key); } }
-  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: screenInventoryAvailable ? 'observed-screens-and-journeys' : 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), identityConflicts: [...identityConflicts], sharedControlReviews: source.contract.sharedControlReviews || [], truncated: evidence.journeys.some(journey => journey.controlInventoryTruncated) || (screenInventoryAvailable && screens.some(screen => screen.controlInventory.truncated)), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
+  return { kind: 'interactive-ui-prototype', dataMode: 'mock', contractHash: source.contractHash, journeyCount: evidence.journeys.length, controlCoverage: inventoryAvailable ? { scope: screenInventoryAvailable ? 'observed-screens-and-journeys' : 'observed-journey-states-only', testedActions, observedControls: [...observed.values()], exercisedControls: [...exercised], untestedControls: [...observed.values()].filter(control => !exercised.has(control.key)), identityConflicts: [...identityConflicts], sharedControlReviews: source.contract.sharedControlReviews || [], truncated: [...evidence.journeys, ...supplemental].some(journey => journey.controlInventoryTruncated) || (screenInventoryAvailable && screens.some(screen => screen.controlInventory.truncated)), note: 'Inventory recognizes native buttons, links and form fields and selected ARIA roles; shared-control equivalence requires professional judgment. Other custom controls, hidden or unvisited states and semantic correctness are not proven.' } : { scope: 'declared-journeys-only', testedActions, otherVisibleControls: 'not-inventoried' } };
 }
 
 // This function is serialized into Playwright CLI run-code. It has no closure

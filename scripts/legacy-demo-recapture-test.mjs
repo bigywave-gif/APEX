@@ -27,7 +27,24 @@ try {
   reject(value => { value.interactiveDemo.sourceManifestHash = 'sha256:changed'; }, old);
   reject(value => { value.evidence[0].domSha256 = 'sha256:changed'; }, old);
   reject(value => { value.evidence.push(value.evidence[0]); });
+  // Synthetic checks ensure supplemental coverage is tied to an approved
+  // transition; real browser behavior is covered by the upgrade integration.
+  const withExtra = structuredClone(next), key = 'route:%2F|id:increment';
+  withExtra.evidence[0].controlInventory.observedControls.push({ key, tag: 'button', role: null, type: null });
+  assert.throws(() => validateLegacyDemoRecapture(root, old, withExtra));
+  withExtra.interactiveDemo.supplementalJourneys = [{ ...structuredClone(withExtra.interactiveDemo.journeys[0]), id: 'supplement-0', originalJourneyId: 'add', originalStepIndex: 0, observedControls: [{ key, tag: 'button', role: null, type: null }], exercisedControls: [key] }];
+  assert.equal(validateLegacyDemoRecapture(root, old, withExtra).status, 'compatible');
+  const prefixed = structuredClone(withExtra), extra = prefixed.interactiveDemo.supplementalJourneys[0];
+  extra.originalJourneyId = 'reset'; extra.originalStepIndex = 1; extra.prefixes = [{ journeyId: 'add', stepIndex: 0 }];
+  extra.steps = structuredClone(prefixed.interactiveDemo.journeys[1].steps);
+  assert.equal(validateLegacyDemoRecapture(root, old, prefixed).status, 'compatible');
+  extra.prefixes[0].stepIndex = 99;
+  assert.throws(() => validateLegacyDemoRecapture(root, old, prefixed));
+  for (const mutate of [v => { v.originalStepIndex = 99; }, v => { v.steps[0].after = 'wrong'; }, v => { v.url = 'http://example.com/'; }, v => { v.failedResources.push({path:'/x',status:404}); }, v => { v.screenshot.sha256 = 'sha256:changed'; }]) {
+    const altered = structuredClone(withExtra); mutate(altered.interactiveDemo.supplementalJourneys[0]);
+    assert.throws(() => validateLegacyDemoRecapture(root, old, altered));
+  }
   fs.appendFileSync(path.join(root, proof.path), 'tampered');
   assert.throws(() => validateLegacyDemoRecapture(root, old, next));
-  console.log(JSON.stringify({ status: 'passed', checks: 11, note: 'Synthetic content checks only; no browser observation or authorization is asserted.' }));
+  console.log(JSON.stringify({ status: 'passed', checks: 20, note: 'Synthetic content checks only; no browser observation or authorization is asserted.' }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

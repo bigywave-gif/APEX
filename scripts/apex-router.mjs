@@ -2,7 +2,7 @@
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
 import { observeLocalListener } from './local-listener-observation.mjs';
 import { existingRoleContext } from './existing-role-context.mjs';
-import { legacyExistingInspection } from './legacy-existing-inspection.mjs';
+import { legacyExistingInspection, legacyExistingSnapshotInputs } from './legacy-existing-inspection.mjs';
 import { controlledOutput, ledgerBoundOutput, declaredVerificationCommand } from './verification-policy.mjs';
 import { qualityVerificationPending } from './quality-workflow.mjs';
 import { industryReviewFailures } from './industry-review-progress.mjs';
@@ -2296,6 +2296,24 @@ function automaticWorkStep(state, runDir, action) {
     if (!runFile('designCandidates')) return step('record-selected-runtime-design-candidate', '登记已确认方案的运行时候选证据', ['design-candidates.json'], '内部将视觉方案中的已选候选与其真实运行时截图、策略哈希和取舍依据写入 design-candidates.json，再调用 experience-evaluator.mjs candidates；禁止生成虚假的替代效果图或要求用户再次确认视觉。');
   }
   if (action === 'verify') {
+    if (state.track === 'existing' && usesCombinedPlan(state) && state.gates?.gate2?.status === 'passed') {
+      const reference = artifactFile(runDir, state.artifacts?.codeReference);
+      let legacy = false;
+      try { legacy = read(reference).importInspection !== 'literal-relative-script-v5'; } catch {}
+      if (legacy) {
+        const inputs = legacyExistingSnapshotInputs(runDir, state);
+        const supplement = inputs.ready && legacyExistingInspection(runDir, state, { allowedSourceChanges: new Set(inputs.allowedTargets) });
+        if (!supplement?.ready) {
+          const running = operationRecords(runDir).some(item => item.receipt?.status === 'running' && item.receipt.action === 'verify' && item.receipt.script === 'existing-code-reference.mjs' && item.receipt.prebaselineContext?.command === 'inspect-legacy-snapshot' && item.receipt.authorizationRef !== process.env.APEX_ROUTER_AUTHORIZATION_REF);
+          if (running) return step('legacy-snapshot-inspection-wait', '等待正在运行的旧版快照检查', [], '先检查现有受控操作与进程；不得并发重复扫描。');
+          if (!inputs.ready || state.artifacts?.unresolvedImportInspection) return { ...step('legacy-snapshot-inspection-blocked', '核对旧版实施前依赖证据', [], '保留已确认方案和原始快照，核对失效或未解决的依赖证据，不得重复扫描或放行。'), legacyBlock: { kind: 'evidence-blocked', category: 'legacy-baseline-unverified', observedError: inputs.reason || supplement?.reason || 'legacy snapshot inspection is unavailable', retryPolicy: 'reconcile original source and controlled evidence before retrying', changed: false } };
+          const scopeValue = { routes: inputs.routes, codeEntrypoints: inputs.entrypoints }, scopeRef = `legacy-snapshot-inspection-scope-${sha(JSON.stringify(scopeValue)).slice(0, 20)}.json`, scopeFile = path.join(runDir, scopeRef);
+          let scopeExists = false; try { fs.lstatSync(scopeFile); scopeExists = true; } catch (error) { if (error.code !== 'ENOENT') scopeExists = true; }
+          if (scopeExists) { try { if (!artifactFile(runDir, scopeRef) || JSON.stringify(read(scopeFile)) !== JSON.stringify(scopeValue)) throw new Error('scope differs'); } catch { return { ...step('legacy-snapshot-inspection-blocked', '核对旧版实施前依赖范围', [], '已存在的范围输入不一致，保留现有文件并核对，不得覆盖。'), legacyBlock: { kind: 'evidence-blocked', category: 'legacy-baseline-unverified', observedError: 'legacy snapshot inspection scope input is inconsistent', retryPolicy: 'reconcile the existing scope input without overwriting it', changed: false } }; } }
+          return { ...step('inspect-legacy-existing-snapshot', '检查旧版已确认源码快照的依赖', ['inspections/imports-*.json'], `按原冻结范围创建 Run 内 ${scopeRef}，以 verify 调用 existing-code-reference.mjs inspect-legacy-snapshot；不修改原确认或正式代码。`), legacyInspectionScope: { path: scopeRef, ...scopeValue }, legacySnapshotBinding: { reference: inputs.reference, scope: inputs.scope, implementationMap: inputs.implementationMap } };
+        }
+      }
+    }
     if (usesCombinedPlan(state)) {
       try {
         const strategyFile = artifactFile(runDir, state.artifacts?.experienceStrategy);
