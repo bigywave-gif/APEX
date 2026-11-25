@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-25T06:09:18.441Z",
+  "generatedAt": "2026-11-25T06:27:33.118Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -172,8 +172,8 @@
     "scripts/prebaseline-batch-runtime-test.mjs": "4be71eb680eaea577a32593e3e5fae29b9542ba8ad9db0658442038d99404300",
     "scripts/prebaseline-import-build.mjs": "d230f5d641128560e9bf4698a9bedbf7aff0027e697614df984ae4acffcfe1fb",
     "scripts/prebaseline-import-review.mjs": "acfc0adc66d2cd606ba072b453a1739ebb426f1d9b89ca1fdd3f5da1de6f647f",
-    "scripts/prebaseline-import-routing-test.mjs": "31b847e9dc7933be355427e93a826882a20eecdb280835ad62e8988e01b58166",
-    "scripts/prebaseline-import-runtime.mjs": "c97f71180ece5e5eaadedf186686cb319268f541c1a03401582745290644ba39",
+    "scripts/prebaseline-import-routing-test.mjs": "36aadf44f65820e9fd84fd4cdb941c6d7f45b3b29580108d14a055fa671a50ac",
+    "scripts/prebaseline-import-runtime.mjs": "6bbc3d9c4495535c26c86ac9bc5c22b02902bf26f9ca99f3b0aab4a5085aee56",
     "scripts/prebaseline-review-batches-test.mjs": "73e75590d34928361281272dac94a9dbc5b68ca35f88ff92fd3c84042e1c1eab",
     "scripts/prebaseline-runtime-probe.mjs": "1ba65ca06d719668bc2e34af0d462443b4641614289c1d229757ef1691c8cb59",
     "scripts/preflight-contract-test.mjs": "5acebc66bf723777a7e0b0f3acf9af89c6ef9c9302a25b92b9cb2d1bd296a228",

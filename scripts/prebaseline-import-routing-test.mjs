@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -58,10 +59,32 @@ try {
   assert.equal(status().currentStep.id, 'prebaseline-runtime-observe', 'candidate judgments require independent observations');
   assert.equal(status().blockingOperation, null);
   if (process.env.APEX_TEST_PREBASELINE_BROWSER === '1') {
-    const serverCode = `const http=require('http'),fs=require('fs'),path=require('path');const root=process.argv[1],broken=process.argv[2]==='1',different=process.argv[3]==='1';http.createServer((req,res)=>{if(req.method==='POST'){fs.writeFileSync(path.join(root,'unexpected-post.txt'),'write');res.end('written');return}if(req.url==='/main.js'&&broken){res.writeHead(404);res.end('missing');return}if(req.url==='/main.js'&&different){res.setHeader('content-type','text/javascript');res.end('console.log("different source")');return}const file=req.url==='/main.js'?'main.js':'index.html';res.setHeader('content-type',file.endsWith('.js')?'text/javascript':'text/html');res.end(fs.readFileSync(path.join(root,file)))}).listen(0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port+'/')});`;
-    const server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_BROKEN || '0', process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE || '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const serverCode = `const http=require('http'),fs=require('fs'),path=require('path');const root=process.argv[1],broken=process.argv[2]==='1',different=process.argv[3]==='1';http.createServer((req,res)=>{if(req.method==='POST'){fs.writeFileSync(path.join(root,'unexpected-post.txt'),'write');res.end('written');return}if(req.url==='/main.js'&&broken){res.writeHead(404);res.end('missing');return}if(req.url==='/main.js'&&different){res.setHeader('content-type','text/javascript');res.end('console.log("different source")');return}if(req.url==='/main.js'&&process.argv[4]==='1'){fs.writeFileSync(path.join(root,'request-started'),'yes');setTimeout(()=>res.end(fs.readFileSync(path.join(root,'main.js'))),15000);return}const file=req.url==='/main.js'?'main.js':'index.html';res.setHeader('content-type',file.endsWith('.js')?'text/javascript':'text/html');res.end(fs.readFileSync(path.join(root,file)))}).listen(0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port+'/')});`;
+    const server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_BROKEN || '0', process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE || '0', process.env.APEX_TEST_PREBASELINE_CANCEL || '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       const url = await new Promise((resolve, reject) => { let value = ''; server.stdout.on('data', chunk => { value += chunk; if (value.includes('\n')) resolve(value.trim()); }); server.on('error', reject); server.on('exit', code => reject(new Error(`fixture server exited: ${code}`))); });
+      if (process.env.APEX_TEST_PREBASELINE_CANCEL === '1') {
+        const auth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
+        const child = spawn(process.execPath, [path.join(core, 'scripts/apex-action.mjs'), 'run', project, run, session, auth.authorizationRef, 'collect_existing_baseline', 'prebaseline-import-runtime.mjs', 'observe', dir, url], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const done = new Promise(resolve => child.on('close', (code, signal) => resolve({ code, signal })));
+        const deadline = Date.now() + 30000;
+        while (!fs.existsSync(path.join(project, 'request-started')) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+        assert.ok(fs.existsSync(path.join(project, 'request-started')), 'browser must reach the delayed response before cancellation');
+        call('apex-router.mjs', ['cancel', project, run, session, '取消当前执行']);
+        const result = await Promise.race([done, new Promise((_, reject) => setTimeout(() => reject(new Error('cancelled browser observation did not stop')), 15000))]);
+        assert.notEqual(result.code, 0);
+        if (process.platform === 'darwin') {
+          const browserSession = `apex-prebaseline-${crypto.createHash('sha1').update(fs.realpathSync(dir)).digest('hex').slice(0, 12)}`;
+          const daemonPids = () => spawnSync('/bin/ps', ['-A', '-o', 'pid=,command='], { encoding: 'utf8' }).stdout.split('\n').filter(line => line.includes('cliDaemon.js') && line.includes(browserSession)).map(line => Number(line.trim().split(/\s+/)[0]));
+          const stopDeadline = Date.now() + 35000;
+          while (daemonPids().length && Date.now() < stopDeadline) await new Promise(resolve => setTimeout(resolve, 200));
+          const remaining = daemonPids();
+          for (const pid of remaining) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+          assert.deepEqual(remaining, [], 'cancelled observation must close its browser daemon');
+        }
+        const evidenceDir = path.join(dir, 'evidence/prebaseline-runtime');
+        assert.ok(!fs.existsSync(evidenceDir) || !fs.readdirSync(evidenceDir).some(name => name.endsWith('.json')), 'cancelled observation must not produce evidence');
+      } else {
       const observed = action('prebaseline-import-runtime.mjs', ['observe', dir, url]);
       assert.equal(observed.status, 'observed'); assert.equal(observed.permitsBaseline, false);
       const evidence = JSON.parse(fs.readFileSync(observed.observation)), sourceResult = evidence.sources.find(item => item.source === 'main.js');
@@ -96,6 +119,7 @@ try {
       assert.equal(status().blockingOperation.professionalReview.runtimeObservation.status, 'observed-not-authorized');
       try { fs.appendFileSync(source, '\n// source changed\n'); assert.equal(status()?.blockingOperation?.professionalReview?.runtimeObservation, undefined); }
       finally { fs.writeFileSync(source, original); }
+      }
     } finally { server.kill('SIGTERM'); }
   }
   assert.equal(fs.existsSync(path.join(dir, 'code-reference.json')), false);

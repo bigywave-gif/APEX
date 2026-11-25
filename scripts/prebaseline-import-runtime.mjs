@@ -8,10 +8,11 @@ import { canonicalApexRoot, npmCacheRoot, playwrightBridge } from './apex-paths.
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { prebaselineObservationBinding } from './prebaseline-import-review.mjs';
 import { prebaselineRuntimeProbeCode } from './prebaseline-runtime-probe.mjs';
+import { runControlledSubprocess } from './controlled-subprocess.mjs';
 
 const apex = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const [command, runArg, originArg] = process.argv.slice(2);
-const die = message => { console.error(`Prebaseline runtime observation failed: ${message}`); process.exit(1); };
+const die = message => { throw new Error(`Prebaseline runtime observation failed: ${message}`); };
 const sha = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 const parse = output => { const match = output.match(/### Result\s*\n([\s\S]*?)\n### /); if (!match) return null; try { let value = JSON.parse(match[1]); return typeof value === 'string' ? JSON.parse(value) : value; } catch { return null; } };
 if (command !== 'observe' || !runArg || !originArg) die('usage: observe <run-dir> <loopback-http-origin>');
@@ -38,17 +39,47 @@ const cached = (() => { try { return fs.readdirSync(npmCacheRoot).map(name => pa
 if (!cached && !fs.existsSync(playwrightBridge)) die('Playwright bridge is unavailable');
 const session = `apex-prebaseline-${crypto.createHash('sha1').update(root).digest('hex').slice(0, 12)}`;
 const daemon = path.join(root, 'cache', 'playwright-daemon'); fs.mkdirSync(daemon, { recursive: true });
-const invoke = args => spawnSync(cached ? process.execPath : playwrightBridge, cached ? [cached, '--session', session, ...args] : ['--session', session, ...args], { cwd: root, env: { ...process.env, PWTEST_DAEMON_SESSION_DIR: daemon }, encoding: 'utf8', timeout: 90000, maxBuffer: 8 * 1024 * 1024 });
-const results = [];
+const executable = cached ? process.execPath : playwrightBridge;
+const argumentsFor = args => cached ? [cached, '--session', session, ...args] : ['--session', session, ...args];
+const env = { ...process.env, PWTEST_DAEMON_SESSION_DIR: daemon };
+process.chdir(root);
+let childGroup = null, daemonPid = null, interrupted = false;
+const stopDaemon = () => {
+  if (!Number.isSafeInteger(daemonPid) || daemonPid < 2 || process.platform === 'win32') return;
+  const inspected = spawnSync('/bin/ps', ['-p', String(daemonPid), '-o', 'command='], { encoding: 'utf8', timeout: 2000 });
+  const command = (inspected.stdout || '').trim();
+  if (inspected.status === 0 && command.includes('/playwright-core/lib/entry/cliDaemon.js ') && command.endsWith(` ${session}`)) {
+    try { process.kill(daemonPid, 'SIGTERM'); } catch {}
+  }
+};
+const forward = () => { interrupted = true; if (childGroup && process.platform !== 'win32') { try { process.kill(-childGroup, 'SIGTERM'); } catch {} } stopDaemon(); };
+process.on('SIGTERM', forward); process.on('SIGINT', forward);
+const invoke = async args => {
+  if (interrupted) die('observation interrupted');
+  const result = await runControlledSubprocess(executable, argumentsFor(args), { env, runDir: root, timeoutMs: 90000, maxBuffer: 8 * 1024 * 1024, onSpawn: identity => { childGroup = identity.processGroup; } });
+  childGroup = null;
+  if (interrupted || result.cancelled || result.error) die(interrupted || result.cancelled ? 'observation cancelled or interrupted' : `browser process failed: ${result.error.message}`);
+  return result;
+};
+const results = []; let observationFinished = false;
 try {
-  const opened = invoke(['open', 'about:blank']); if (opened.status !== 0) die('could not open browser');
+  const opened = await invoke(['open', 'about:blank']); if (opened.status !== 0) die('could not open browser');
+  const daemonMatch = (opened.stdout || '').match(new RegExp('Browser `'+session+'` opened with pid (\\d+)\\.'));
+  if (daemonMatch) daemonPid = Number(daemonMatch[1]);
   for (const route of routes) {
-    const result = invoke(['run-code', prebaselineRuntimeProbeCode({ origin: origin.href, routes: [route] })]);
+    const result = await invoke(['run-code', prebaselineRuntimeProbeCode({ origin: origin.href, routes: [route] })]);
     const observed = parse(result.stdout || '');
     if (result.status !== 0 || observed?.routes?.length !== 1 || observed.routes[0].route !== route) die(`browser observation failed for ${route}`);
     results.push(observed.routes[0]);
   }
-} finally { invoke(['close']); }
+  observationFinished = true;
+} finally {
+  process.removeListener('SIGTERM', forward); process.removeListener('SIGINT', forward);
+  // Cleanup must still run after cancellation, when the monitored subprocess
+  // helper correctly refuses to launch more work.
+  if (!observationFinished) stopDaemon();
+  spawnSync(executable, argumentsFor(['close']), { cwd: root, env, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 });
+}
 if (sha(fs.readFileSync(stateFile)) !== stateHash || !checkBinding()) die('inspection, roles, or Run state changed during browser observation');
 const matchingHashes = new Set(sources.map(item => item.sha256)), loadedByHash = new Map();
 for (const route of results) for (const item of route.responses) if (matchingHashes.has(item.sha256)) { const loaded = loadedByHash.get(item.sha256) || []; loaded.push({ route: route.route, path: item.path, resourceType: item.resourceType }); loadedByHash.set(item.sha256, loaded); }
