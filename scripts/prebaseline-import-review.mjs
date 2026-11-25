@@ -5,6 +5,36 @@ import { currentImportInspection } from './existing-import-inspection.mjs';
 
 const hash = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 export const PREBASELINE_REVIEWER_ID = 'prebaseline-codebase-onboarding-engineer';
+export const PREBASELINE_BATCH_MAX_ITEMS = 50;
+export const PREBASELINE_BATCH_MAX_BYTES = 64 * 1024;
+
+// Partition a frozen inspection without changing its ordering or dropping any
+// reference. The inspection hash and scope travel with every batch; a later
+// execution must still revalidate the source and ledger binding before use.
+export function partitionPrebaselineReviewContext(context) {
+  if (!context || typeof context.inspection !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(context.inspectionSha256 || '') || !Array.isArray(context.unresolvedImports) || !context.unresolvedImports.length || context.unresolvedImports.length > 10000) throw new Error('prebaseline batch input is invalid');
+  const entries = context.unresolvedImports;
+  const identities = new Set();
+  for (const entry of entries) {
+    if (typeof entry?.source !== 'string' || typeof entry?.reference !== 'string') throw new Error('prebaseline batch reference identity is invalid');
+    const key = JSON.stringify([entry.source, entry.reference]);
+    if (identities.has(key)) throw new Error('prebaseline batch input contains duplicate references');
+    identities.add(key);
+  }
+  const shared = { inspection: context.inspection, inspectionSha256: context.inspectionSha256, scope: context.scope, requirementRevision: context.requirementRevision };
+  const groups = [];
+  let group = [];
+  // Reserve space for the maximum possible batch index and count, so filling
+  // a group never relies on knowing how many later groups will be needed.
+  const fits = items => items.length <= PREBASELINE_BATCH_MAX_ITEMS && Buffer.byteLength(JSON.stringify({ ...shared, batch: { index: 10000, count: 10000, totalReferences: entries.length }, unresolvedImports: items })) <= PREBASELINE_BATCH_MAX_BYTES;
+  for (const entry of entries) {
+    if (fits([...group, entry])) { group.push(entry); continue; }
+    if (!group.length || !fits([entry])) throw new Error('a single prebaseline reference exceeds the bounded batch context');
+    groups.push(group); group = [entry];
+  }
+  if (group.length) groups.push(group);
+  return groups.map((items, index) => ({ ...shared, batch: { index: index + 1, count: groups.length, totalReferences: entries.length }, unresolvedImports: items }));
+}
 export function inspectionBoundaryState(runDir) {
   const directory = path.join(runDir, 'inspections');
   try {
@@ -17,7 +47,7 @@ export function inspectionBoundaryState(runDir) {
 
 // A bounded projection is the Agent's context; the full inspection stays
 // hash-bound in the ledger and is revalidated before accepting any advisory.
-export function prebaselineReviewContext(runDir, projectRoot, reference) {
+function prebaselineReviewSource(runDir, projectRoot, reference) {
   const current = currentImportInspection(runDir, projectRoot, reference);
   if (current.status !== 'current-unverified') throw new Error(`prebaseline import inspection is not current: ${current.reason || current.status}`);
   const root = fs.realpathSync(runDir), file = fs.realpathSync(path.resolve(root, reference));
@@ -26,9 +56,19 @@ export function prebaselineReviewContext(runDir, projectRoot, reference) {
   if (path.basename(file) !== `imports-${digest.slice('sha256:'.length)}.json`) throw new Error('prebaseline inspection content identity changed');
   const inspection = JSON.parse(bytes.toString('utf8'));
   if (!inspection.unresolvedImports.length) throw new Error('prebaseline import review is not needed when no unresolved references were detected');
-  if (inspection.unresolvedImports.length > 50) throw new Error('prebaseline import review exceeds 50 references; bounded batching is required');
   const context = { inspection: reference, inspectionSha256: digest, scope: inspection.scope, requirementRevision: inspection.requirementRevision, unresolvedImports: inspection.unresolvedImports };
-  if (Buffer.byteLength(JSON.stringify(context)) > 64 * 1024) throw new Error('prebaseline import review context exceeds 64 KiB; bounded batching is required');
+  return { inspection, context };
+}
+
+export function prebaselineReviewBatchPlan(runDir, projectRoot, reference) {
+  const { inspection, context } = prebaselineReviewSource(runDir, projectRoot, reference);
+  return { inspection, batches: partitionPrebaselineReviewContext(context) };
+}
+
+export function prebaselineReviewContext(runDir, projectRoot, reference) {
+  const { inspection, context } = prebaselineReviewSource(runDir, projectRoot, reference);
+  if (inspection.unresolvedImports.length > PREBASELINE_BATCH_MAX_ITEMS) throw new Error('prebaseline import review exceeds 50 references; bounded batching is required');
+  if (Buffer.byteLength(JSON.stringify(context)) > PREBASELINE_BATCH_MAX_BYTES) throw new Error('prebaseline import review context exceeds 64 KiB; bounded batching is required');
   return { inspection, context };
 }
 

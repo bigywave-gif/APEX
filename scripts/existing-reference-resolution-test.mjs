@@ -9,7 +9,7 @@ import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, 
 import { assessResourceVerification, observeResourceImages, observeResourceExemptions, observeBackgroundImages, resourceVerificationBinding, resourceImageProbeCode } from './existing-resource-runtime.mjs';
 import { unresolvedSnapshot, unresolvedFailure, unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
 import { controlledOutput } from './verification-policy.mjs';
-import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, validatePrebaselineImportReviews } from './prebaseline-import-review.mjs';
+import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews } from './prebaseline-import-review.mjs';
 import { agentRuntimeStatus } from './run-ledger.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -191,6 +191,12 @@ try {
   const largeInspection = inspectionAction(), largeReference = path.relative(dir, largeInspection.inspection);
   assert.ok(largeInspection.unresolvedCount > 50);
   assert.throws(() => prebaselineReviewContext(dir, project, largeReference), /bounded batching is required/);
+  const largePlan = prebaselineReviewBatchPlan(dir, project, largeReference);
+  assert.ok(largePlan.batches.length > 1);
+  assert.deepEqual(largePlan.batches.flatMap(batch => batch.unresolvedImports), largePlan.inspection.unresolvedImports, 'every inspected reference must appear exactly once in the batch plan');
+  assert.ok(largePlan.batches.every(batch => batch.unresolvedImports.length <= 50 && Buffer.byteLength(JSON.stringify(batch)) <= 64 * 1024));
+  fs.appendFileSync(main, '\n// batch plan becomes stale\n');
+  assert.throws(() => prebaselineReviewBatchPlan(dir, project, largeReference), /inspection is not current/, 'batch planning must reject stale source');
   assert.equal(agentRuntimeStatus(dir).jobs.filter(item => item.stage === 'prebaseline').length, 1, 'an oversized review must not silently create partial jobs');
   fs.writeFileSync(main, beforeLargeReview); assert.equal(inspectionAction().sha256, inspectionResult.sha256);
   const firstAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
