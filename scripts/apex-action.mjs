@@ -14,6 +14,7 @@ import { runControlledSubprocess } from './controlled-subprocess.mjs';
 import { runtimeStartLockAvailable } from './runtime-start-lock.mjs';
 import { recoveredRuntimeReady } from './runtime-launch-intent.mjs';
 import { unresolvedCauseChanged, currentImportInspection } from './existing-import-inspection.mjs';
+import { inspectionBoundaryState } from './prebaseline-import-review.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
@@ -280,19 +281,14 @@ if (script === 'agent-runtime.mjs' && scriptArgs[0] === 'skill') {
 }
 let inspectionBoundary;
 if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports') {
-  const directory = path.join(runDirectory, 'inspections');
-  try {
-    const stat = fs.lstatSync(directory);
-    if (stat.isSymbolicLink()) inspectionBoundary = { kind: 'symlink', target: fs.readlinkSync(directory) };
-    else if (!stat.isDirectory()) inspectionBoundary = { kind: 'non-directory' };
-    else inspectionBoundary = { kind: 'directory', links: fs.readdirSync(directory, { withFileTypes: true }).filter(item => item.isSymbolicLink()).map(item => [item.name, fs.readlinkSync(path.join(directory, item.name))]).sort((a, b) => a[0].localeCompare(b[0])) };
-  } catch (error) { inspectionBoundary = { kind: error.code === 'ENOENT' ? 'absent' : `unavailable:${error.code || 'unknown'}` }; }
+  inspectionBoundary = inspectionBoundaryState(runDirectory);
 }
 let prebaselineInspection;
-if ((script === 'role-advisory.mjs' && scriptArgs[2] === 'prebaseline') || (script === 'agent-runtime.mjs' && scriptArgs[3] === 'prebaseline')) {
+if ((script === 'role-advisory.mjs' && scriptArgs[2] === 'prebaseline') || (script === 'agent-runtime.mjs' && scriptArgs[3] === 'prebaseline') || (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports')) {
   try { const state = readRunState(runDirectory); prebaselineInspection = currentImportInspection(runDirectory, projectRoot, state.artifacts?.unresolvedImportInspection); }
   catch (error) { prebaselineInspection = { status: 'stale-or-unverified', reason: error.message }; }
 }
+const prebaselineContext = prebaselineInspection === undefined ? null : { stage: 'prebaseline', command: scriptArgs[0], inspection: prebaselineInspection.inspection || null, inspectionStatus: prebaselineInspection.status, inspectionReason: prebaselineInspection.reason || null, selectionSha256: currentRunInputHashes['advisories/prebaseline/selection.json'] || 'absent', ...(inspectionBoundary === undefined ? {} : { inspectionBoundary }) };
 const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }), ...(requiredVisualSkill === undefined ? {} : { requiredVisualSkill }), ...(optionalSkillInput === undefined ? {} : { optionalSkillInput }), ...(inspectionBoundary === undefined ? {} : { inspectionBoundary }), ...(prebaselineInspection === undefined ? {} : { prebaselineInspection }) });
 // An authorization is deliberately single-use, but a fresh authorization is
 // not evidence that the failed action now has different inputs.  Without this
@@ -308,7 +304,7 @@ if (priorFailure) {
   if (!releasedRuntimeLock && !recoveredRuntime && !changedImport) fail(`an identical controlled operation already failed or was interrupted (${priorFailure}); inspect its outcome and change the observed cause, state, or input before requesting another retry`);
 }
 const startedAt = new Date().toISOString();
-fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
+fs.writeFileSync(receiptFile, `${JSON.stringify({ schemaVersion: '3.1', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), ...(prebaselineContext ? { prebaselineContext } : {}), status: 'running', startedAt, owner: { pid: process.pid, host: os.hostname() } }, null, 2)}\n`, { flag: 'wx' });
 let localProcessIdentity = null;
 let inspectionScopeHash;
 if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-imports') {
@@ -332,7 +328,7 @@ if (execution.error?.code === 'APEX_MONITOR_UNAVAILABLE') {
   // ledger from the projection when the original ledger is unavailable.
   // The local receipt remains recoverable, but neither cancellation nor any
   // external side effect can be inferred from the missing ledger.
-  const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), outputFileHashes: {}, outputFileFingerprints: {}, status: 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut: false, exitCode: 1, stdout: execution.stdout || '', stderr: `APEX_MONITOR_UNAVAILABLE: ${execution.error.message}\nRun ledger integrity and external side effects remain unverified; inspect the original ledger before retrying.\n`, ledgerIntegrity: 'unverified', externalSideEffects: 'unverified' };
+  const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), ...(prebaselineContext ? { prebaselineContext } : {}), outputFileHashes: {}, outputFileFingerprints: {}, status: 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut: false, exitCode: 1, stdout: execution.stdout || '', stderr: `APEX_MONITOR_UNAVAILABLE: ${execution.error.message}\nRun ledger integrity and external side effects remain unverified; inspect the original ledger before retrying.\n`, ledgerIntegrity: 'unverified', externalSideEffects: 'unverified' };
   const temporary = `${receiptFile}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`);
   fs.renameSync(temporary, receiptFile);
@@ -377,7 +373,7 @@ if (succeeded) {
 }
 if (recordLateCancelledOperation(runDirectory, { authorizationRef, action, script, startedAt, finishedAt, exitCode: execution.status, stage: 'receipt-write' })) fail('the operation was cancelled before its receipt could be committed; external side effects require verification');
 const pendingRevision = action === 'recover' && script === 'apex-recover.mjs' ? pendingRevisionTransactions(runDirectory)[0] || null : null;
-const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), outputFileHashes: outputHashes, outputFileFingerprints: outputFingerprints, productionBoundary: action === 'generate_visual' ? { allowedRoot: path.join(runDirectory, 'visual-sandbox'), snapshotMode: productionBefore?.mode || null, protectedFiles: Object.keys(productionBefore?.files || {}), changedFiles: productionChangedFiles, formalProjectUnchanged: !productionBoundaryError } : null, status: succeeded ? 'succeeded' : 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut, signal: execution.signal || null, owner: { pid: process.pid, host: os.hostname() }, localProcess: localProcessIdentity, revisionTransactionId: pendingRevision?.transactionId || null, revisionReplayClaimId: pendingRevision?.replayClaimId || null, exitCode: succeeded ? 0 : (execution.status || 1), stdout: execution.stdout || '', stderr: `${execution.stderr || ''}${executionError ? `${executionError}\n` : ''}${stateReconciliationError ? `${stateReconciliationError}\n` : ''}${timedOut ? `operation exceeded controlled timeout (${executionTimeoutMs}ms)\n` : ''}${productionBoundaryError ? `${productionBoundaryError}\n` : ''}` };
+const receipt = { schemaVersion: '3.2', authorizationRef, action, script, fingerprint, operationKey, stateHash, inputDigest, inputFileHashes: currentInputHashes, runInputHashes: currentRunInputHashes, ...(optionalSkillContext ? { optionalSkillContext } : {}), ...(prebaselineContext ? { prebaselineContext } : {}), outputFileHashes: outputHashes, outputFileFingerprints: outputFingerprints, productionBoundary: action === 'generate_visual' ? { allowedRoot: path.join(runDirectory, 'visual-sandbox'), snapshotMode: productionBefore?.mode || null, protectedFiles: Object.keys(productionBefore?.files || {}), changedFiles: productionChangedFiles, formalProjectUnchanged: !productionBoundaryError } : null, status: succeeded ? 'succeeded' : 'failed', startedAt, finishedAt, durationMs: Date.parse(finishedAt) - Date.parse(startedAt), timeoutMs: executionTimeoutMs, timedOut, signal: execution.signal || null, owner: { pid: process.pid, host: os.hostname() }, localProcess: localProcessIdentity, revisionTransactionId: pendingRevision?.transactionId || null, revisionReplayClaimId: pendingRevision?.replayClaimId || null, exitCode: succeeded ? 0 : (execution.status || 1), stdout: execution.stdout || '', stderr: `${execution.stderr || ''}${executionError ? `${executionError}\n` : ''}${stateReconciliationError ? `${stateReconciliationError}\n` : ''}${timedOut ? `operation exceeded controlled timeout (${executionTimeoutMs}ms)\n` : ''}${productionBoundaryError ? `${productionBoundaryError}\n` : ''}` };
 fs.writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
 updateOperationIndex(receiptFile, receipt);
 process.stdout.write(receipt.stdout); process.stderr.write(receipt.stderr);

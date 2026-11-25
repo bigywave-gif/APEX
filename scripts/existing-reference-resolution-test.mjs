@@ -249,13 +249,13 @@ try {
   const changedAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
   const changedFailure = spawnSync(process.execPath, [path.join(core, 'scripts/apex-action.mjs'), ...captureArgs.map(arg => arg === firstAuth.authorizationRef ? changedAuth.authorizationRef : arg)], { encoding: 'utf8', timeout: 30000 });
   assert.notEqual(changedFailure.status, 0); assert.match(changedFailure.stderr, /later-unresolved/);
-  assert.equal(call('apex-router.mjs', ['status', project, run, session]).terminalResponseContract?.blockingOperation?.category, 'unresolved-local-import');
+  assert.equal(call('apex-router.mjs', ['status', project, run, session]).executionDirective?.remediatingFailure?.category, 'unresolved-local-import');
   const operationsDir = path.join(dir, 'operations');
   const failedCapture = fs.readdirSync(operationsDir).filter(name => name.endsWith('.json')).map(name => JSON.parse(fs.readFileSync(path.join(operationsDir, name), 'utf8'))).find(item => item.status === 'failed' && item.stderr?.includes('later-unresolved'));
   const fileDigest = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
   const forgedReceipt = path.join(operationsDir, 'fixture-unbound-success.json');
   fs.writeFileSync(forgedReceipt, JSON.stringify({ action: 'collect_existing_baseline', script: 'existing-code-reference.mjs', status: 'succeeded', fingerprint: failedCapture.fingerprint, finishedAt: '9999-01-01T00:00:00.000Z', outputFileHashes: { 'code-reference.json': fileDigest(path.join(dir, 'code-reference.json')), 'page-skeleton.json': fileDigest(path.join(dir, 'page-skeleton.json')) } }));
-  assert.equal(call('apex-router.mjs', ['status', project, run, session]).terminalResponseContract?.blockingOperation?.category, 'unresolved-local-import', 'an unbound success receipt cannot erase a failed capture');
+  assert.equal(call('apex-router.mjs', ['status', project, run, session]).executionDirective?.remediatingFailure?.category, 'unresolved-local-import', 'an unbound success receipt cannot erase a failed capture');
   fs.unlinkSync(forgedReceipt);
   fs.writeFileSync(main, mainBeforeFailure);
   const revertedStatus = call('apex-router.mjs', ['status', project, run, session]);

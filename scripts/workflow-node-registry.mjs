@@ -27,6 +27,8 @@ export const workflowNodes = Object.freeze({
   'capture-project-inventory': node('collect_existing_baseline', ['project-inventory.json'], actionScript('project-intake.mjs')),
   'expand-project-inventory': node('collect_existing_baseline', ['project-inventory.json'], actionScript('project-intake.mjs')),
   'freeze-code-reference': node('collect_existing_baseline', ['code-reference.json', 'page-skeleton.json'], actionScript('existing-code-reference.mjs')),
+  'inspect-unresolved-imports': node('collect_existing_baseline', ['inspections/imports-*.json'], actionScript('existing-code-reference.mjs'), { completion: 'record an unverified inspection; it cannot grant an exception or complete the baseline' }),
+  'prebaseline-operation-wait': node('collect_existing_baseline', [], { kind: 'host-controlled-implementation' }, { completion: 'observe the existing controlled operation and its process identity without starting another', stateCommit: 'wait for its receipt or reconcile an interrupted operation', retry: 'do not start another inspection or role operation while the existing outcome is unknown' }),
   'capture-existing-browser-baseline': node('collect_existing_baseline', ['evidence/existing-browser-capture.json'], actionScript('browser-capture.mjs')),
   'freeze-existing-baseline': node('collect_existing_baseline', ['existing-baseline.json'], actionScript('baseline-collector.mjs')),
   'freeze-change-scope': node('record_context', ['change-scope.json'], actionScript('contract-recorder.mjs')),
@@ -100,10 +102,11 @@ export function workflowNode(id) {
   if (workflowNodes[id]) return workflowNodes[id];
   // Role work is selected/recorded/summarized dynamically for every stage,
   // but it is still a concrete guarded node rather than host prose.
-  const role = String(id).match(/^(baseline|gate1|visual|implementation|verify)-role-(select|record|summarize|repair|rebudget|wait)$/);
+  const role = String(id).match(/^(prebaseline|baseline|gate1|visual|implementation|verify)-role-(select|record|summarize|repair|rebudget|wait)$/);
   if (role) {
-    const action = role[1] === 'baseline' ? 'collect_existing_baseline' : role[1] === 'gate1' ? 'analyze_requirement' : role[1] === 'visual' ? 'plan_visual' : role[1] === 'implementation' ? 'compile_visual_bundle' : 'verify';
+    const action = ['prebaseline', 'baseline'].includes(role[1]) ? 'collect_existing_baseline' : role[1] === 'gate1' ? 'analyze_requirement' : role[1] === 'visual' ? 'plan_visual' : role[1] === 'implementation' ? 'compile_visual_bundle' : 'verify';
     if (role[2] === 'wait') return node(action, [], actionScript('agent-runtime.mjs'), { completion: 'observe the existing job until it ends or its lease is eligible for controlled recovery', stateCommit: 'status is read-only; a finished job or controlled recovery advances the ledger', retry: 'poll the same live job without starting or cancelling another execution', failurePolicy: 'preserve uncertain execution and lease evidence' });
+    if (role[1] === 'prebaseline') return node(action, role[2] === 'select' ? ['advisories/prebaseline/selection.json'] : role[2] === 'record' ? ['advisories/prebaseline/prebaseline-codebase-onboarding-engineer.json'] : [], actionScript('role-advisory.mjs'), { completion: 'record a bounded judgment only; it cannot grant an exception or complete the baseline' });
     return node(action, [`advisories/${role[1]}/role-decision-summary.md`], actionScript('role-advisory.mjs'));
   }
   return null;

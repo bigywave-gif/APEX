@@ -5,6 +5,15 @@ import { currentImportInspection } from './existing-import-inspection.mjs';
 
 const hash = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 export const PREBASELINE_REVIEWER_ID = 'prebaseline-codebase-onboarding-engineer';
+export function inspectionBoundaryState(runDir) {
+  const directory = path.join(runDir, 'inspections');
+  try {
+    const stat = fs.lstatSync(directory);
+    if (stat.isSymbolicLink()) return { kind: 'symlink', target: fs.readlinkSync(directory) };
+    if (!stat.isDirectory()) return { kind: 'non-directory' };
+    return { kind: 'directory', links: fs.readdirSync(directory, { withFileTypes: true }).filter(item => item.isSymbolicLink()).map(item => [item.name, fs.readlinkSync(path.join(directory, item.name))]).sort((a, b) => a[0].localeCompare(b[0])) };
+  } catch (error) { return { kind: error.code === 'ENOENT' ? 'absent' : `unavailable:${error.code || 'unknown'}` }; }
+}
 
 // A bounded projection is the Agent's context; the full inspection stays
 // hash-bound in the ledger and is revalidated before accepting any advisory.

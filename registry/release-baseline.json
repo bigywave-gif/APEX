@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-25T00:31:12.836Z",
+  "generatedAt": "2026-11-25T00:51:21.390Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -65,11 +65,11 @@
     "scripts/agent-concurrency-contract-test.mjs": "086bfbb0c9e2b0a29749a45932e2ba1f3ad00fa0a0a2b914c55af588e4b70a7b",
     "scripts/agent-runtime-contract-test.mjs": "864f0e4300a07b9a922090ed6235631cb3431dd72175b9085cb8649218a51839",
     "scripts/agent-runtime.mjs": "8d0c63ae5846f82ad7305722c4854c85118eed4ebf1c953f355e32fcb64dfa85",
-    "scripts/apex-action.mjs": "738dfd4311139d513e771fc2b2a5c04db18c8e8950e62b82abd3d62a57b4ce4f",
+    "scripts/apex-action.mjs": "5c81079d1d9df40d605fbdce55b20bb3d20df75354edfac993fbfa608f788758",
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-reconcile.mjs": "b827d327e518916fa6187df1e4a1f52c8d49bdffe1bd4402e944b13ed5c5877a",
     "scripts/apex-recover.mjs": "52424517bbe1cc1677999b89c9ce686cf84fc2195992357f04671f69cafa9279",
-    "scripts/apex-router.mjs": "77d5bcf2a474fbeeb9641e8733690df0b01876a37d9f79e57b513b8e337495a7",
+    "scripts/apex-router.mjs": "1b02f146390fc622365911e8691e73e6b4c4b3de3ae810c37f270067620be35e",
     "scripts/apex-run.mjs": "46e1524c809022d0d2cb58ea2bc0db8bfe6a746f8d8b0b7f2c53b4b9e19225df",
     "scripts/apex-runtime-guard.mjs": "86f7341158c31e5566dbecaf0a3de446e7b624680d40d9586ce819441ac1e9fe",
     "scripts/apex-validate.mjs": "6a653f16b86f1f739da3295ef62da576e0a78db519f70d53a4f88638db31485b",
@@ -122,7 +122,7 @@
     "scripts/existing-baseline-browser-test.mjs": "7ae5b6b8fb1685e9755456a553eba9e1d5f75459340ff2d1ff3c63c20f83f461",
     "scripts/existing-code-reference.mjs": "84cafe418606d353acd5e4a01683b23b2807e6e7c86b9b14e7568d04688a24d6",
     "scripts/existing-import-inspection.mjs": "a9b652c92b53f0fca8098278e2da6036f78b8682ff678768a887e8f007a3232c",
-    "scripts/existing-reference-resolution-test.mjs": "0949e52f464c45dc5df4930d628c805e69a110545a7d6489e53e344b53a216f5",
+    "scripts/existing-reference-resolution-test.mjs": "b5b59d9e7f9ce66f51adac5d855348d18b59cf85e6695a44dc2bb98ec9fd46a6",
     "scripts/existing-resource-freshness.mjs": "63bcefda9f3169a5310d3cf111d6d365483d786010a4136ccf8a01523aee4004",
     "scripts/existing-resource-runtime.mjs": "f103ed456c99dc108075575bde80e9f05c7933351b0791f5d2e1c08c9f6b1438",
     "scripts/experience-evaluator.mjs": "97034f0159a68bcd3d6cbba36edd8d8d62074879659b24dd38decb77d7e78ea6",
@@ -162,7 +162,8 @@
     "scripts/operation-recovery-test.mjs": "3b2f0d36dfc8bd4deb7c0a6374944432064b086c8e97a35540cb7490fb14cdab",
     "scripts/operation-recovery.mjs": "fcc99bb456da21e942cbcb86e0b1a01a507b37b9f6f5a48b514180ade3e4e1e5",
     "scripts/portable-install-contract-test.mjs": "7909ec69b6983034413e592506a039d7e5077f36df97fd45a9f7ec544a2c7468",
-    "scripts/prebaseline-import-review.mjs": "64aeef3a9b079fd618e36c5661c02177faa9c2e4cb2180614dd5a757e2765dee",
+    "scripts/prebaseline-import-review.mjs": "7db79688fe777de1fbb9588a48f05c2c6df2247c6cddf902f79217eceb6a4dd4",
+    "scripts/prebaseline-import-routing-test.mjs": "a1e56ac5048f0a1d379b4a1eb34dcbf136445f26f196eab0c14b23f63b36f1e1",
     "scripts/preflight-contract-test.mjs": "5acebc66bf723777a7e0b0f3acf9af89c6ef9c9302a25b92b9cb2d1bd296a228",
     "scripts/preflight.mjs": "5df44889bb2d8ccc6410d3ee9535bf0305f5252e68748fbd66acd4f84f5e8701",
     "scripts/product-to-demo-browser-test.mjs": "4c1120321d1c11c530662d8374fbe7a1d3b4452a9982f6ab79942d061c13a329",
@@ -263,7 +264,7 @@
     "scripts/visual-source-contract-test.mjs": "155ed8cf073a1cb5912ae3f702ec5407a0dff30c9441d5e40fc8ac53add7570f",
     "scripts/visual-source.mjs": "964e4b89160646e78624221b12e306f1b717a32e5d90091b416dddf844bea475",
     "scripts/workflow-node-registry-contract-test.mjs": "ff397b6c0d085252048af37a485be44c52e37718541e481c59c58d46b0756785",
-    "scripts/workflow-node-registry.mjs": "215fddddc92916fc4dd107bf1f8cd0e92a1bcf2c36bf5611750ffc05d1bdd801",
+    "scripts/workflow-node-registry.mjs": "5ece0e13941f22ec48e0a40b1338b627dbc13c2f8835de4014a16a4388304ae9",
     "skills/google-design-md/SKILL.md": "7c29f433b4c28e532dfbf27d31bc15b80ef5dd21eb2e455d0f0a3122c542be24"
   }
 }

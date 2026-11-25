@@ -34,7 +34,8 @@ import { formalReviewArtifacts, hasFormalObservation, requiredFormalTasks, valid
 import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage } from './existing-resource-freshness.mjs';
-import { unresolvedCauseChanged, unresolvedFailureSummary } from './existing-import-inspection.mjs';
+import { unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
+import { PREBASELINE_REVIEWER_ID, inspectionBoundaryState, prebaselineReviewContext, validatePrebaselineImportReviews } from './prebaseline-import-review.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
@@ -1177,6 +1178,72 @@ function artifactFile(runDir, reference) {
     return file.startsWith(`${root}${path.sep}`) && fs.realpathSync(file).startsWith(`${fs.realpathSync(root)}${path.sep}`) && fs.statSync(file).isFile() ? file : null;
   } catch { return null; }
 }
+function failedImportScope(runDir, failure) {
+  try {
+    const receiptFile = artifactFile(runDir, failure.operationReceipt), operations = fs.realpathSync(path.join(runDir, 'operations'));
+    if (!receiptFile || !fs.realpathSync(receiptFile).startsWith(`${operations}${path.sep}`)) return null;
+    const receipt = read(receiptFile);
+    if (receipt.status !== 'failed' || receipt.action !== 'collect_existing_baseline' || receipt.script !== 'existing-code-reference.mjs') return null;
+    const root = fs.realpathSync(runDir), candidates = new Map();
+    for (const [reference, expected] of Object.entries(receipt.inputFileHashes || {})) {
+      const file = artifactFile(runDir, reference);
+      if (!file || fs.statSync(file).size > 1024 * 1024 || sha256File(file) !== expected) continue;
+      let input; try { input = read(file); } catch { continue; }
+      if (!Array.isArray(input.routes) || !input.routes.length || !input.routes.every(item => typeof item === 'string' && item) || !Array.isArray(input.codeEntrypoints) || !input.codeEntrypoints.length || !input.codeEntrypoints.every(item => typeof item === 'string' && item)) continue;
+      const canonical = path.relative(root, fs.realpathSync(file)).split(path.sep).join('/');
+      candidates.set(canonical, { reference: canonical, sha256: expected });
+    }
+    return candidates.size === 1 ? [...candidates.values()][0] : null;
+  } catch { return null; }
+}
+function prebaselineImportRoleState(runDir, state) {
+  try {
+    const inFlight = operationRecords(runDir).some(item => item.receipt?.action === 'collect_existing_baseline' && item.receipt?.prebaselineContext?.stage === 'prebaseline' && item.receipt.status === 'running');
+    if (inFlight) return { status: 'operation-wait' };
+    const file = path.join(runDir, 'advisories', 'prebaseline', 'selection.json');
+    if (!fs.existsSync(file)) return { status: 'select' };
+    const selection = read(file), jobId = selection.agentJobs?.[PREBASELINE_REVIEWER_ID];
+    if (typeof jobId !== 'string' || !jobId) return { status: 'repair' };
+    const job = agentRuntimeStatus(runDir, jobId).jobs[0];
+    const stale = () => ({ status: job?.status === 'running' || inFlight ? 'wait' : 'repair', jobId });
+    const binding = selection.inputBindings?.find(item => item.artifact === 'unresolvedImportInspection');
+    const inspectionFile = artifactFile(runDir, state.artifacts?.unresolvedImportInspection);
+    if (!inspectionFile || binding?.path !== state.artifacts.unresolvedImportInspection || binding.sha256 !== sha256File(inspectionFile) || selection.registry?.sha256 !== sha256File(path.join(apexRoot, 'registry', 'agency-role-registry.json')) || JSON.stringify(selection.selectedRoles) !== JSON.stringify([PREBASELINE_REVIEWER_ID]) || !controlledOutput(runDir, 'advisories/prebaseline/selection.json', ['role-advisory.mjs'], [], ['collect_existing_baseline']) || !job || job.agentId !== PREBASELINE_REVIEWER_ID || job.stage !== 'prebaseline' || job.payload?.roleId !== PREBASELINE_REVIEWER_ID || JSON.stringify(job.payload?.inputBindings) !== JSON.stringify(selection.inputBindings)) return stale();
+    if (job.status === 'running') return { status: Number.isFinite(Date.parse(job.leaseExpiresAt)) && Date.parse(job.leaseExpiresAt) > Date.now() ? 'running' : 'wait', jobId };
+    if (job.status === 'queued') return { status: !Number.isFinite(Date.parse(job.availableAt)) ? 'terminal' : Date.parse(job.availableAt) > Date.now() ? 'backoff' : 'record', jobId };
+    if (job.status !== 'succeeded') return { status: 'terminal', jobId };
+    const advisoryRef = `advisories/prebaseline/${PREBASELINE_REVIEWER_ID}.json`, advisoryFile = artifactFile(runDir, advisoryRef);
+    if (!advisoryFile || job.result?.advisory !== advisoryRef || job.result.sha256 !== sha256File(advisoryFile) || !controlledOutput(runDir, advisoryRef, ['role-advisory.mjs'], [], ['collect_existing_baseline'])) return stale();
+    const context = prebaselineReviewContext(runDir, path.resolve(runDir, '..', '..', '..'), binding.path).context;
+    if (job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(context)) return { status: 'repair', jobId };
+    validatePrebaselineImportReviews(runDir, path.resolve(runDir, '..', '..', '..'), binding.path, read(advisoryFile).importReviews);
+    return { status: 'done', jobId, advisoryRef, advisoryHash: job.result.sha256 };
+  } catch { return { status: 'repair' }; }
+}
+function pendingPrebaselineFailure(runDir, state, rootFailure) {
+  const records = operationRecords(runDir).filter(item => item.receipt?.action === 'collect_existing_baseline' && ['succeeded', 'failed', 'interrupted'].includes(item.receipt.status)).sort((a, b) => String(b.receipt.finishedAt || b.receipt.startedAt || '').localeCompare(String(a.receipt.finishedAt || a.receipt.startedAt || '')));
+  const laterRecords = [];
+  for (const item of records) {
+    const receipt = item.receipt;
+    if (path.relative(runDir, item.path) === rootFailure?.operationReceipt) break;
+    if (receipt.status === 'succeeded') { laterRecords.push(receipt); continue; }
+    const context = receipt.prebaselineContext;
+    const legacyAmbiguous = !context && ['role-advisory.mjs', 'agent-runtime.mjs'].includes(receipt.script);
+    if (!legacyAmbiguous && (context?.stage !== 'prebaseline' || !['inspect-imports', 'select', 'record', 'repair', 'rebudget', 'claim', 'skill', 'renew'].includes(context.command))) continue;
+    if (receipt.status !== 'interrupted' && laterRecords.some(record => record.script === 'role-advisory.mjs' && record.prebaselineContext?.command === 'record')) {
+      const role = prebaselineImportRoleState(runDir, state);
+      if (role.status === 'done' && laterRecords.some(record => record.outputFileHashes?.[role.advisoryRef] === role.advisoryHash && ledgerBoundOutput(runDir, record, role.advisoryRef, role.advisoryHash))) continue;
+    }
+    if (legacyAmbiguous) return { kind: receipt.status === 'interrupted' ? 'operation-interrupted' : 'operation-failed', category: 'prebaseline-review-failed', action: 'collect_existing_baseline', script: receipt.script, operationReceipt: path.relative(runDir, item.path), exitCode: receipt.exitCode ?? null, observedError: `${receipt.stderr || receipt.stdout || 'unclassified earlier operation failed'}`.trim().slice(0, 1200), retryPolicy: 'inspect the unclassified earlier receipt before continuing', changed: false, interrupted: receipt.status === 'interrupted', command: 'unknown' };
+    const current = currentImportInspection(runDir, path.resolve(runDir, '..', '..', '..'), state.artifacts?.unresolvedImportInspection);
+    const selection = artifactFile(runDir, 'advisories/prebaseline/selection.json');
+    const selectionHash = selection ? sha256File(selection) : 'absent';
+    let changed = current.inspection !== context.inspection || current.status !== context.inspectionStatus || (current.reason || null) !== context.inspectionReason || selectionHash !== context.selectionSha256 || (context.command === 'inspect-imports' && JSON.stringify(inspectionBoundaryState(runDir)) !== JSON.stringify(context.inspectionBoundary));
+    for (const [reference, hash] of Object.entries(receipt.inputFileHashes || {})) { const file = artifactFile(runDir, reference); if (!file || sha256File(file) !== hash) changed = true; }
+    return { kind: receipt.status === 'interrupted' ? 'operation-interrupted' : 'operation-failed', category: 'prebaseline-review-failed', action: 'collect_existing_baseline', script: receipt.script, operationReceipt: path.relative(runDir, item.path), exitCode: receipt.exitCode ?? null, observedError: `${receipt.stderr || receipt.stdout || 'prebaseline operation failed'}`.trim().slice(0, 1200), retryPolicy: 'reconcile the recorded attempt; retry only after the observed inputs change', changed, interrupted: receipt.status === 'interrupted', command: context.command };
+  }
+  return null;
+}
 function changeScopeStatus(runDir, state, reference = null) {
   if (state.track !== 'existing' || !state.artifacts?.changeScope) return { ready: true, reason: null };
   const scopeFile = artifactFile(runDir, state.artifacts.changeScope);
@@ -1842,7 +1909,29 @@ function automaticWorkStep(state, runDir, action) {
     const inventory = read(artifactFile(runDir, state.artifacts.projectInventory));
     if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) return step('expand-project-inventory', '扩大项目扫描范围', ['project-inventory.json'], '扫描结果存在截断。以新的 collect_existing_baseline 授权调用 project-intake.mjs expand <run-dir> <project-root>；脚本按截断情况扩大限制并重扫，达到上限时记录失败回执且保持未验证。不得增加用户确认或重复执行未改变的失败输入。');
     const reference = existingCodeReferenceFreshness(runDir, state);
-    if (!reference.ready) return step('freeze-code-reference', '从当前目标页生成或刷新 Existing 代码闭包与页面骨架', ['baseline-code-scope-input.json', 'code-reference.json', 'page-skeleton.json'], `内部根据当前需求、真实入口和路由生成范围输入，再调用 existing-code-reference.mjs capture。当前原因：${reference.reason}。不得使用模板 Replace 值，也不得复用已漂移的快照。`);
+    if (!reference.ready) {
+      const failure = latestBlockingOperation(runDir, action);
+      if (failure?.category === 'unresolved-local-import' && state.roleChain?.enabled && state.roleChain?.confirmationModel === 'two-confirmations') {
+        const role = prebaselineImportRoleState(runDir, state);
+        const inspection = currentImportInspection(runDir, path.resolve(runDir, '..', '..', '..'), state.artifacts?.unresolvedImportInspection);
+        const scope = failedImportScope(runDir, failure);
+        if (role.status === 'operation-wait') return step('prebaseline-operation-wait', '等待既有基线分析操作', [], '检查已有受控操作回执及进程；结果未知时不得重复启动，必要时进行受控恢复。');
+        if (role.status === 'wait' || (role.status === 'running' && (failure.unresolvedImportCauseChanged || inspection.status !== 'current-unverified'))) return step('prebaseline-role-wait', '等待运行中的基线分析角色', [], roleWait);
+        if (['record', 'backoff'].includes(role.status) && (failure.unresolvedImportCauseChanged || inspection.status !== 'current-unverified')) return step('prebaseline-role-repair', '修复过期的基线分析任务', [], '先受控处理过期的排队任务，再重新读取 Router；不得复用过期证据。');
+        if (!failure.unresolvedImportCauseChanged && scope) {
+          if (role.status === 'repair') return step('prebaseline-role-repair', '修复基线分析角色绑定', [], '通过 role-advisory.mjs repair 对账角色任务与当前证据，保留既有回执。');
+          let sameScope = false;
+          try { const data = read(artifactFile(runDir, inspection.inspection)); sameScope = data.scope.inputReference === scope.reference && data.scope.inputSha256 === scope.sha256; } catch {}
+          if (inspection.status !== 'current-unverified' || !sameScope) return step('inspect-unresolved-imports', '检查未解析的本地依赖', ['inspections/imports-*.json'], `通过 existing-code-reference.mjs inspect-imports 使用原失败回执绑定的 Run 内范围 ${scope.reference}；结果仅为未验证证据，不能放行基线。`);
+          if (inspection.unresolvedCount > 0) {
+            if (role.status === 'select') return step('prebaseline-role-select', '选择基线依赖分析角色', ['advisories/prebaseline/selection.json'], '基于当前受控检查选择专业角色；其判断不构成依赖例外许可。');
+            if (role.status === 'record' || role.status === 'running') return step('prebaseline-role-record', '完成基线依赖专业分析', ['advisories/prebaseline/prebaseline-codebase-onboarding-engineer.json'], '使用同一受控作业和租约分析当前源码，记录有依据的判断；不得重复派发或放行基线。');
+            if (role.status === 'backoff') return step('prebaseline-role-wait', '等待基线分析任务退避', [], '等待现有作业可重试时间，重新读取 Router；不得创建重复作业。');
+          }
+        }
+      }
+      return step('freeze-code-reference', '从当前目标页生成或刷新 Existing 代码闭包与页面骨架', ['baseline-code-scope-input.json', 'code-reference.json', 'page-skeleton.json'], `内部根据当前需求、真实入口和路由生成范围输入，再调用 existing-code-reference.mjs capture。当前原因：${reference.reason}。不得使用模板 Replace 值，也不得复用已漂移的快照。`);
+    }
     const display = existingBrowserCaptureFreshness(runDir, state, reference);
     if (!display.ready) return step('capture-existing-browser-baseline', '采集并绑定当前 Existing 页面截图与 DOM 证据', ['browser-spec.json', 'evidence/existing-browser-capture.json'], `内部基于当前冻结代码引用和页面骨架生成浏览器规格并调用 browser-capture.mjs capture。当前原因：${display.reason}。截图和 DOM 必须绑定同一 sourceTreeHash，且仅作证据，不是用户确认。`);
     const baseline = existingVisualBaselineStatus(runDir, state);
@@ -2308,7 +2397,11 @@ function executionDirective(state, runDir = null) {
   const releasedRuntimeStart = action === 'generate_visual' && latestFailure?.category === 'runtime-start-locked' && latestFailure.script === 'visual-sandbox-runtime.mjs' && runtimeStartLockAvailable(runDir);
   const recoveredRuntime = action === 'generate_visual' && latestFailure?.category === 'runtime-recovery-unavailable' && latestFailure.script === 'visual-sandbox-runtime.mjs' && recoveredRuntimeReady(runDir, state.runId);
   const automaticallyRemediableFailure = ((latestFailure?.category === 'source-drift' && currentStep.id === 'freeze-code-reference' && sourceDriftRetries <= 1) || (latestFailure?.category === 'unresolved-local-import' && latestFailure.unresolvedImportCauseChanged) || (latestFailure?.category === 'required-skill-drift' && currentStep.id === 'visual-role-repair') || requiredSkillRestored || optionalSkillHandled || releasedRuntimeStart || recoveredRuntime || latestFailure?.category === 'obsolete-boundary-snapshot');
-  const blockingOperation = continuationStall(runDir, action, currentStep.id) || (automaticallyRemediableFailure ? null : latestFailure);
+  const reviewFailure = latestFailure?.category === 'unresolved-local-import' ? pendingPrebaselineFailure(runDir, state, latestFailure) : null;
+  const reviewStep = currentStep.id === 'inspect-unresolved-imports' || currentStep.id.startsWith('prebaseline-');
+  const reviewCanProceed = reviewFailure && !reviewFailure.interrupted && reviewFailure.changed && (reviewStep || currentStep.id === 'freeze-code-reference');
+  const safeObservation = currentStep.id === 'prebaseline-operation-wait' || (currentStep.id === 'prebaseline-role-wait' && ['running', 'wait'].includes(prebaselineImportRoleState(runDir, state).status));
+  const blockingOperation = continuationStall(runDir, action, currentStep.id) || (reviewFailure ? (reviewCanProceed || safeObservation ? null : reviewFailure) : ((automaticallyRemediableFailure || (latestFailure?.category === 'unresolved-local-import' && reviewStep)) ? null : latestFailure));
   return {
     kind: 'must-complete-before-user-response',
     action,
@@ -2337,6 +2430,7 @@ function executionDirective(state, runDir = null) {
           : { action, required: true, runner: 'apex-action.mjs', mode: 'run-after-router-authorize' },
     currentStep,
     blockingOperation,
+    ...(latestFailure?.category === 'unresolved-local-import' && !blockingOperation ? { remediatingFailure: latestFailure, ...(reviewFailure ? { priorReviewFailure: reviewFailure } : {}) } : {}),
     continuationProtocol: {
       reauthorizeAfterEveryStateWrite: true,
       nextStepSource: 'executionDirective.currentStep',
