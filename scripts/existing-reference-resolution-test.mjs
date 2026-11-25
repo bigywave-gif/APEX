@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, resourceCoverage, assertResourceCoverage, validateResourceReviews, currentResourceReview } from './existing-resource-freshness.mjs';
 import { assessResourceVerification, observeResourceImages, observeResourceExemptions, observeBackgroundImages, resourceVerificationBinding, resourceImageProbeCode } from './existing-resource-runtime.mjs';
-import { unresolvedSnapshot, unresolvedFailure, unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
+import { codePositions, unresolvedSnapshot, unresolvedFailure, unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
 import { controlledOutput } from './verification-policy.mjs';
 import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineBatchReviews, validatePrebaselineReviewCoverage } from './prebaseline-import-review.mjs';
 import { agentRuntimeStatus } from './run-ledger.mjs';
@@ -19,6 +19,11 @@ function put(name, text) { const file = path.join(project, name); fs.mkdirSync(p
 function call(script, args) { const result = spawnSync(process.execPath, [path.join(core, 'scripts', script), ...args], { encoding: 'utf8', timeout: 30000 }); assert.equal(result.status, 0, `${script}: ${result.stderr || result.stdout}`); return JSON.parse(result.stdout); }
 function action(script, args) { const auth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']); return call('apex-action.mjs', ['run', project, run, session, auth.authorizationRef, 'collect_existing_baseline', script, ...args]); }
 try {
+  const templateFixture = "const x = `raw import('./fake-one') ${(() => ({x: `inner ${import('./real-nested')}`}))()} tail import('./fake-two')`;";
+  const templatePositions = codePositions(templateFixture);
+  assert.equal(templatePositions[templateFixture.indexOf("import('./fake-one')")], 0);
+  assert.equal(templatePositions[templateFixture.indexOf("import('./real-nested')")], 1);
+  assert.equal(templatePositions[templateFixture.indexOf("import('./fake-two')")], 0);
   put('src/race-source.ts', "import './race-candidate';");
   const racedImport = [{ source: 'src/race-source.ts', reference: './race-candidate', candidates: ['src/race-candidate.ts'] }];
   const scannedMissing = unresolvedSnapshot(project, racedImport);
@@ -48,6 +53,11 @@ try {
   put('src/Widget.svelte', '<script lang="ts">import "./svelte-inline";</script><div>Original</div>');
   put('src/components/button.ts', 'export const button = true;');
   put('src/shared.css', 'button { color: red }');
+  put('src/comment-only.ts', "import './unrelated-comment-target'; export const example = true;");
+  put('src/string-only.ts', "import './unrelated-string-target'; export const example = true;");
+  put('src/template-only.ts', "import './unrelated-template-target'; export const example = true;");
+  put('src/template-real.ts', 'export const example = true;');
+  put('commented-html.js', "import './unrelated-html-target'; export const example = true;");
   put('packages/ui/package.json', JSON.stringify({ name: '@fixture/ui', exports: { '.': { import: './dist/index.js' } } }));
   put('packages/ui/tsconfig.json', JSON.stringify({ compilerOptions: { rootDir: 'src', outDir: 'dist' } }));
   put('packages/ui/src/index.ts', "export { ui } from './implementation.js';");
@@ -58,6 +68,7 @@ try {
   const capture = () => action('existing-code-reference.mjs', ['capture', dir, project, scope]);
   const main = path.join(project, 'src/main.ts');
   fs.appendFileSync(main, `\n// import './comment-only'; require('./commented-require');\n/* import './block-only'; */\nconst text = "import './string-only'";\nconst template = \`import './template-only'\`;\nimport './missing-local-module';\nimport './second-missing';\nimport('./dynamic-missing');\nrequire('./require-missing');\nobject.require('./property-method'); object . require('./spaced-property'); object./* comment */require('./commented-property');\nimport(computedPath);\n`);
+  fs.appendFileSync(main, "\nconst nested = `raw ${(() => ({ result: import('./template-real') }))()} more`;\n");
   const inspectionAction = () => action('existing-code-reference.mjs', ['inspect-imports', dir, project, scope]);
   const outsideScope = path.join(project, 'outside-scope.json'); fs.writeFileSync(outsideScope, fs.readFileSync(scope));
   const outsideAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);
@@ -78,6 +89,7 @@ try {
   const inspectionResult = inspectionAction(), inspectionPath = path.relative(dir, inspectionResult.inspection);
   const verifyInspection = reference => action('existing-code-reference.mjs', ['verify-inspection', dir, project, reference]);
   const inspection = JSON.parse(fs.readFileSync(inspectionResult.inspection, 'utf8'));
+  assert.equal(inspection.scanner, 'literal-relative-script-v4');
   assert.equal(inspection.status, 'unverified'); assert.equal(inspectionResult.status, 'unverified');
   assert.equal(inspection.observationDrift, 'no-drift-detected');
   assert.deepEqual(inspection.requirementRevision, { observed: 'absent', authorized: 'absent' });
@@ -85,6 +97,9 @@ try {
   assert.equal(inspection.scope.inputReference, 'scope.json'); assert.equal(inspection.scope.inputSha256, inspection.scope.authorizedInputSha256);
   assert.ok(inspection.unresolvedImports.some(item => item.source === 'src/main.ts' && item.reference === './missing-local-module'));
   assert.ok(inspection.sourceObservations.some(item => item.path === 'src/main.ts' && /^sha256:[a-f0-9]{64}$/.test(item.sha256)));
+  assert.ok(!inspection.sourceObservations.some(item => ['src/comment-only.ts', 'src/string-only.ts', 'src/template-only.ts', 'commented-html.js'].includes(item.path)), 'existing files mentioned only in comments, strings or HTML comments must not enter the code closure');
+  assert.ok(inspection.sourceObservations.some(item => item.path === 'src/template-real.ts'), 'imports in template interpolation are executable code');
+  assert.ok(!inspection.unresolvedImports.some(item => /unrelated-(comment|string|template|html)-target/.test(item.reference)), 'unrelated example files must not introduce false unresolved imports');
   assert.ok(inspection.limitations.includes('not-a-review-or-permission-to-proceed'));
   assert.equal(controlledOutput(dir, inspectionPath, ['existing-code-reference.mjs'], ['scope.json'], ['collect_existing_baseline']), true, 'inspection must have a successful ledger-bound controlled receipt');
   assert.equal(verifyInspection(inspectionPath).status, 'current-unverified');
@@ -103,6 +118,8 @@ try {
   const originalInspection = fs.readFileSync(inspectionResult.inspection); fs.writeFileSync(inspectionResult.inspection, '{}');
   assert.equal(controlledOutput(dir, inspectionPath, ['existing-code-reference.mjs'], ['scope.json'], ['collect_existing_baseline']), false, 'modified inspection cannot retain its evidence binding');
   assert.equal(currentImportInspection(dir, project, inspectionPath).status, 'stale-or-unverified');
+  fs.writeFileSync(inspectionResult.inspection, JSON.stringify({ ...inspection, scanner: 'literal-relative-script-v3' }));
+  assert.equal(currentImportInspection(dir, project, inspectionPath).status, 'stale-or-unverified', 'legacy scanner observations must not be reused as current');
   fs.writeFileSync(inspectionResult.inspection, originalInspection);
   assert.equal(inspectionAction().reused, true, 'identical inspection should reuse its immutable object');
   assert.equal(fs.existsSync(path.join(dir, 'code-reference.json')), false, 'inspection must not mark the code baseline complete');
@@ -247,7 +264,7 @@ try {
   assert.equal(restoredStatus.executionDirective?.currentStep?.id, 'freeze-code-reference');
   assert.equal(restoredStatus.terminalResponseContract?.blockingOperation ?? null, null);
   capture();
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).importInspection, 'literal-relative-script-v3');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).importInspection, 'literal-relative-script-v4');
   const cleanInspection = inspectionAction();
   assert.equal(cleanInspection.unresolvedCount, 0); assert.equal(cleanInspection.status, 'unverified');
   assert.equal(verifyInspection(path.relative(dir, cleanInspection.inspection)).status, 'current-unverified', 'an empty static result is not a review or proof of complete runtime coverage');
@@ -283,6 +300,8 @@ try {
   assert.equal(call('apex-router.mjs', ['status', project, run, session]).terminalResponseContract?.blockingOperation ?? null, null, 'a later ledger-bound reference can supersede an old failed scope');
   capture();
   const paths = () => new Set(JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json'))).files.map(item => item.path));
+  for (const excluded of ['src/comment-only.ts', 'src/string-only.ts', 'src/template-only.ts', 'commented-html.js']) assert.ok(!paths().has(excluded), `commented example must not enter frozen scope: ${excluded}`);
+  assert.ok(paths().has('src/template-real.ts'), 'template interpolation dependencies belong to the frozen scope');
   for (const expected of ['public/style.css', 'public/main.js', 'public/hero.png', 'public/logo.svg', 'src/main.ts', 'src/App.tsx', 'src/module.mts', 'src/module-common.cts', 'src/components/Button.vue', 'src/components/button.ts', 'src/components/vue-required.ts', 'src/dynamic-missing.ts', 'src/require-missing.ts', 'inline-html-dynamic.js', 'src/shared.css', 'packages/ui/src/index.ts', 'packages/ui/src/implementation.ts', 'tsconfig.json', 'package.json', 'packages/ui/package.json', 'packages/ui/tsconfig.json']) assert.ok(paths().has(expected), expected);
   assert.equal(capture().reused, true);
   const beforePreferred = JSON.parse(fs.readFileSync(path.join(dir, 'code-reference.json')));

@@ -14,7 +14,7 @@ import { codePositions, embeddedScriptPositions, unresolvedFailure, unresolvedSn
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ignored = new Set(['.git', '.apex', 'node_modules', 'dist', 'build', 'coverage', '.next', '.nuxt', 'vendor', 'target']);
 const extensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.json', '.yaml', '.yml'];
-const CAPTURE_VERSION = '14';
+const CAPTURE_VERSION = '15';
 function die(message) { console.error(`Existing code reference failed: ${message}`); process.exit(1); }
 function write(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function sha(content) { return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`; }
@@ -106,6 +106,10 @@ function imports(projectRoot, file, content, sourceBytes) {
     /(?<![\w$.])(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g
   ];
   for (const [index, pattern] of patterns.entries()) for (const match of content.matchAll(pattern)) {
+    // Do not resolve or traverse examples in comments, strings or markup.
+    // Checking only the unresolved case still followed an existing file named
+    // in an example, pulling its unrelated dependency graph into the scope.
+    if (positions && !positions[match.index]) continue;
     let preceding = match.index - 1;
     if (index === 1 && (!positions || positions[match.index])) { while (preceding >= 0 && (/\s/.test(content[preceding]) || (positions && !positions[preceding]))) preceding--; if (content[preceding] === '.') continue; }
     const candidates = new Map();
@@ -272,7 +276,7 @@ if (command === 'inspect-imports') {
     const unresolvedCurrent = !references.length || JSON.stringify(unresolvedSnapshot(projectRoot, references)) === JSON.stringify(missing);
     if (!inputsCurrent || !configsCurrent || newConfigs.length || newImports.length || !unresolvedCurrent) observationDrift = 'detected';
   } catch { observationDrift = 'detected'; }
-  const inspection = { schemaVersion: '1.0', status: 'unverified', observationDrift, projectRoot, requirementRevision, scope: { routes: scope.routes, entrypoints: entries.map(entry => rel(projectRoot, entry)).sort(), inputReference: rel(fs.realpathSync(runDir), scopePath), inputSha256: sha(scopeBytes), authorizedInputSha256: process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 || 'unavailable' }, scanner: 'literal-relative-script-v3', sourceObservations: sourceObservations.sort((a, b) => a.path.localeCompare(b.path)), configurationObservations, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedImports: missing, limitations: ['partial-static-analysis', 'computed-paths-and-build-plugins-not-verified', 'no-drift-detected-is-not-an-atomic-snapshot', 'not-a-review-or-permission-to-proceed'] };
+  const inspection = { schemaVersion: '1.0', status: 'unverified', observationDrift, projectRoot, requirementRevision, scope: { routes: scope.routes, entrypoints: entries.map(entry => rel(projectRoot, entry)).sort(), inputReference: rel(fs.realpathSync(runDir), scopePath), inputSha256: sha(scopeBytes), authorizedInputSha256: process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 || 'unavailable' }, scanner: 'literal-relative-script-v4', sourceObservations: sourceObservations.sort((a, b) => a.path.localeCompare(b.path)), configurationObservations, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedImports: missing, limitations: ['partial-static-analysis', 'computed-paths-and-build-plugins-not-verified', 'no-drift-detected-is-not-an-atomic-snapshot', 'not-a-review-or-permission-to-proceed'] };
   const serialized = `${JSON.stringify(inspection, null, 2)}\n`;
   if (Buffer.byteLength(serialized) > 4 * 1024 * 1024) die('unresolved import inspection exceeds the 4 MiB evidence limit');
   const inspectionHash = sha(serialized), reference = `inspections/imports-${inspectionHash.slice('sha256:'.length)}.json`, output = path.join(runDir, reference);
@@ -309,7 +313,7 @@ const files = [...selected].sort((a, b) => rel(projectRoot, a).localeCompare(rel
 });
 if (!nodes.length) die('target code closure has no mappable page skeleton nodes');
 const sourceTreeHash = `sha256:${aggregate.digest('hex')}`; const skeletonPayload = { sourceTreeHash, entrypoints: entries.map(entry => rel(projectRoot, entry)), nodes }; const skeletonHash = sha(Buffer.from(JSON.stringify(skeletonPayload)));
-const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, importInspection: 'literal-relative-script-v3', scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
+const reference = { schemaVersion: '3.0', capturedAt: new Date().toISOString(), projectRoot, complete: true, importInspection: 'literal-relative-script-v4', scope: { routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints, mode: 'target-entrypoints-and-transitive-project-dependencies' }, sourceFileCount: files.length, totalBytes, sourceTreeHash, files, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedResources: [...missingResources.values()], excludedDirectories: [...ignored].sort() };
 if (!reference.scope.routes.length) die('baseline input must declare target routes');
 const output = path.join(runDir, 'code-reference.json'); const skeletonOutput = path.join(runDir, 'page-skeleton.json'); write(output, reference); write(skeletonOutput, { schemaVersion: '3.0', ...skeletonPayload, skeletonHash });
 write(integrityIndexFile, { schemaVersion: '3.0', captureVersion: CAPTURE_VERSION, capturedAt: new Date().toISOString(), purpose: 'fast-path-only; Gate validation recomputes all SHA-256 values', sourceTreeHash, scopeHash: sha(Buffer.from(JSON.stringify({ routes: scope.routes || [], entrypoints: skeletonPayload.entrypoints.slice().sort(), configHash, publicRoots }))), entrypoints: skeletonPayload.entrypoints, files: integrityFiles, missingCandidates: [...new Set([...missingResources.values()].flatMap(item => item.candidates))] });
