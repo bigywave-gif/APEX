@@ -19,8 +19,9 @@ function action(script, args, succeeds = true) {
 }
 const status = () => call('apex-router.mjs', ['status', project, run, session]).executionDirective;
 try {
+  if (process.env.APEX_TEST_PREBASELINE_BUILD === '1') fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { build: 'node main.js' } }));
   fs.writeFileSync(path.join(project, 'index.html'), '<script src="/main.js"></script>');
-  const source = path.join(project, 'main.js'), original = "try { require('./optional-module'); } catch (error) {}\n" + (process.env.APEX_TEST_PREBASELINE_POST === '1' ? "fetch('/write',{method:'POST'}).catch(()=>{});\n" : '') + (process.env.APEX_TEST_PREBASELINE_JSERROR === '1' ? "throw new Error('fixture failure');\n" : '') + (process.env.APEX_TEST_PREBASELINE_BIG === '1' ? `/*${'x'.repeat(4 * 1024 * 1024)}*/` : '');
+  const source = path.join(project, 'main.js'), original = "try { require('./optional-module'); } catch (error) {}\n" + (process.env.APEX_TEST_PREBASELINE_BUILD_FAIL === '1' ? "if(typeof process !== 'undefined' && process.env.CI) process.exit(7);\n" : '') + (process.env.APEX_TEST_PREBASELINE_BUILD_ISOLATION === '1' ? `if(typeof process !== 'undefined' && process.env.CI){try{require('fs').writeFileSync(${JSON.stringify(path.join(project, 'forbidden.txt'))},'x');process.exitCode=9}catch(e){if(!['EPERM','EACCES'].includes(e.code))process.exitCode=8}}\n` : '') + (process.env.APEX_TEST_PREBASELINE_POST === '1' ? "fetch('/write',{method:'POST'}).catch(()=>{});\n" : '') + (process.env.APEX_TEST_PREBASELINE_JSERROR === '1' ? "throw new Error('fixture failure');\n" : '') + (process.env.APEX_TEST_PREBASELINE_BIG === '1' ? `/*${'x'.repeat(4 * 1024 * 1024)}*/` : '');
   fs.writeFileSync(source, original);
   call('apex-router.mjs', ['intake', project, run, 'existing', 'standard', 'interactive', session, '确认调用 APEX']);
   action('project-intake.mjs', ['scan', dir, project]);
@@ -72,6 +73,19 @@ try {
       if (process.env.APEX_TEST_PREBASELINE_POST === '1') { assert.ok(evidence.routes[0].blockedRequests.some(item => item.method === 'POST')); assert.equal(fs.existsSync(path.join(project, 'unexpected-post.txt')), false); }
       if (process.env.APEX_TEST_PREBASELINE_JSERROR === '1') assert.ok(evidence.routes[0].pageErrors > 0, 'uncaught page errors must be observed');
       if (process.env.APEX_TEST_PREBASELINE_BIG === '1') { assert.equal(evidence.routes[0].overflow, true); assert.equal(evidence.routes[0].status, 'incomplete'); }
+      if (process.env.APEX_TEST_PREBASELINE_BUILD === '1') {
+        assert.equal(status().currentStep.id, 'prebaseline-build-observe');
+        const built = action('prebaseline-import-build.mjs', ['observe', dir]);
+        assert.equal(built.permitsBaseline, false);
+        assert.equal(built.buildStatus, process.platform === 'darwin' ? (process.env.APEX_TEST_PREBASELINE_BUILD_FAIL === '1' ? 'failed-or-incomplete' : 'passed') : 'unavailable');
+        if (process.env.APEX_TEST_PREBASELINE_BUILD_FAIL === '1' && process.platform === 'darwin') assert.equal(built.exitCode, 7);
+        assert.equal(fs.existsSync(path.join(project, 'forbidden.txt')), false);
+        assert.equal(status().blockingOperation.professionalReview.buildObservation.permitsBaseline, false);
+        const buildBytes = fs.readFileSync(built.observation);
+        try { fs.appendFileSync(built.observation, 'tamper'); assert.notEqual(status().blockingOperation?.professionalReview?.buildObservation?.status, 'observed-not-authorized'); }
+        finally { fs.writeFileSync(built.observation, buildBytes); }
+        assert.equal(status().blockingOperation.professionalReview.buildObservation.status, 'observed-not-authorized');
+      }
       const blocked = status().blockingOperation;
       assert.equal(blocked.category, 'unresolved-local-import'); assert.equal(blocked.professionalReview.runtimeObservation.status, 'observed-not-authorized');
       assert.equal(blocked.professionalReview.runtimeObservation.permitsBaseline, false);

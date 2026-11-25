@@ -26,7 +26,7 @@ const permitted = {
   analyze_requirement: new Set(['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
   plan_visual: new Set(['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
   generate_visual: new Set(['demo-source-compiler.mjs', 'visual-sandbox-writer.mjs', 'visual-sandbox-runtime.mjs', 'browser-capture.mjs', 'runtime-visual-baseline.mjs', 'visual-reference-compiler.mjs', 'visual-sandbox-dependency.mjs', 'experience-evaluator.mjs']),
-  collect_existing_baseline: new Set(['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'functional-freeze-compiler.mjs', 'browser-capture.mjs', 'prebaseline-import-runtime.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
+  collect_existing_baseline: new Set(['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'functional-freeze-compiler.mjs', 'browser-capture.mjs', 'prebaseline-import-runtime.mjs', 'prebaseline-import-build.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
   sync_stitch: new Set(['stitch-sync.mjs', 'stitch-ui-importer.mjs', 'strict-replica.mjs', 'visual-reference-compiler.mjs', 'confirmation-presentation.mjs']),
   observe_stitch: new Set(['stitch-sync.mjs']),
   validate_stitch: new Set(['strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs']),

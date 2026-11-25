@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
-import { controlledOutput, ledgerBoundOutput } from './verification-policy.mjs';
+import { controlledOutput, ledgerBoundOutput, declaredVerificationCommand } from './verification-policy.mjs';
 import { qualityVerificationPending } from './quality-workflow.mjs';
 import { industryReviewFailures } from './industry-review-progress.mjs';
 import { gate1RoleSummaryCurrent, visualRoleSummaryCurrent, approvedRoleSummariesCurrent } from './role-summary-binding.mjs';
@@ -1371,10 +1371,33 @@ function prebaselineRuntimeObservation(runDir, binding) {
         const file = artifactFile(runDir, reference);
         if (!file || sha256File(file) !== digest || !ledgerBoundOutput(runDir, receipt, reference, digest, true)) continue;
         const observation = read(file);
-        if (observation.schemaVersion === '1.0' && observation.type === 'prebaseline-runtime-observation' && observation.status === 'observed' && JSON.stringify(observation.binding) === JSON.stringify(binding) && Array.isArray(observation.routes) && Array.isArray(observation.sources)) return { status: 'observed-not-authorized', reference, sha256: digest, serviceOwnership: observation.serviceOwnership || 'unverified', routeCount: observation.routes.length, incompleteRoutes: observation.routes.filter(item => item.status !== 'observed').length, sourceCount: observation.sources.length, unobservedSources: observation.sources.filter(item => !Array.isArray(item.loadedAt) || !item.loadedAt.length).length, failedResources: observation.routes.reduce((sum, item) => sum + (item.failedResources?.length || 0), 0), pageErrors: observation.routes.reduce((sum, item) => sum + (item.pageErrors || 0), 0), blockedRequests: observation.routes.reduce((sum, item) => sum + (item.blockedRequests?.length || 0), 0), permitsBaseline: false };
+        if (observation.schemaVersion === '1.0' && observation.type === 'prebaseline-runtime-observation' && observation.status === 'observed' && JSON.stringify(observation.binding) === JSON.stringify(binding) && Array.isArray(observation.routes) && Array.isArray(observation.sources)) return { status: 'observed-not-authorized', reference, sha256: digest, serviceOwnership: observation.serviceOwnership || 'unverified', routeCount: observation.routes.length, incompleteRoutes: observation.routes.filter(item => item.status !== 'observed').length, sourceCount: observation.sources.length, unobservedSources: observation.sources.filter(item => !Array.isArray(item.loadedAt) || !item.loadedAt.length).length, failedResources: observation.routes.reduce((sum, item) => sum + (item.failedResources?.length || 0), 0), pageErrors: observation.routes.reduce((sum, item) => sum + (item.pageErrors || 0), 0), consoleErrors: observation.routes.reduce((sum, item) => sum + (item.consoleErrors || 0), 0), blockedRequests: observation.routes.reduce((sum, item) => sum + (item.blockedRequests?.length || 0), 0), permitsBaseline: false };
       }
     }
   } catch { /* Missing or stale observations do not grant an exception. */ }
+  return null;
+}
+function prebaselineDeclaredBuild(runDir, state) {
+  try {
+    const root = path.dirname(path.dirname(path.dirname(runDir))), manifestFile = path.join(root, 'package.json'), inventoryRef = state.artifacts?.projectInventory, inventoryFile = artifactFile(runDir, inventoryRef);
+    if (!inventoryFile || !controlledOutput(runDir, inventoryRef, ['project-intake.mjs'], [], ['collect_existing_baseline']) || !fs.realpathSync(manifestFile).startsWith(`${fs.realpathSync(root)}${path.sep}`)) return null;
+    const manifest = read(manifestFile), inventory = read(inventoryFile), check = { id: 'package-build', command: 'npm run build' };
+    if (!declaredVerificationCommand(check, inventory, manifest)) return null;
+    return { command: check.command, manifestSha256: sha256File(manifestFile), inventory: inventoryRef, inventorySha256: sha256File(inventoryFile) };
+  } catch { return null; }
+}
+function prebaselineBuildObservation(runDir, binding, runtime, build) {
+  try {
+    for (const { receipt } of operationRecords(runDir)) {
+      if (receipt.status !== 'succeeded' || receipt.action !== 'collect_existing_baseline' || receipt.script !== 'prebaseline-import-build.mjs') continue;
+      for (const [reference, digest] of Object.entries(receipt.outputFileHashes || {})) {
+        if (!/^evidence\/prebaseline-build\/[a-f0-9-]{36}\.json$/.test(reference.split(path.sep).join('/'))) continue;
+        const file = artifactFile(runDir, reference); if (!file || sha256File(file) !== digest || !ledgerBoundOutput(runDir, receipt, reference, digest, true)) continue;
+        const result = read(file);
+        if (result.schemaVersion === '1.0' && result.type === 'prebaseline-build-observation' && result.status === 'observed' && JSON.stringify(result.binding) === JSON.stringify(binding) && result.runtime?.reference === runtime.reference && result.runtime.sha256 === runtime.sha256 && JSON.stringify(result.build) === JSON.stringify(build)) return { status: 'observed-not-authorized', reference, sha256: digest, buildStatus: result.buildStatus, exitCode: result.exitCode, permitsBaseline: false };
+      }
+    }
+  } catch { /* Uncontrolled or stale build results cannot authorize an exception. */ }
   return null;
 }
 function pendingPrebaselineFailure(runDir, state, rootFailure) {
@@ -2100,6 +2123,13 @@ function automaticWorkStep(state, runDir, action) {
               const observation = prebaselineRuntimeObservation(runDir, binding);
               if (!observation) return { ...step('prebaseline-runtime-observe', '观察候选依赖的实际页面加载', ['evidence/prebaseline-runtime/*.json'], '以当前项目的本机 HTTP 服务和检查范围中的全部路由运行受控浏览器观察，记录实际加载源码、失败与控制台错误；观察不等于构建通过或例外许可。'), observationBinding: binding };
               completedReview = { ...completedReview, runtimeObservation: observation };
+              const clean = !observation.incompleteRoutes && !observation.unobservedSources && !observation.failedResources && !observation.pageErrors && !observation.consoleErrors && !observation.blockedRequests;
+              const build = clean ? prebaselineDeclaredBuild(runDir, state) : null;
+              if (build) {
+                const buildObservation = prebaselineBuildObservation(runDir, binding, observation, build);
+                if (!buildObservation) return { ...step('prebaseline-build-observe', '在隔离快照中观察项目构建', ['evidence/prebaseline-build/*.json'], '仅执行项目当前声明的 npm run build，在受限快照中记录真实结果；构建结果不能单独授权依赖例外。'), observationBinding: binding, runtimeObservation: observation, buildBinding: build };
+                completedReview = { ...completedReview, buildObservation };
+              }
             }
           }
         }
