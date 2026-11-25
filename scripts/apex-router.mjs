@@ -36,7 +36,7 @@ import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
-import { PREBASELINE_REVIEWER_ID, inspectionBoundaryState, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineReviewCoverage, summarizePrebaselineReviews } from './prebaseline-import-review.mjs';
+import { PREBASELINE_REVIEWER_ID, inspectionBoundaryState, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineReviewCoverage, summarizePrebaselineReviews, prebaselineObservationBinding } from './prebaseline-import-review.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
@@ -1362,6 +1362,21 @@ function prebaselineImportRoleState(runDir, state) {
     return { status: 'done', jobId, advisoryRef, advisoryHash: job.result.sha256, reviewSummary: summarizePrebaselineReviews([{ reviews }]) };
   } catch { return { status: 'repair' }; }
 }
+function prebaselineRuntimeObservation(runDir, binding) {
+  try {
+    for (const { receipt } of operationRecords(runDir)) {
+      if (receipt.status !== 'succeeded' || receipt.action !== 'collect_existing_baseline' || receipt.script !== 'prebaseline-import-runtime.mjs') continue;
+      for (const [reference, digest] of Object.entries(receipt.outputFileHashes || {})) {
+        if (!/^evidence\/prebaseline-runtime\/[a-f0-9-]{36}\.json$/.test(reference.split(path.sep).join('/'))) continue;
+        const file = artifactFile(runDir, reference);
+        if (!file || sha256File(file) !== digest || !ledgerBoundOutput(runDir, receipt, reference, digest, true)) continue;
+        const observation = read(file);
+        if (observation.schemaVersion === '1.0' && observation.type === 'prebaseline-runtime-observation' && observation.status === 'observed' && JSON.stringify(observation.binding) === JSON.stringify(binding) && Array.isArray(observation.routes) && Array.isArray(observation.sources)) return { status: 'observed-not-authorized', reference, sha256: digest, serviceOwnership: observation.serviceOwnership || 'unverified', routeCount: observation.routes.length, incompleteRoutes: observation.routes.filter(item => item.status !== 'observed').length, sourceCount: observation.sources.length, unobservedSources: observation.sources.filter(item => !Array.isArray(item.loadedAt) || !item.loadedAt.length).length, failedResources: observation.routes.reduce((sum, item) => sum + (item.failedResources?.length || 0), 0), pageErrors: observation.routes.reduce((sum, item) => sum + (item.pageErrors || 0), 0), blockedRequests: observation.routes.reduce((sum, item) => sum + (item.blockedRequests?.length || 0), 0), permitsBaseline: false };
+      }
+    }
+  } catch { /* Missing or stale observations do not grant an exception. */ }
+  return null;
+}
 function pendingPrebaselineFailure(runDir, state, rootFailure) {
   const records = operationRecords(runDir).filter(item => item.receipt?.action === 'collect_existing_baseline' && ['succeeded', 'failed', 'interrupted'].includes(item.receipt.status)).sort((a, b) => String(b.receipt.finishedAt || b.receipt.startedAt || '').localeCompare(String(a.receipt.finishedAt || a.receipt.startedAt || '')));
   const laterRecords = [];
@@ -2079,6 +2094,13 @@ function automaticWorkStep(state, runDir, action) {
             if ((role.status === 'record' || role.status === 'running') && role.roleId) return step('prebaseline-batch-record', '完成当前依赖分析批次', ['advisories/prebaseline/*-batch-*.json'], `使用已有角色 ${role.roleId} 的受控作业 ${role.jobId} 和租约，只处理该批冻结上下文；不得重复派发或放行基线。`);
             if (role.status === 'record' || role.status === 'running') return step('prebaseline-role-record', '完成基线依赖专业分析', ['advisories/prebaseline/prebaseline-codebase-onboarding-engineer.json'], '使用同一受控作业和租约分析当前源码，记录有依据的判断；不得重复派发或放行基线。');
             if (role.status === 'backoff') return step('prebaseline-role-wait', '等待基线分析任务退避', [], '等待现有作业可重试时间，重新读取 Router；不得创建重复作业。');
+            if (role.status === 'done' && role.reviewSummary?.candidatesRequiringIndependentProof > 0 && role.reviewSummary.mustResolveOrInvestigate === 0) {
+              let binding; try { binding = prebaselineObservationBinding(runDir, path.resolve(runDir, '..', '..', '..'), inspection.inspection); }
+              catch { return step('prebaseline-role-repair', '修复基线分析角色绑定', [], '当前角色回执或检查绑定已变化；先受控对账，再重新读取 Router。'); }
+              const observation = prebaselineRuntimeObservation(runDir, binding);
+              if (!observation) return { ...step('prebaseline-runtime-observe', '观察候选依赖的实际页面加载', ['evidence/prebaseline-runtime/*.json'], '以当前项目的本机 HTTP 服务和检查范围中的全部路由运行受控浏览器观察，记录实际加载源码、失败与控制台错误；观察不等于构建通过或例外许可。'), observationBinding: binding };
+              completedReview = { ...completedReview, runtimeObservation: observation };
+            }
           }
         }
       }

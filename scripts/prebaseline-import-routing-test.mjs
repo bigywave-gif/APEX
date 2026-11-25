@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PREBASELINE_REVIEWER_ID } from './prebaseline-import-review.mjs';
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,11 +20,11 @@ function action(script, args, succeeds = true) {
 const status = () => call('apex-router.mjs', ['status', project, run, session]).executionDirective;
 try {
   fs.writeFileSync(path.join(project, 'index.html'), '<script src="/main.js"></script>');
-  const source = path.join(project, 'main.js'), original = "try { require('./optional-module'); } catch (error) {}\n";
+  const source = path.join(project, 'main.js'), original = "try { require('./optional-module'); } catch (error) {}\n" + (process.env.APEX_TEST_PREBASELINE_POST === '1' ? "fetch('/write',{method:'POST'}).catch(()=>{});\n" : '') + (process.env.APEX_TEST_PREBASELINE_JSERROR === '1' ? "throw new Error('fixture failure');\n" : '') + (process.env.APEX_TEST_PREBASELINE_BIG === '1' ? `/*${'x'.repeat(4 * 1024 * 1024)}*/` : '');
   fs.writeFileSync(source, original);
   call('apex-router.mjs', ['intake', project, run, 'existing', 'standard', 'interactive', session, '确认调用 APEX']);
   action('project-intake.mjs', ['scan', dir, project]);
-  const scope = path.join(dir, 'scope.json'); fs.writeFileSync(scope, JSON.stringify({ routes: ['/'], codeEntrypoints: ['index.html'] }));
+  const scope = path.join(dir, 'scope.json'); fs.writeFileSync(scope, JSON.stringify({ routes: process.env.APEX_TEST_PREBASELINE_DUPLICATE === '1' ? ['/', '/'] : ['/'], codeEntrypoints: ['index.html'] }));
   assert.match(action('existing-code-reference.mjs', ['capture', dir, project, scope], false).stderr, /APEX_UNRESOLVED_LOCAL_IMPORTS/);
   assert.equal(status().currentStep.id, 'inspect-unresolved-imports');
   assert.equal(status().remediatingFailure.category, 'unresolved-local-import');
@@ -54,7 +54,36 @@ try {
   const retry = action('agent-runtime.mjs', ['claim', dir, job, 'prebaseline', 'route_fixture_claim_02']);
   advisory.execution.leaseToken = retry.leaseToken; fs.writeFileSync(input, JSON.stringify(advisory));
   action('role-advisory.mjs', ['record', dir, 'prebaseline', input]);
-  assert.equal(status().blockingOperation.category, 'unresolved-local-import', 'professional judgment cannot approve the baseline');
+  assert.equal(status().currentStep.id, 'prebaseline-runtime-observe', 'candidate judgments require independent observations');
+  assert.equal(status().blockingOperation, null);
+  if (process.env.APEX_TEST_PREBASELINE_BROWSER === '1') {
+    const serverCode = `const http=require('http'),fs=require('fs'),path=require('path');const root=process.argv[1],broken=process.argv[2]==='1',different=process.argv[3]==='1';http.createServer((req,res)=>{if(req.method==='POST'){fs.writeFileSync(path.join(root,'unexpected-post.txt'),'write');res.end('written');return}if(req.url==='/main.js'&&broken){res.writeHead(404);res.end('missing');return}if(req.url==='/main.js'&&different){res.setHeader('content-type','text/javascript');res.end('console.log("different source")');return}const file=req.url==='/main.js'?'main.js':'index.html';res.setHeader('content-type',file.endsWith('.js')?'text/javascript':'text/html');res.end(fs.readFileSync(path.join(root,file)))}).listen(0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port+'/')});`;
+    const server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_BROKEN || '0', process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE || '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      const url = await new Promise((resolve, reject) => { let value = ''; server.stdout.on('data', chunk => { value += chunk; if (value.includes('\n')) resolve(value.trim()); }); server.on('error', reject); server.on('exit', code => reject(new Error(`fixture server exited: ${code}`))); });
+      const observed = action('prebaseline-import-runtime.mjs', ['observe', dir, url]);
+      assert.equal(observed.status, 'observed'); assert.equal(observed.permitsBaseline, false);
+      const evidence = JSON.parse(fs.readFileSync(observed.observation)), sourceResult = evidence.sources.find(item => item.source === 'main.js');
+      assert.equal(evidence.routes.length, 1, 'duplicate target routes must be observed once');
+      assert.equal(evidence.serviceOwnership, 'unverified'); assert.ok(evidence.limitations.includes('not-a-build-result-or-an-import-exception'));
+      const expectedLoaded = process.env.APEX_TEST_PREBASELINE_BROKEN !== '1' && process.env.APEX_TEST_PREBASELINE_BIG !== '1' && process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE !== '1';
+      assert.ok(sourceResult); assert.equal(Boolean(sourceResult.loadedAt.length), expectedLoaded);
+      if (process.env.APEX_TEST_PREBASELINE_BROKEN === '1') assert.ok(evidence.routes[0].failedResources.some(item => item.status === 404));
+      if (process.env.APEX_TEST_PREBASELINE_POST === '1') { assert.ok(evidence.routes[0].blockedRequests.some(item => item.method === 'POST')); assert.equal(fs.existsSync(path.join(project, 'unexpected-post.txt')), false); }
+      if (process.env.APEX_TEST_PREBASELINE_JSERROR === '1') assert.ok(evidence.routes[0].pageErrors > 0, 'uncaught page errors must be observed');
+      if (process.env.APEX_TEST_PREBASELINE_BIG === '1') { assert.equal(evidence.routes[0].overflow, true); assert.equal(evidence.routes[0].status, 'incomplete'); }
+      const blocked = status().blockingOperation;
+      assert.equal(blocked.category, 'unresolved-local-import'); assert.equal(blocked.professionalReview.runtimeObservation.status, 'observed-not-authorized');
+      assert.equal(blocked.professionalReview.runtimeObservation.permitsBaseline, false);
+      assert.equal(blocked.professionalReview.runtimeObservation.unobservedSources, expectedLoaded ? 0 : 1);
+      const bytes = fs.readFileSync(observed.observation);
+      try { fs.appendFileSync(observed.observation, 'tamper'); assert.equal(status()?.blockingOperation?.professionalReview?.runtimeObservation, undefined); }
+      finally { fs.writeFileSync(observed.observation, bytes); }
+      assert.equal(status().blockingOperation.professionalReview.runtimeObservation.status, 'observed-not-authorized');
+      try { fs.appendFileSync(source, '\n// source changed\n'); assert.equal(status()?.blockingOperation?.professionalReview?.runtimeObservation, undefined); }
+      finally { fs.writeFileSync(source, original); }
+    } finally { server.kill('SIGTERM'); }
+  }
   assert.equal(fs.existsSync(path.join(dir, 'code-reference.json')), false);
   console.log(JSON.stringify({ status: 'passed', test: 'prebaseline-import-routing' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

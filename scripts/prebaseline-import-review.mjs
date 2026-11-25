@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { currentImportInspection } from './existing-import-inspection.mjs';
+import { controlledOutput } from './verification-policy.mjs';
+import { agentRuntimeStatus } from './run-ledger.mjs';
 
 const hash = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 export const PREBASELINE_REVIEWER_ID = 'prebaseline-codebase-onboarding-engineer';
@@ -152,4 +154,25 @@ export function summarizePrebaselineReviews(results, limit = 10) {
     }
   }
   return { status: 'reviewed-not-authorized', permitsBaseline: false, reviewedCount: seen.size, counts, candidatesRequiringIndependentProof: counts['optional-candidate'] + counts['shadowed-candidate'], mustResolveOrInvestigate: counts['requires-resolution'] + counts.unverified, samples, omittedCount: Math.max(0, seen.size - samples.length), fullEvidence: 'controlled-prebaseline-advisory-artifacts' };
+}
+
+// Recheck the durable job/output identities after a browser observation. This
+// binds the observation to the same reviewed inputs without resending them.
+export function prebaselineObservationBinding(runDir, projectRoot, inspectionRef) {
+  const current = currentImportInspection(runDir, projectRoot, inspectionRef);
+  if (current.status !== 'current-unverified') throw new Error('prebaseline inspection is not current');
+  const root = fs.realpathSync(runDir), inspectionFile = fs.realpathSync(path.resolve(root, inspectionRef));
+  if (!inspectionFile.startsWith(`${root}${path.sep}`)) throw new Error('inspection is outside the Run');
+  const selectionRef = 'advisories/prebaseline/selection.json';
+  if (!controlledOutput(root, selectionRef, ['role-advisory.mjs'], [], ['collect_existing_baseline'])) throw new Error('prebaseline selection is not controlled');
+  const selection = JSON.parse(fs.readFileSync(path.join(root, selectionRef), 'utf8'));
+  if (!Array.isArray(selection.selectedRoles) || !selection.selectedRoles.length || selection.selectedRoles.length > 10000) throw new Error('invalid prebaseline roles');
+  const jobs = new Map(agentRuntimeStatus(root).jobs.map(job => [job.jobId, job]));
+  const outputs = selection.selectedRoles.map(roleId => {
+    if (!/^[a-z0-9-]+$/.test(roleId)) throw new Error('invalid prebaseline role identity');
+    const job = jobs.get(selection.agentJobs?.[roleId]), ref = `advisories/prebaseline/${roleId}.json`, file = fs.realpathSync(path.resolve(root, ref));
+    if (!file.startsWith(`${root}${path.sep}`) || job?.stage !== 'prebaseline' || job.status !== 'succeeded' || job.result?.advisory !== ref || job.result.sha256 !== hash(fs.readFileSync(file)) || !controlledOutput(root, ref, ['role-advisory.mjs'], [], ['collect_existing_baseline'])) throw new Error('prebaseline role output is stale or uncontrolled');
+    return { roleId, ref, sha256: job.result.sha256 };
+  });
+  return { inspection: inspectionRef, inspectionSha256: hash(fs.readFileSync(inspectionFile)), selectionSha256: hash(fs.readFileSync(path.join(root, selectionRef))), roleOutputsSha256: hash(JSON.stringify(outputs)), roleCount: outputs.length };
 }

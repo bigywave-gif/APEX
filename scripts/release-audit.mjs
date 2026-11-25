@@ -74,7 +74,7 @@ const guardedActionScripts = {
   analyze_requirement: ['experience-evaluator.mjs', 'contract-recorder.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
   plan_visual: ['visual-execution-plan.mjs', 'motion-capability.mjs', 'asset-resolver.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
   generate_visual: ['demo-source-compiler.mjs', 'visual-sandbox-writer.mjs', 'visual-sandbox-runtime.mjs', 'browser-capture.mjs', 'runtime-visual-baseline.mjs', 'visual-reference-compiler.mjs', 'visual-sandbox-dependency.mjs', 'experience-evaluator.mjs'],
-  'collect_existing_baseline': ['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
+  'collect_existing_baseline': ['project-intake.mjs', 'existing-code-reference.mjs', 'baseline-collector.mjs', 'browser-capture.mjs', 'prebaseline-import-runtime.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
   'sync_stitch': ['stitch-sync.mjs', 'stitch-ui-importer.mjs', 'strict-replica.mjs', 'confirmation-presentation.mjs'],
   observe_stitch: ['stitch-sync.mjs'],
   validate_stitch: ['strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs'],
