@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
+import { validBoundMainViewport } from './viewport-main-evidence.mjs';
+import { responsiveEvidenceFailures } from './responsive-evidence.mjs';
 import { observeLocalListener } from './local-listener-observation.mjs';
 import { existingRoleContext } from './existing-role-context.mjs';
 import { legacyExistingInspection, legacyExistingSnapshotInputs } from './legacy-existing-inspection.mjs';
@@ -2011,6 +2013,15 @@ function visualSandboxSourceReady(state, runDir) {
     return missing.length ? { ready: false, reason: `materialized Demo does not declare its selected sources: ${missing.join(', ')}` } : { ready: true, reason: null };
   } catch { return { ready: false, reason: 'Demo source or sandbox materialization is unreadable' }; }
 }
+function formalCaptureArtifactsCurrent(runDir, capture) {
+  try {
+    if (!Array.isArray(capture?.evidence) || !capture.evidence.length) return false;
+    return capture.evidence.every(screen => [[screen.screenshot, screen.screenshotSha256], [screen.domHtml, screen.domSha256]].every(([reference, expected]) => {
+      const file = artifactFile(runDir, reference);
+      return file && /^sha256:[a-f0-9]{64}$/.test(expected || '') && sha256File(file) === expected;
+    }));
+  } catch { return false; }
+}
 function formalRuntimeSourceProvenanceStatus(state, runDir) {
   try {
     const manifestFile = artifactFile(runDir, state.artifacts?.visualSourceManifest);
@@ -2040,9 +2051,20 @@ function formalRuntimeSourceProvenanceStatus(state, runDir) {
       if (!emitted) missingCodeMarkers.push(`${binding.visualNode}:${binding.sourceMarker}`);
     }
     if (missingCodeMarkers.length) return { ready: false, enforce: true, needsImplementation: true, reason: `formal implementation does not emit frozen DOM source markers (${missingCodeMarkers.join(', ')})` };
+    const captureFile = path.join(runDir, 'evidence', 'runtime-browser-capture.json');
+    if (usesCombinedPlan(state) && state.gates?.gate3?.status !== 'passed' && fs.existsSync(captureFile)) {
+      const capture = read(captureFile);
+      if (capture.kind === 'runtime' && Array.isArray(capture.sourceBindings) && capture.sourceBindings.length && (capture.sourceMainViewportProtocol !== '1.0' || !Array.isArray(capture.evidence) || capture.evidence.some(item => !validBoundMainViewport(item.sourceMainViewport)))) return { ready: false, enforce: true, needsImplementation: false, reason: 'formal main viewport observations require a current browser recapture' };
+      if (capture.kind === 'runtime' && Array.isArray(capture.sourceBindings) && capture.sourceBindings.length && !formalCaptureArtifactsCurrent(runDir, capture)) return { ready: false, enforce: true, needsImplementation: false, reason: 'formal screenshot or DOM evidence changed and requires browser recapture' };
+    }
     const matrixFile = artifactFile(runDir, state.artifacts?.runtimeStateMatrix);
     if (!matrixFile) return { ready: false, enforce: true, needsImplementation: false, reason: 'runtime state matrix has not been captured after formal source markers were emitted' };
-    const provenance = read(matrixFile).sourceProvenance;
+    const matrix = read(matrixFile), provenance = matrix.sourceProvenance;
+    if (usesCombinedPlan(state) && state.gates?.gate3?.status !== 'passed') {
+      const capture = read(captureFile), bundle = read(artifactFile(runDir, state.artifacts?.visualBundle));
+      const failures = responsiveEvidenceFailures(runDir, capture, operationRecords(runDir).map(item => item.receipt), matrix, bundle.responsive);
+      if (failures.length) return { ready: false, enforce: true, needsImplementation: false, reason: `current responsive evidence is incomplete: ${failures[0]}` };
+    }
     if (!provenance?.ready || !Array.isArray(provenance.bindings) || provenance.bindings.length !== (manifest.bindings || []).length) return { ready: false, enforce: true, needsImplementation: false, reason: 'runtime state matrix lacks complete browser-bound formal source provenance' };
     const expected = new Set((plan.sourceSelections || []).map(selection => selection.id));
     if (![...expected].every(id => provenance.sourceSelectionIds?.includes(id))) return { ready: false, enforce: true, needsImplementation: false, reason: 'runtime state matrix does not bind every selected visual source' };
@@ -2057,6 +2079,8 @@ function formalCaptureSourceReady(state, runDir) {
     const capture = read(file), bindings = capture.sourceBindings || [];
     const expected = new Set((plan.sourceSelections || []).map(item => item.id));
     if (capture.kind !== 'runtime' || capture.status !== 'passed' || !bindings.length || !capture.evidence?.length || bindings.length !== (manifest.bindings || []).length) return false;
+    if (usesCombinedPlan(state) && (capture.sourceMainViewportProtocol !== '1.0' || capture.evidence.some(item => !validBoundMainViewport(item.sourceMainViewport)))) return false;
+    if (usesCombinedPlan(state) && !formalCaptureArtifactsCurrent(runDir, capture)) return false;
     if (usesCombinedPlan(state)) {
       const sandbox = read(artifactFile(runDir, state.artifacts?.visualSandboxFiles));
       const strategyFile = artifactFile(runDir, state.artifacts?.experienceStrategy);
@@ -2326,7 +2350,7 @@ function automaticWorkStep(state, runDir, action) {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
     if (provenance.enforce && !provenance.ready) {
       if (!formalCaptureSourceReady(state, runDir)) return step('capture-formal-runtime-source-provenance', '采集正式页面的来源选择证据', ['evidence/runtime-browser-capture.json'], `以 verify 调用 browser-capture.mjs，从冻结 Visual Source Manifest 采集实际 DOM 来源标记，并在 formalJourneys 中执行每项已确认任务、记录前后状态和受控回执。当前原因：${provenance.reason}。`);
-      return step('capture-runtime-state-matrix', '校验正式页面状态与交互矩阵', ['runtime-state-matrix.json'], '根据真实浏览器截图、响应式范围、状态与已确认任务的 formalJourneys 前后变化证据构建矩阵输入，以 verify 调用 stability-evidence.mjs verify <run-dir> <matrix-input.json>；脚本校验并登记矩阵与来源证据。');
+      return step('capture-runtime-state-matrix', '校验正式页面状态与交互矩阵', ['runtime-state-matrix.json'], `根据真实浏览器截图、响应式范围、状态与已确认任务的 formalJourneys 前后变化证据构建矩阵输入，以 verify 调用 stability-evidence.mjs verify <run-dir> <matrix-input.json>；当前原因：${provenance.reason}。若主内容被裁切，先修复正式页面再重新采集，不得重复提交未变化的矩阵。`);
     }
     if (state.track === 'existing' && usesCombinedPlan(state)) {
       try {
