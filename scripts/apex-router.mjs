@@ -36,7 +36,7 @@ import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
-import { PREBASELINE_REVIEWER_ID, inspectionBoundaryState, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineReviewCoverage } from './prebaseline-import-review.mjs';
+import { PREBASELINE_REVIEWER_ID, inspectionBoundaryState, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineReviewCoverage, summarizePrebaselineReviews } from './prebaseline-import-review.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
@@ -1341,7 +1341,7 @@ function prebaselineImportRoleState(runDir, state) {
       const next = roles.map(id => jobs.get(selection.agentJobs[id])).find(job => job.status !== 'succeeded');
       if (next) return { status: next.status !== 'queued' || !Number.isFinite(Date.parse(next.availableAt)) ? 'terminal' : Date.parse(next.availableAt) > Date.now() ? 'backoff' : 'record', jobId: next.jobId, roleId: next.agentId };
       validatePrebaselineReviewCoverage(runDir, projectRoot, binding.path, results);
-      return { status: 'done', advisoryOutputs };
+      return { status: 'done', advisoryOutputs, reviewSummary: summarizePrebaselineReviews(results) };
     }
     const jobId = selection.agentJobs?.[PREBASELINE_REVIEWER_ID];
     if (typeof jobId !== 'string' || !jobId) return { status: 'repair' };
@@ -1357,8 +1357,9 @@ function prebaselineImportRoleState(runDir, state) {
     if (!advisoryFile || job.result?.advisory !== advisoryRef || job.result.sha256 !== sha256File(advisoryFile) || !controlledOutput(runDir, advisoryRef, ['role-advisory.mjs'], [], ['collect_existing_baseline'])) return stale();
     const context = prebaselineReviewContext(runDir, path.resolve(runDir, '..', '..', '..'), binding.path).context;
     if (job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(context)) return { status: 'repair', jobId };
-    validatePrebaselineImportReviews(runDir, path.resolve(runDir, '..', '..', '..'), binding.path, read(advisoryFile).importReviews);
-    return { status: 'done', jobId, advisoryRef, advisoryHash: job.result.sha256 };
+    const reviews = read(advisoryFile).importReviews;
+    validatePrebaselineImportReviews(runDir, path.resolve(runDir, '..', '..', '..'), binding.path, reviews);
+    return { status: 'done', jobId, advisoryRef, advisoryHash: job.result.sha256, reviewSummary: summarizePrebaselineReviews([{ reviews }]) };
   } catch { return { status: 'repair' }; }
 }
 function pendingPrebaselineFailure(runDir, state, rootFailure) {
@@ -2058,9 +2059,11 @@ function automaticWorkStep(state, runDir, action) {
     if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) return step('expand-project-inventory', '扩大项目扫描范围', ['project-inventory.json'], '扫描结果存在截断。以新的 collect_existing_baseline 授权调用 project-intake.mjs expand <run-dir> <project-root>；脚本按截断情况扩大限制并重扫，达到上限时记录失败回执且保持未验证。不得增加用户确认或重复执行未改变的失败输入。');
     const reference = existingCodeReferenceFreshness(runDir, state);
     if (!reference.ready) {
+      let completedReview = null;
       const failure = latestBlockingOperation(runDir, action);
       if (failure?.category === 'unresolved-local-import' && state.roleChain?.enabled && state.roleChain?.confirmationModel === 'two-confirmations') {
         const role = prebaselineImportRoleState(runDir, state);
+        if (role.status === 'done') completedReview = role.reviewSummary;
         const inspection = currentImportInspection(runDir, path.resolve(runDir, '..', '..', '..'), state.artifacts?.unresolvedImportInspection);
         const scope = failedImportScope(runDir, failure);
         if (role.status === 'operation-wait') return step('prebaseline-operation-wait', '等待既有基线分析操作', [], '检查已有受控操作回执及进程；结果未知时不得重复启动，必要时进行受控恢复。');
@@ -2079,7 +2082,7 @@ function automaticWorkStep(state, runDir, action) {
           }
         }
       }
-      return step('freeze-code-reference', '从当前目标页生成或刷新 Existing 代码闭包与页面骨架', ['baseline-code-scope-input.json', 'code-reference.json', 'page-skeleton.json'], `内部根据当前需求、真实入口和路由生成范围输入，再调用 existing-code-reference.mjs capture。当前原因：${reference.reason}。不得使用模板 Replace 值，也不得复用已漂移的快照。`);
+      return { ...step('freeze-code-reference', '从当前目标页生成或刷新 Existing 代码闭包与页面骨架', ['baseline-code-scope-input.json', 'code-reference.json', 'page-skeleton.json'], `内部根据当前需求、真实入口和路由生成范围输入，再调用 existing-code-reference.mjs capture。当前原因：${reference.reason}。不得使用模板 Replace 值，也不得复用已漂移的快照。`), ...(completedReview ? { professionalReview: completedReview } : {}) };
     }
     const display = existingBrowserCaptureFreshness(runDir, state, reference);
     if (!display.ready) return step('capture-existing-browser-baseline', '采集并绑定当前 Existing 页面截图与 DOM 证据', ['browser-spec.json', 'evidence/existing-browser-capture.json'], `内部基于当前冻结代码引用和页面骨架生成浏览器规格并调用 browser-capture.mjs capture。当前原因：${display.reason}。截图和 DOM 必须绑定同一 sourceTreeHash，且仅作证据，不是用户确认。`);
@@ -2556,7 +2559,9 @@ function executionDirective(state, runDir = null) {
   const reviewStep = currentStep.id === 'inspect-unresolved-imports' || currentStep.id.startsWith('prebaseline-');
   const reviewCanProceed = reviewFailure && !reviewFailure.interrupted && reviewFailure.changed && (reviewStep || currentStep.id === 'freeze-code-reference');
   const safeObservation = currentStep.id === 'prebaseline-operation-wait' || (currentStep.id === 'prebaseline-role-wait' && ['running', 'wait'].includes(prebaselineImportRoleState(runDir, state).status));
-  const blockingOperation = (action === 'recover' ? unresolvedPostGateRecovery(runDir, state) : null) || continuationStall(runDir, action, currentStep.id) || (reviewFailure ? (reviewCanProceed || safeObservation ? null : reviewFailure) : ((automaticallyRemediableFailure || (latestFailure?.category === 'unresolved-local-import' && reviewStep)) ? null : latestFailure));
+  let blockingOperation = (action === 'recover' ? unresolvedPostGateRecovery(runDir, state) : null) || continuationStall(runDir, action, currentStep.id) || (reviewFailure ? (reviewCanProceed || safeObservation ? null : reviewFailure) : ((automaticallyRemediableFailure || (latestFailure?.category === 'unresolved-local-import' && reviewStep)) ? null : latestFailure));
+  if (blockingOperation?.category === 'unresolved-local-import' && currentStep.professionalReview) blockingOperation = { ...blockingOperation, professionalReview: currentStep.professionalReview };
+  const { professionalReview: internalReview, ...publicCurrentStep } = currentStep;
   return {
     kind: 'must-complete-before-user-response',
     action,
@@ -2583,7 +2588,7 @@ function executionDirective(state, runDir = null) {
         : action === 'implement'
           ? { action, required: true, leaseRequired: true, leaseMode: 'acquire-before-router-authorize', runner: 'host-controlled-implementation', mode: 'lease-then-router-authorize-then-apply-approved-implementation-map', scope: 'formal-project-files-only-within-approved-implementation-map', requiredPostconditions: ['page-delta.json', 'selected-dependency-materialization-record', 'no-out-of-scope-project-changes'] }
           : { action, required: true, runner: 'apex-action.mjs', mode: 'run-after-router-authorize' },
-    currentStep,
+    currentStep: publicCurrentStep,
     blockingOperation,
     ...(latestFailure?.category === 'unresolved-local-import' && !blockingOperation ? { remediatingFailure: latestFailure, ...(reviewFailure ? { priorReviewFailure: reviewFailure } : {}) } : {}),
     continuationProtocol: {

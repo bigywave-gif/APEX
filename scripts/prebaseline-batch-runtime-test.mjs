@@ -64,7 +64,7 @@ try {
     const replay = action('agent-runtime.mjs', ['claim', dir, jobId, 'prebaseline', `batch_fixture_claim_0${i + 1}`]);
     assert.equal(replay.idempotent, true); assert.equal(replay.leaseToken, claim.leaseToken); assert.equal(replay.payload.reviewContext, undefined);
     const inspection = selection.inputBindings.find(item => item.artifact === 'unresolvedImportInspection').path;
-    const advisory = { schemaVersion: '1.0', roleId, stage: 'prebaseline', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'fixture', classification: 'unverified', statement: '依赖的实际运行条件仍待验证。', evidence: [inspection] }], recommendations: [], importReviews: claim.payload.reviewContext.unresolvedImports.map(item => ({ source: item.source, reference: item.reference, decision: 'unverified', rationale: '当前证据仅显示源码引用，实际运行条件和影响仍需独立核验。', sourceExcerpt: item.reference })), execution: { inputTokens: 100, outputTokens: 50, usageSource: 'provider-reported', model: 'test-fixture', sessionId: claim.payload.agentSessionId, skillBindings: claim.payload.skillBindings, leaseToken: claim.leaseToken }, status: 'ready' };
+    const advisory = { schemaVersion: '1.0', roleId, stage: 'prebaseline', adapterVersion: '1.0.0', inputBindings: selection.inputBindings, findings: [{ id: 'fixture', classification: 'unverified', statement: '依赖的实际运行条件仍待验证。', evidence: [inspection] }], recommendations: [], importReviews: claim.payload.reviewContext.unresolvedImports.map((item, index) => ({ source: item.source, reference: item.reference, decision: i === 0 && index < 3 ? ['optional-candidate', 'shadowed-candidate', 'requires-resolution'][index] : 'unverified', rationale: '当前证据仅显示源码引用，实际运行条件和影响仍需独立核验。', sourceExcerpt: item.reference })), execution: { inputTokens: 100, outputTokens: 50, usageSource: 'provider-reported', model: 'test-fixture', sessionId: claim.payload.agentSessionId, skillBindings: claim.payload.skillBindings, leaseToken: claim.leaseToken }, status: 'ready' };
     const input = path.join(dir, `batch-input-${i + 1}.json`); fs.writeFileSync(input, JSON.stringify(advisory));
     if (i === 0) {
       const source = path.join(project, 'main.js'), original = fs.readFileSync(source);
@@ -90,7 +90,21 @@ try {
     assert.equal(agentRuntimeStatus(dir, jobId).jobs[0].status, 'succeeded');
   }
   assert.equal(agentRuntimeStatus(dir).tokenUsage.prebaseline, 450);
-  assert.equal(status().blockingOperation.category, 'unresolved-local-import');
+  const blocked = status().blockingOperation;
+  assert.equal(blocked.category, 'unresolved-local-import');
+  assert.equal(blocked.professionalReview.status, 'reviewed-not-authorized');
+  assert.deepEqual(blocked.professionalReview.counts, { 'optional-candidate': 1, 'shadowed-candidate': 1, 'requires-resolution': 1, unverified: 48 });
+  assert.equal(blocked.professionalReview.candidatesRequiringIndependentProof, 2);
+  assert.equal(blocked.professionalReview.mustResolveOrInvestigate, 49);
+  assert.equal(blocked.professionalReview.samples.length, 10);
+  assert.equal(blocked.professionalReview.omittedCount, 41);
+  assert.equal(blocked.professionalReview.permitsBaseline, false);
+  const roleFile = path.join(dir, 'advisories', 'prebaseline', `${selection.selectedRoles[0]}.json`), roleBytes = fs.readFileSync(roleFile);
+  try {
+    fs.appendFileSync(roleFile, 'tampered');
+    assert.equal(status()?.blockingOperation?.professionalReview, undefined, 'changed role evidence cannot support the summary');
+  } finally { fs.writeFileSync(roleFile, roleBytes); }
+  assert.equal(status().blockingOperation.professionalReview.reviewedCount, 51, 'restored controlled role evidence remains usable');
   assert.equal(fs.existsSync(path.join(dir, 'code-reference.json')), false);
   console.log(JSON.stringify({ status: 'passed', test: 'prebaseline-batch-runtime' }));
 } finally { fs.rmSync(project, { recursive: true, force: true }); }

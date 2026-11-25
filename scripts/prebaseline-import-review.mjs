@@ -136,3 +136,20 @@ export function validatePrebaselineReviewCoverage(runDir, projectRoot, reference
   validateReviews(runDir, projectRoot, reference, allReviews, prepared);
   return { status: 'professional-judgment-unverified', reviewedCount: prepared.inspection.unresolvedImports.length, batchCount: batches.length, permitsBaseline: false, controlledExecution: 'not-verified' };
 }
+
+// Call only after validating every controlled role result and its coverage.
+// Candidate decisions require independent proof and never authorize a baseline.
+export function summarizePrebaselineReviews(results, limit = 10) {
+  if (!Array.isArray(results) || !Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new Error('invalid prebaseline summary input');
+  const counts = { 'optional-candidate': 0, 'shadowed-candidate': 0, 'requires-resolution': 0, unverified: 0 }, samples = [], seen = new Set();
+  for (const batch of results) {
+    if (!Array.isArray(batch?.reviews)) throw new Error('prebaseline summary is missing reviews');
+    for (const review of batch.reviews) {
+      const key = JSON.stringify([review?.source, review?.reference]);
+      if (typeof review?.source !== 'string' || !review.source || typeof review.reference !== 'string' || !review.reference || !Object.hasOwn(counts, review.decision) || typeof review.rationale !== 'string' || seen.has(key)) throw new Error('invalid or duplicate prebaseline review');
+      seen.add(key); counts[review.decision]++;
+      if (samples.length < limit) samples.push({ source: review.source.slice(0, 256), sourceTruncated: review.source.length > 256, reference: review.reference.slice(0, 256), referenceTruncated: review.reference.length > 256, decision: review.decision, rationale: review.rationale.slice(0, 240), rationaleTruncated: review.rationale.length > 240 });
+    }
+  }
+  return { status: 'reviewed-not-authorized', permitsBaseline: false, reviewedCount: seen.size, counts, candidatesRequiringIndependentProof: counts['optional-candidate'] + counts['shadowed-candidate'], mustResolveOrInvestigate: counts['requires-resolution'] + counts.unverified, samples, omittedCount: Math.max(0, seen.size - samples.length), fullEvidence: 'controlled-prebaseline-advisory-artifacts' };
+}

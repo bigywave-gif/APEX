@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-25T05:06:29.104Z",
+  "generatedAt": "2026-11-25T05:20:44.806Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -69,7 +69,7 @@
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-reconcile.mjs": "b827d327e518916fa6187df1e4a1f52c8d49bdffe1bd4402e944b13ed5c5877a",
     "scripts/apex-recover.mjs": "52424517bbe1cc1677999b89c9ce686cf84fc2195992357f04671f69cafa9279",
-    "scripts/apex-router.mjs": "6be8d2759894fdf5c12e58e1f4d61c8eb12414e94bba9dc6422911e9a76ff128",
+    "scripts/apex-router.mjs": "b173ea600d39683bd40fd65d1becf4d91a486fe09efd61367926bdf9342fd373",
     "scripts/apex-run.mjs": "46e1524c809022d0d2cb58ea2bc0db8bfe6a746f8d8b0b7f2c53b4b9e19225df",
     "scripts/apex-runtime-guard.mjs": "86f7341158c31e5566dbecaf0a3de446e7b624680d40d9586ce819441ac1e9fe",
     "scripts/apex-validate.mjs": "1feba6e48eb7b60eaf5e6c8a7f7f010f80eb830b900cbe0f69e3aa0c24d8bf3d",
@@ -169,8 +169,8 @@
     "scripts/operation-recovery-test.mjs": "3b2f0d36dfc8bd4deb7c0a6374944432064b086c8e97a35540cb7490fb14cdab",
     "scripts/operation-recovery.mjs": "fcc99bb456da21e942cbcb86e0b1a01a507b37b9f6f5a48b514180ade3e4e1e5",
     "scripts/portable-install-contract-test.mjs": "7909ec69b6983034413e592506a039d7e5077f36df97fd45a9f7ec544a2c7468",
-    "scripts/prebaseline-batch-runtime-test.mjs": "ef7953826171cd23a5b59837e9015a1f6be4a196582411905190fb1fe2c844b6",
-    "scripts/prebaseline-import-review.mjs": "63af6f63534e05f658f8e3f3bea009a7c297f488c842374eed00da3e2c549539",
+    "scripts/prebaseline-batch-runtime-test.mjs": "4be71eb680eaea577a32593e3e5fae29b9542ba8ad9db0658442038d99404300",
+    "scripts/prebaseline-import-review.mjs": "bf678a5682a7487465149541b9e5cf8097ecf9651e516ae12a031808e9498683",
     "scripts/prebaseline-import-routing-test.mjs": "a1e56ac5048f0a1d379b4a1eb34dcbf136445f26f196eab0c14b23f63b36f1e1",
     "scripts/prebaseline-review-batches-test.mjs": "73e75590d34928361281272dac94a9dbc5b68ca35f88ff92fd3c84042e1c1eab",
     "scripts/preflight-contract-test.mjs": "5acebc66bf723777a7e0b0f3acf9af89c6ef9c9302a25b92b9cb2d1bd296a228",
