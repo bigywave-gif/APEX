@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 /** Persistent, evidence-first runtime for dedicated professional agents. */
 import path from 'node:path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { availableAgentSkills, loadTasteSkill, loadAgentSkill, requiredTasteLoadCurrent } from './required-visual-skill.mjs';
+import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext } from './prebaseline-import-review.mjs';
+import { controlledOutput } from './verification-policy.mjs';
 
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
 const [command, runArg, ...args] = process.argv.slice(2);
 const runDir = path.resolve(runArg || '.');
 if (!command || !runArg) fail('usage: register|enqueue|claim|skill|renew|succeed|fail|tokens-observed|reconcile-attempt-usage|reconcile-observed-usage|run-budget|trace-start|trace-end|status <run-dir> ... (tokens is for legacy Runs only)');
-const stageAction = { baseline: 'collect_existing_baseline', gate1: 'analyze_requirement', visual: 'plan_visual', implementation: 'compile_visual_bundle', verify: 'verify' };
+const stageAction = { prebaseline: 'collect_existing_baseline', baseline: 'collect_existing_baseline', gate1: 'analyze_requirement', visual: 'plan_visual', implementation: 'compile_visual_bundle', verify: 'verify' };
 const readJson = value => { try { return JSON.parse(value); } catch { fail('JSON argument is invalid'); } };
 const tokenInteger = (value, name) => { if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error(`${name} must be a non-negative safe integer`); return Number(value); };
 try {
@@ -30,6 +33,14 @@ try {
     // A replay reconciles a potentially live executor; it must not redispatch
     // or reload its instructions. New claims still validate the Skill first.
     const replaying = pending.status === 'running';
+    if (stage === 'prebaseline' && !replaying) {
+      const reference = pending.payload?.inputBindings?.find(item => item.artifact === 'unresolvedImportInspection')?.path;
+      const current = prebaselineReviewContext(runDir, path.resolve(runDir, '..', '..', '..'), reference);
+      const selectionRef = 'advisories/prebaseline/selection.json';
+      if (!controlledOutput(runDir, selectionRef, ['role-advisory.mjs'], [], ['collect_existing_baseline'])) throw new Error('prebaseline review selection lacks a controlled ledger-bound receipt');
+      const selection = JSON.parse(fs.readFileSync(path.join(runDir, selectionRef), 'utf8'));
+      if (pending.agentId !== PREBASELINE_REVIEWER_ID || pending.payload?.roleId !== pending.agentId || selection.agentJobs?.[pending.agentId] !== jobId || JSON.stringify(selection.inputBindings) !== JSON.stringify(pending.payload?.inputBindings) || pending.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(pending.payload?.reviewContext) !== JSON.stringify(current.context)) throw new Error('prebaseline review job is not bound to the current inspection');
+    }
     const skillInstructions = !replaying && pending?.payload?.tasteSkill ? loadTasteSkill(pending.payload.tasteSkill) : null;
     const optionalSkills = replaying ? [] : availableAgentSkills(stage, pending.payload?.roleId);
     const claimed = claimAgentJob(runDir, jobId, { claimKey, replayOnly: replaying });
@@ -37,7 +48,9 @@ try {
     if (claimed.status === 'running' && !claimed.idempotent && skillInstructions) appendLedgerEvent(runDir, { type: 'agent-required-skill-loaded', jobId, agentId: pending.agentId, stage, attempt: claimed.attempt, name: skillInstructions.name, sha256: skillInstructions.sha256, path: skillInstructions.path, operationReceipt: process.env.APEX_ROUTER_OPERATION_RECEIPT || null });
     const replaySkill = claimed.idempotent && claimed.payload?.tasteSkill;
     const requiredSkillLoad = replaySkill ? { status: requiredTasteLoadCurrent(runDir, jobId, claimed.attempt, claimed.leaseToken, replaySkill) ? 'verified' : 'unverified', note: 'A replay does not load or dispatch the Skill; reconcile the original executor and receipt before proceeding.' } : undefined;
-    console.log(JSON.stringify({ ...claimed, ...(claimed.status === 'running' && !claimed.idempotent && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(replaySkill ? { requiredSkillBinding: replaySkill, requiredSkillLoad } : {}), ...(claimed.status === 'running' && !claimed.idempotent && optionalSkills.length ? { optionalSkills } : {}) }));
+    const replayReview = stage === 'prebaseline' && claimed.idempotent && claimed.payload?.reviewContext;
+    const response = replayReview ? { ...claimed, payload: { ...claimed.payload, reviewContext: undefined }, reviewContextBinding: { sha256: `sha256:${crypto.createHash('sha256').update(JSON.stringify(replayReview)).digest('hex')}`, note: 'Reconcile the existing execution; replay does not resend or redispatch the review context.' } } : claimed;
+    console.log(JSON.stringify({ ...response, ...(claimed.status === 'running' && !claimed.idempotent && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(replaySkill ? { requiredSkillBinding: replaySkill, requiredSkillLoad } : {}), ...(claimed.status === 'running' && !claimed.idempotent && optionalSkills.length ? { optionalSkills } : {}) }));
   } else if (command === 'skill') {
     const [jobId, stage, leaseToken, name, expectedSha256] = args;
     if (!stageAction[stage] || !jobId || !leaseToken || !name || !expectedSha256) fail('skill requires a valid agent job, stage, lease token, skill name and expected hash');

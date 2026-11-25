@@ -13,7 +13,7 @@ import { recordLateCancelledOperation } from './cancelled-operation-finalizer.mj
 import { runControlledSubprocess } from './controlled-subprocess.mjs';
 import { runtimeStartLockAvailable } from './runtime-start-lock.mjs';
 import { recoveredRuntimeReady } from './runtime-launch-intent.mjs';
-import { unresolvedCauseChanged } from './existing-import-inspection.mjs';
+import { unresolvedCauseChanged, currentImportInspection } from './existing-import-inspection.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const router = path.join(apexRoot, 'scripts', 'apex-router.mjs');
@@ -288,7 +288,12 @@ if (script === 'existing-code-reference.mjs' && scriptArgs[0] === 'inspect-impor
     else inspectionBoundary = { kind: 'directory', links: fs.readdirSync(directory, { withFileTypes: true }).filter(item => item.isSymbolicLink()).map(item => [item.name, fs.readlinkSync(path.join(directory, item.name))]).sort((a, b) => a[0].localeCompare(b[0])) };
   } catch (error) { inspectionBoundary = { kind: error.code === 'ENOENT' ? 'absent' : `unavailable:${error.code || 'unknown'}` }; }
 }
-const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }), ...(requiredVisualSkill === undefined ? {} : { requiredVisualSkill }), ...(optionalSkillInput === undefined ? {} : { optionalSkillInput }), ...(inspectionBoundary === undefined ? {} : { inspectionBoundary }) });
+let prebaselineInspection;
+if ((script === 'role-advisory.mjs' && scriptArgs[2] === 'prebaseline') || (script === 'agent-runtime.mjs' && scriptArgs[3] === 'prebaseline')) {
+  try { const state = readRunState(runDirectory); prebaselineInspection = currentImportInspection(runDirectory, projectRoot, state.artifacts?.unresolvedImportInspection); }
+  catch (error) { prebaselineInspection = { status: 'stale-or-unverified', reason: error.message }; }
+}
+const inputDigest = digest({ argumentFiles: currentInputHashes, runInputs: currentRunInputHashes, roleEvidence: roleEvidenceInputs(), ...(claimBudgetInputs === undefined ? {} : { agentClaimBudget: claimBudgetInputs }), ...(revisionRetryInputs === undefined ? {} : { revisionRecoveryRetry: revisionRetryInputs }), ...(requiredVisualSkill === undefined ? {} : { requiredVisualSkill }), ...(optionalSkillInput === undefined ? {} : { optionalSkillInput }), ...(inspectionBoundary === undefined ? {} : { inspectionBoundary }), ...(prebaselineInspection === undefined ? {} : { prebaselineInspection }) });
 // An authorization is deliberately single-use, but a fresh authorization is
 // not evidence that the failed action now has different inputs.  Without this
 // operation key, hosts can create an infinite retry loop by asking Router for

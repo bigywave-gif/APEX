@@ -23,6 +23,7 @@
     },
     "stage": {
       "enum": [
+        "prebaseline",
         "baseline",
         "gate1",
         "visual",
@@ -257,6 +258,21 @@
         }
       },
       "additionalProperties": false
+    },
+    "importReviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "reference", "decision", "rationale", "sourceExcerpt"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "reference": { "type": "string", "minLength": 1 },
+          "decision": { "enum": ["optional-candidate", "shadowed-candidate", "requires-resolution", "unverified"] },
+          "rationale": { "type": "string", "minLength": 24 },
+          "sourceExcerpt": { "type": "string", "minLength": 8 }
+        },
+        "additionalProperties": false
+      }
     },
     "resourceReviews": {
       "type": "array",
