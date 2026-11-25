@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-25T04:16:22.537Z",
+  "generatedAt": "2026-11-25T04:28:52.352Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -161,6 +161,7 @@
     "scripts/legacy-demo-recapture-test.mjs": "4ef021981077d45a40314ef6a74a0d61d9900b3207dc858a20094de75f3fb48c",
     "scripts/legacy-demo-recapture.mjs": "e2089528d301d6f5ee917b16de3e995e5c6e59bdcd430078919e279604f32cb8",
     "scripts/legacy-upgrade-browser-test.mjs": "1fb3eebadec48df1b3b0ccdcbfd3c1a823a2d690a5c5b2703ef0853383b5d5bc",
+    "scripts/legacy-upgrade-gate3-test.mjs": "31e86f8069cb38fb73af4401f397c28dda115a76a2f2507698e1da837d0642fe",
     "scripts/materialization-current.mjs": "9deb907f7edab687cf4de2a29d6cff77cd8a4fc255058809ad6f9cb57bfbd485",
     "scripts/motion-capability.mjs": "fa7859ee77018cc023703654e16ee04d76e0f535b5162b738277e81712882902",
     "scripts/motion-contract.mjs": "1bcdb0b5c1230002c4b6a8d9fccde2d5f528a46a2e56deec22bf68bfc1d7c788",
