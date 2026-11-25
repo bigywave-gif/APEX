@@ -146,6 +146,7 @@ for (const [name, script] of [
   ['existing-reference-resolution', 'existing-reference-resolution-test.mjs'],
   ['prebaseline-import-routing', 'prebaseline-import-routing-test.mjs'],
   ['prebaseline-review-batches', 'prebaseline-review-batches-test.mjs'],
+  ['prebaseline-batch-runtime', 'prebaseline-batch-runtime-test.mjs'],
   ['design-contract-evidence', 'design-contract-evidence-test.mjs'],
   ['visual-skill-decision', 'visual-skill-decision-test.mjs'],
   ['visual-revision-binding', 'visual-revision-binding-test.mjs'],

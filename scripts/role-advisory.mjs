@@ -14,7 +14,7 @@ import { validateRequirementReview } from './requirement-review.mjs';
 import { validateResourceReviews } from './existing-resource-freshness.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
-import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, validatePrebaselineImportReviews } from './prebaseline-import-review.mjs';
+import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineBatchReviews } from './prebaseline-import-review.mjs';
 import { controlledOutput } from './verification-policy.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,7 +113,16 @@ function loadSelection(runDir, stage) { const file = path.join(stageDirectory(ru
 function currentSelectionInputs(runDir, stage) {
   const state = stateFor(runDir); state.__runDir = runDir;
   if (stage === 'prebaseline' && (state.track !== 'existing' || !state.roleChain?.enabled || state.roleChain?.confirmationModel !== 'two-confirmations')) die('prebaseline import review requires an enabled current Existing role chain');
-  const reviewBundle = stage === 'prebaseline' ? prebaselineReviewContext(runDir, path.resolve(runDir, '..', '..', '..'), state.artifacts?.unresolvedImportInspection) : null;
+  let reviewBundle = null, reviewContexts = null;
+  if (stage === 'prebaseline') {
+    const root = path.resolve(runDir, '..', '..', '..'), reference = state.artifacts?.unresolvedImportInspection;
+    try { reviewBundle = prebaselineReviewContext(runDir, root, reference); }
+    catch (error) {
+      if (!/bounded batching is required/.test(error.message)) throw error;
+      const plan = prebaselineReviewBatchPlan(runDir, root, reference);
+      reviewContexts = Object.fromEntries(plan.batches.map(batch => [`${PREBASELINE_REVIEWER_ID}-batch-${batch.batch.index}`, batch]));
+    }
+  }
   const reviewContext = reviewBundle?.context || null;
   if (stage === 'visual' && state.roleChain?.confirmationModel === 'two-confirmations') {
     const required = ['deliveryContract', 'experienceStrategy', ...(state.track === 'existing' ? ['changeScope'] : [])], root = fs.realpathSync(runDir);
@@ -128,7 +137,7 @@ function currentSelectionInputs(runDir, stage) {
     try { requiredFormalTasks({}, read(path.resolve(runDir, state.artifacts.experienceStrategy)), { requireProductPlan: true }); }
     catch (error) { die(`visual role requires a complete product task plan: ${error.message}`); }
   }
-  const registry = read(registryFile); const selectedRoles = requiredRoleIds(registry, state, stage); delete state.__runDir;
+  const registry = read(registryFile); const baseRoles = requiredRoleIds(registry, state, stage); const selectedRoles = reviewContexts ? Object.keys(reviewContexts) : baseRoles; delete state.__runDir;
   if (!selectedRoles.length) die(`no role is eligible for ${stage}/${state.track}`);
   const bindings = (stageArtifacts[stage] || []).flatMap(artifact => {
     const reference = state.artifacts?.[artifact]; const file = reference && path.resolve(runDir, reference);
@@ -145,12 +154,12 @@ function currentSelectionInputs(runDir, stage) {
     bindings.push({ artifact: 'requirementRevisions', path: 'prompt-revisions.ndjson', sha256: hash(revisionFile) });
   }
   const configuredStageBudget = { lite: 6000, standard: 12000, full: 24000 }[state.scope] || 12000;
-  const inputFloor = reviewContext ? tokenFloor(JSON.stringify(reviewContext)) : bindings.reduce((total, binding) => total + tokenFloor(fs.readFileSync(path.resolve(runDir, binding.path))), 0);
+  const inputFloor = reviewContext ? tokenFloor(JSON.stringify(reviewContext)) : reviewContexts ? Math.max(...Object.values(reviewContexts).map(item => tokenFloor(JSON.stringify(item)))) : bindings.reduce((total, binding) => total + tokenFloor(fs.readFileSync(path.resolve(runDir, binding.path))), 0);
   const outputReserve = reviewContext ? 1000 + 180 * reviewContext.unresolvedImports.length : 1000;
   const perAgentBudget = Math.max(1000, Math.floor(configuredStageBudget / selectedRoles.length), inputFloor + outputReserve);
   const tasteBinding = stage === 'visual' && selectedRoles.includes('ui-designer') ? resolveTasteSkill() : null;
   const requiredSkillFloor = tasteBinding ? tokenFloor(fs.readFileSync(tasteBinding.path)) : 0;
-  const perRole = Object.fromEntries(selectedRoles.map(roleId => [roleId, roleId === 'ui-designer' && tasteBinding ? Math.max(perAgentBudget, inputFloor + requiredSkillFloor + 1000) : perAgentBudget]));
+  const perRole = Object.fromEntries(selectedRoles.map(roleId => [roleId, reviewContexts ? Math.max(1000, tokenFloor(JSON.stringify(reviewContexts[roleId])) + 1000 + 180 * reviewContexts[roleId].unresolvedImports.length) : roleId === 'ui-designer' && tasteBinding ? Math.max(perAgentBudget, inputFloor + requiredSkillFloor + 1000) : perAgentBudget]));
   const baseStageBudget = Math.max(configuredStageBudget, Object.values(perRole).reduce((sum, value) => sum + value, 0) + 2500);
   // Archived stage executions already include revisions and repairs. Count
   // each once so a visual revision does not receive two extra allowances.
@@ -160,10 +169,10 @@ function currentSelectionInputs(runDir, stage) {
       .length
     : 0;
   const stageBudget = baseStageBudget * (1 + repairEpoch);
-  return { registry, selectedRoles, bindings, tasteBinding, reviewContext, reviewBundle, tokenBudget: { stage: stageBudget, perAgent: perAgentBudget, perRole, inputFloor, requiredSkillFloor, policy: 'role-input-and-required-skill-reserve-v2', repairEpoch } };
+  return { registry, selectedRoles, bindings, tasteBinding, reviewContext, reviewContexts, reviewBundle, tokenBudget: { stage: stageBudget, perAgent: perAgentBudget, perRole, inputFloor, requiredSkillFloor, policy: 'role-input-and-required-skill-reserve-v2', repairEpoch } };
 }
 function select(runDir, stage) {
-  const { registry, selectedRoles, bindings, tokenBudget, tasteBinding, reviewContext } = currentSelectionInputs(runDir, stage);
+  const { registry, selectedRoles, bindings, tokenBudget, tasteBinding, reviewContext, reviewContexts } = currentSelectionInputs(runDir, stage);
   const output = path.join(stageDirectory(runDir, stage), 'selection.json');
   // Selection is an idempotency boundary.  Re-selecting after a transport
   // retry must never enqueue the same profession a second time or consume a
@@ -177,7 +186,7 @@ function select(runDir, stage) {
     for (const roleId of selectedRoles) {
       const job = jobs.get(existing.agentJobs?.[roleId]);
       if (!job || job.agentId !== roleId || job.stage !== stage || job.payload?.roleId !== roleId || job.payload?.registrySha256 !== existing.registry.sha256 || JSON.stringify(job.payload?.inputBindings) !== JSON.stringify(bindings)) die(`existing role selection has missing or inconsistent durable job: ${roleId}; recover the ledger before continuing`);
-      if (stage === 'prebaseline' && (job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(reviewContext))) die('existing prebaseline review job has stale or inconsistent inspection context');
+      if (stage === 'prebaseline' && (job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(reviewContexts?.[roleId] || reviewContext))) die('existing prebaseline review job has stale or inconsistent inspection context');
       if (stage === 'visual' && roleId === 'ui-designer' && (JSON.stringify(job.payload.tasteSkill) !== JSON.stringify(existing.tasteSkill) || !job.payload.skillBindings?.includes('taste-skill'))) die('visual UI designer job is missing or has an inconsistent required taste-skill binding');
     }
     console.log(JSON.stringify({ stage, selection: output, selectedRoles, inputBindings: bindings.length, jobs: existing.agentJobs || {}, idempotent: true }));
@@ -196,18 +205,19 @@ function select(runDir, stage) {
   // but it cannot silently turn the professional chain into a prose list.
   const inputHash = `sha256:${crypto.createHash('sha256').update(JSON.stringify(selection.inputBindings)).digest('hex')}`;
   const jobs = selectedRoles.map(roleId => {
+    const roleReviewContext = reviewContexts?.[roleId] || reviewContext;
     const role = registry.roles.find(item => item.id === (stage === 'prebaseline' ? 'codebase-onboarding-engineer' : roleId));
     const productVerification = stage === 'verify' && roleId === 'product-manager' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations';
     const skillBindings = [...(stageSkillBindings[stage] || []), ...(roleId === 'ui-designer' && tasteSkill ? ['taste-skill'] : [])];
     const agent = registerAgent(runDir, { agentId: roleId, vocation: stage === 'prebaseline' ? 'codebase-onboarding-engineer' : roleId, stage, capabilityVersion: registry.upstream.commit, metadata: { standards: stage === 'prebaseline' ? ['source-bound-import-assessment', 'judgment-is-not-an-exception'] : role?.standards || [], inputs: stage === 'prebaseline' ? ['unresolvedImportInspection'] : productVerification ? ['intentBrief', 'experienceStrategy', 'visualSandboxFiles', 'implementationMap', 'runtimeStateMatrix', 'evidenceProvenance', ...(fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) ? ['requirementRevisions'] : [])] : role?.inputs || [], outputs: stage === 'prebaseline' ? ['importReviews'] : productVerification ? ['productReview', 'requirementReview', 'requestCoverage'] : role?.outputs || [], skillBindings } });
-    const payload = { roleId, stage, agentSessionId: agent.sessionId, skillBindings, ...(roleId === 'ui-designer' && tasteSkill ? { tasteSkill } : {}), ...(reviewContext ? { reviewContext, reviewPolicy: 'judgment-only-no-baseline-exception' } : {}), ...(tokenBudget.repairEpoch > 0 ? { budgetRecovery: true } : {}), inputBindings: bindings, registrySha256: selection.registry.sha256, tokenBudget: selection.tokenBudget.perRole[roleId], stageTokenBudget: selection.tokenBudget.stage };
+    const payload = { roleId, stage, agentSessionId: agent.sessionId, skillBindings, ...(roleId === 'ui-designer' && tasteSkill ? { tasteSkill } : {}), ...(roleReviewContext ? { reviewContext: roleReviewContext, reviewPolicy: 'judgment-only-no-baseline-exception' } : {}), ...(tokenBudget.repairEpoch > 0 ? { budgetRecovery: true } : {}), inputBindings: bindings, registrySha256: selection.registry.sha256, tokenBudget: selection.tokenBudget.perRole[roleId], stageTokenBudget: selection.tokenBudget.stage };
     // A deterministic identity lets a replay reconstruct a selection after a
     // crash between durable job creation and the compatibility-file write.
     const jobId = `agent-${crypto.createHash('sha256').update(JSON.stringify({ stage, roleId, inputHash, repairEpoch: tokenBudget.repairEpoch, payload })).digest('hex').slice(0, 32)}`;
     return enqueueAgentJob(runDir, { jobId, agentId: roleId, stage, inputHash, payload, maxAttempts: 3 });
   });
   selection.agentJobs = Object.fromEntries(selectedRoles.map((roleId, index) => [roleId, jobs[index].jobId])); write(output, selection);
-  console.log(JSON.stringify({ stage, selection: output, selectedRoles, inputBindings: bindings.length, jobs }));
+  console.log(JSON.stringify({ stage, selection: output, selectedRoles, inputBindings: bindings.length, jobs: reviewContexts ? jobs.map(job => ({ jobId: job.jobId, agentId: job.agentId, status: job.status })) : jobs }));
 }
 function rebudget(runDir, stage) {
   const selection = loadSelection(runDir, stage);
@@ -260,9 +270,14 @@ function recordChecked(runDir, stage, selection, advisory) {
     const state = stateFor(runDir), baseline = read(path.join(runDir, state.artifacts.existingBaseline));
     if (baseline.codeReference?.resourceReviewProtocol === '1.0') validateResourceReviews(read(path.join(runDir, state.artifacts.codeReference)), advisory.resourceReviews);
   }
-  if (stage === 'prebaseline') validatePrebaselineImportReviews(runDir, path.resolve(runDir, '..', '..', '..'), stateFor(runDir).artifacts?.unresolvedImportInspection, advisory.importReviews, current.reviewBundle);
+  const roleReviewContext = current.reviewContexts?.[advisory.roleId] || current.reviewContext;
+  if (stage === 'prebaseline') {
+    const root = path.resolve(runDir, '..', '..', '..'), reference = stateFor(runDir).artifacts?.unresolvedImportInspection;
+    if (current.reviewContexts) validatePrebaselineBatchReviews(runDir, root, reference, roleReviewContext.batch.index, advisory.importReviews);
+    else validatePrebaselineImportReviews(runDir, root, reference, advisory.importReviews, current.reviewBundle);
+  }
   if (stage === 'verify' && advisory.roleId === 'product-manager' && stateFor(runDir).roleChain?.confirmationModel === 'two-confirmations') { validateProductTaskReview(runDir, stateFor(runDir), advisory.productReview); validateRequirementReview(runDir, stateFor(runDir), advisory.requirementReview, advisory.requestCoverage); }
-  const floors = advisoryTokenFloors(runDir, selection.inputBindings, advisory, stage, current.reviewContext);
+  const floors = advisoryTokenFloors(runDir, selection.inputBindings, advisory, stage, roleReviewContext);
   const usageSource = advisory.execution.usageSource || 'legacy-unverified';
   if (usageSource === 'unknown' && (advisory.execution.inputTokens !== 0 || advisory.execution.outputTokens !== 0)) die('unknown token usage must use zero placeholders and remain explicitly unmetered');
   // A byte-based heuristic is not a tokenizer and must not reject provider-reported usage.
@@ -278,7 +293,7 @@ function recordChecked(runDir, stage, selection, advisory) {
     const job = agentRuntimeStatus(runDir, jobId).jobs[0];
     if (!job || job.agentId !== advisory.roleId || job.stage !== stage) die(`dedicated Agent job does not match advisory: ${advisory.roleId}`);
     if (job.status !== 'running') die(`dedicated Agent job must be claimed before advisory recording: ${advisory.roleId}/${job.status}`);
-    if (JSON.stringify(job.payload?.inputBindings) !== JSON.stringify(expectedBindings) || job.payload?.registrySha256 !== selection.registry?.sha256 || (stage === 'prebaseline' && (job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(current.reviewContext)))) die(`dedicated Agent job inputs do not match selection: ${advisory.roleId}`);
+    if (JSON.stringify(job.payload?.inputBindings) !== JSON.stringify(expectedBindings) || job.payload?.registrySha256 !== selection.registry?.sha256 || (stage === 'prebaseline' && (job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(roleReviewContext)))) die(`dedicated Agent job inputs do not match selection: ${advisory.roleId}`);
     if (stage === 'visual' && advisory.roleId === 'ui-designer' && (!job.payload?.tasteSkill || JSON.stringify(job.payload.tasteSkill) !== JSON.stringify(selection.tasteSkill))) die('visual UI designer job is missing or has an inconsistent required taste-skill binding');
     if (advisory.execution.sessionId !== job.payload?.agentSessionId) die(`advisory session does not match claimed Agent job: ${advisory.roleId}`);
     if (JSON.stringify(advisory.execution.skillBindings || []) !== JSON.stringify(job.payload?.skillBindings || [])) die(`advisory Skill bindings do not match claimed Agent job: ${advisory.roleId}`);

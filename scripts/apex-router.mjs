@@ -35,7 +35,7 @@ import { validateRequirementReview } from './requirement-review.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage } from './existing-resource-freshness.mjs';
 import { unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
-import { PREBASELINE_REVIEWER_ID, inspectionBoundaryState, prebaselineReviewContext, validatePrebaselineImportReviews } from './prebaseline-import-review.mjs';
+import { PREBASELINE_REVIEWER_ID, inspectionBoundaryState, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineReviewCoverage } from './prebaseline-import-review.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
@@ -1202,7 +1202,32 @@ function prebaselineImportRoleState(runDir, state) {
     if (inFlight) return { status: 'operation-wait' };
     const file = path.join(runDir, 'advisories', 'prebaseline', 'selection.json');
     if (!fs.existsSync(file)) return { status: 'select' };
-    const selection = read(file), jobId = selection.agentJobs?.[PREBASELINE_REVIEWER_ID];
+    const selection = read(file);
+    if (selection.selectedRoles?.[0]?.startsWith(`${PREBASELINE_REVIEWER_ID}-batch-`)) {
+      const roles = selection.selectedRoles, jobs = new Map(agentRuntimeStatus(runDir).jobs.map(job => [job.jobId, job]));
+      const active = roles.map(id => jobs.get(selection.agentJobs?.[id])).find(job => job?.status === 'running');
+      const stale = () => ({ status: active ? 'wait' : 'repair', jobId: active?.jobId });
+      const binding = selection.inputBindings?.find(item => item.artifact === 'unresolvedImportInspection'), projectRoot = path.resolve(runDir, '..', '..', '..');
+      const inspectionFile = artifactFile(runDir, state.artifacts?.unresolvedImportInspection);
+      if (!inspectionFile || binding?.path !== state.artifacts.unresolvedImportInspection || binding.sha256 !== sha256File(inspectionFile) || selection.registry?.sha256 !== sha256File(path.join(apexRoot, 'registry', 'agency-role-registry.json')) || !controlledOutput(runDir, 'advisories/prebaseline/selection.json', ['role-advisory.mjs'], [], ['collect_existing_baseline'])) return stale();
+      let batches; try { batches = prebaselineReviewBatchPlan(runDir, projectRoot, binding.path).batches; } catch { return stale(); }
+      if (JSON.stringify(roles) !== JSON.stringify(batches.map(batch => `${PREBASELINE_REVIEWER_ID}-batch-${batch.batch.index}`)) || Object.keys(selection.agentJobs || {}).length !== roles.length) return stale();
+      const results = [], advisoryOutputs = [];
+      for (const [index, roleId] of roles.entries()) {
+        const job = jobs.get(selection.agentJobs[roleId]);
+        if (!job || job.agentId !== roleId || job.stage !== 'prebaseline' || job.payload?.roleId !== roleId || job.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(job.payload?.inputBindings) !== JSON.stringify(selection.inputBindings) || JSON.stringify(job.payload?.reviewContext) !== JSON.stringify(batches[index])) return stale();
+        if (job.status !== 'succeeded') continue;
+        const advisoryRef = `advisories/prebaseline/${roleId}.json`, advisoryFile = artifactFile(runDir, advisoryRef);
+        if (!advisoryFile || job.result?.advisory !== advisoryRef || job.result.sha256 !== sha256File(advisoryFile) || !controlledOutput(runDir, advisoryRef, ['role-advisory.mjs'], [], ['collect_existing_baseline'])) return stale();
+        results.push({ batchIndex: index + 1, reviews: read(advisoryFile).importReviews }); advisoryOutputs.push({ advisoryRef, advisoryHash: job.result.sha256 });
+      }
+      if (active) return { status: Number.isFinite(Date.parse(active.leaseExpiresAt)) && Date.parse(active.leaseExpiresAt) > Date.now() ? 'running' : 'wait', jobId: active.jobId, roleId: active.agentId };
+      const next = roles.map(id => jobs.get(selection.agentJobs[id])).find(job => job.status !== 'succeeded');
+      if (next) return { status: next.status !== 'queued' || !Number.isFinite(Date.parse(next.availableAt)) ? 'terminal' : Date.parse(next.availableAt) > Date.now() ? 'backoff' : 'record', jobId: next.jobId, roleId: next.agentId };
+      validatePrebaselineReviewCoverage(runDir, projectRoot, binding.path, results);
+      return { status: 'done', advisoryOutputs };
+    }
+    const jobId = selection.agentJobs?.[PREBASELINE_REVIEWER_ID];
     if (typeof jobId !== 'string' || !jobId) return { status: 'repair' };
     const job = agentRuntimeStatus(runDir, jobId).jobs[0];
     const stale = () => ({ status: job?.status === 'running' || inFlight ? 'wait' : 'repair', jobId });
@@ -1232,7 +1257,8 @@ function pendingPrebaselineFailure(runDir, state, rootFailure) {
     if (!legacyAmbiguous && (context?.stage !== 'prebaseline' || !['inspect-imports', 'select', 'record', 'repair', 'rebudget', 'claim', 'skill', 'renew'].includes(context.command))) continue;
     if (receipt.status !== 'interrupted' && laterRecords.some(record => record.script === 'role-advisory.mjs' && record.prebaselineContext?.command === 'record')) {
       const role = prebaselineImportRoleState(runDir, state);
-      if (role.status === 'done' && laterRecords.some(record => record.outputFileHashes?.[role.advisoryRef] === role.advisoryHash && ledgerBoundOutput(runDir, record, role.advisoryRef, role.advisoryHash))) continue;
+      const outputs = role.advisoryOutputs || [{ advisoryRef: role.advisoryRef, advisoryHash: role.advisoryHash }];
+      if (role.status === 'done' && laterRecords.some(record => outputs.some(({ advisoryRef, advisoryHash }) => record.outputFileHashes?.[advisoryRef] === advisoryHash && ledgerBoundOutput(runDir, record, advisoryRef, advisoryHash)))) continue;
     }
     if (legacyAmbiguous) return { kind: receipt.status === 'interrupted' ? 'operation-interrupted' : 'operation-failed', category: 'prebaseline-review-failed', action: 'collect_existing_baseline', script: receipt.script, operationReceipt: path.relative(runDir, item.path), exitCode: receipt.exitCode ?? null, observedError: `${receipt.stderr || receipt.stdout || 'unclassified earlier operation failed'}`.trim().slice(0, 1200), retryPolicy: 'inspect the unclassified earlier receipt before continuing', changed: false, interrupted: receipt.status === 'interrupted', command: 'unknown' };
     const current = currentImportInspection(runDir, path.resolve(runDir, '..', '..', '..'), state.artifacts?.unresolvedImportInspection);
@@ -1925,6 +1951,7 @@ function automaticWorkStep(state, runDir, action) {
           if (inspection.status !== 'current-unverified' || !sameScope) return step('inspect-unresolved-imports', '检查未解析的本地依赖', ['inspections/imports-*.json'], `通过 existing-code-reference.mjs inspect-imports 使用原失败回执绑定的 Run 内范围 ${scope.reference}；结果仅为未验证证据，不能放行基线。`);
           if (inspection.unresolvedCount > 0) {
             if (role.status === 'select') return step('prebaseline-role-select', '选择基线依赖分析角色', ['advisories/prebaseline/selection.json'], '基于当前受控检查选择专业角色；其判断不构成依赖例外许可。');
+            if ((role.status === 'record' || role.status === 'running') && role.roleId) return step('prebaseline-batch-record', '完成当前依赖分析批次', ['advisories/prebaseline/*-batch-*.json'], `使用已有角色 ${role.roleId} 的受控作业 ${role.jobId} 和租约，只处理该批冻结上下文；不得重复派发或放行基线。`);
             if (role.status === 'record' || role.status === 'running') return step('prebaseline-role-record', '完成基线依赖专业分析', ['advisories/prebaseline/prebaseline-codebase-onboarding-engineer.json'], '使用同一受控作业和租约分析当前源码，记录有依据的判断；不得重复派发或放行基线。');
             if (role.status === 'backoff') return step('prebaseline-role-wait', '等待基线分析任务退避', [], '等待现有作业可重试时间，重新读取 Router；不得创建重复作业。');
           }

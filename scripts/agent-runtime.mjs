@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { availableAgentSkills, loadTasteSkill, loadAgentSkill, requiredTasteLoadCurrent } from './required-visual-skill.mjs';
-import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext } from './prebaseline-import-review.mjs';
+import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan } from './prebaseline-import-review.mjs';
 import { controlledOutput } from './verification-policy.mjs';
 
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
@@ -35,11 +35,13 @@ try {
     const replaying = pending.status === 'running';
     if (stage === 'prebaseline' && !replaying) {
       const reference = pending.payload?.inputBindings?.find(item => item.artifact === 'unresolvedImportInspection')?.path;
-      const current = prebaselineReviewContext(runDir, path.resolve(runDir, '..', '..', '..'), reference);
+      const batchIndex = pending.payload?.reviewContext?.batch?.index;
+      const currentContext = batchIndex === undefined ? prebaselineReviewContext(runDir, path.resolve(runDir, '..', '..', '..'), reference).context : prebaselineReviewBatchPlan(runDir, path.resolve(runDir, '..', '..', '..'), reference).batches[batchIndex - 1];
       const selectionRef = 'advisories/prebaseline/selection.json';
       if (!controlledOutput(runDir, selectionRef, ['role-advisory.mjs'], [], ['collect_existing_baseline'])) throw new Error('prebaseline review selection lacks a controlled ledger-bound receipt');
       const selection = JSON.parse(fs.readFileSync(path.join(runDir, selectionRef), 'utf8'));
-      if (pending.agentId !== PREBASELINE_REVIEWER_ID || pending.payload?.roleId !== pending.agentId || selection.agentJobs?.[pending.agentId] !== jobId || JSON.stringify(selection.inputBindings) !== JSON.stringify(pending.payload?.inputBindings) || pending.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(pending.payload?.reviewContext) !== JSON.stringify(current.context)) throw new Error('prebaseline review job is not bound to the current inspection');
+      const expectedAgent = batchIndex === undefined ? PREBASELINE_REVIEWER_ID : `${PREBASELINE_REVIEWER_ID}-batch-${batchIndex}`;
+      if (!currentContext || pending.agentId !== expectedAgent || pending.payload?.roleId !== pending.agentId || selection.agentJobs?.[pending.agentId] !== jobId || JSON.stringify(selection.inputBindings) !== JSON.stringify(pending.payload?.inputBindings) || pending.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(pending.payload?.reviewContext) !== JSON.stringify(currentContext)) throw new Error('prebaseline review job is not bound to the current inspection');
     }
     const skillInstructions = !replaying && pending?.payload?.tasteSkill ? loadTasteSkill(pending.payload.tasteSkill) : null;
     const optionalSkills = replaying ? [] : availableAgentSkills(stage, pending.payload?.roleId);
