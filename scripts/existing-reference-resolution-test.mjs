@@ -9,7 +9,7 @@ import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, 
 import { assessResourceVerification, observeResourceImages, observeResourceExemptions, observeBackgroundImages, resourceVerificationBinding, resourceImageProbeCode } from './existing-resource-runtime.mjs';
 import { unresolvedSnapshot, unresolvedFailure, unresolvedCauseChanged, unresolvedFailureSummary, currentImportInspection } from './existing-import-inspection.mjs';
 import { controlledOutput } from './verification-policy.mjs';
-import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews } from './prebaseline-import-review.mjs';
+import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan, validatePrebaselineImportReviews, validatePrebaselineBatchReviews, validatePrebaselineReviewCoverage } from './prebaseline-import-review.mjs';
 import { agentRuntimeStatus } from './run-ledger.mjs';
 
 const core = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -195,8 +195,20 @@ try {
   assert.ok(largePlan.batches.length > 1);
   assert.deepEqual(largePlan.batches.flatMap(batch => batch.unresolvedImports), largePlan.inspection.unresolvedImports, 'every inspected reference must appear exactly once in the batch plan');
   assert.ok(largePlan.batches.every(batch => batch.unresolvedImports.length <= 50 && Buffer.byteLength(JSON.stringify(batch)) <= 64 * 1024));
+  const batchResults = largePlan.batches.map(batch => ({ batchIndex: batch.batch.index, reviews: batch.unresolvedImports.map(item => ({ source: item.source, reference: item.reference, decision: 'unverified', rationale: '当前证据仅显示项目代码中的引用位置，尚未证明其实际运行时行为或影响。', sourceExcerpt: item.reference })) }));
+  assert.equal(validatePrebaselineBatchReviews(dir, project, largeReference, 1, batchResults[0].reviews).permitsBaseline, false);
+  assert.deepEqual(validatePrebaselineReviewCoverage(dir, project, largeReference, batchResults), { status: 'professional-judgment-unverified', reviewedCount: largeInspection.unresolvedCount, batchCount: largePlan.batches.length, permitsBaseline: false, controlledExecution: 'not-verified' });
+  assert.throws(() => validatePrebaselineReviewCoverage(dir, project, largeReference, batchResults.slice(1)), /cover every batch/);
+  assert.throws(() => validatePrebaselineReviewCoverage(dir, project, largeReference, batchResults.map(() => batchResults[0])), /duplicate batch/);
+  assert.throws(() => validatePrebaselineBatchReviews(dir, project, largeReference, 1, batchResults[1].reviews), /exactly once|unknown or duplicate/);
+  assert.throws(() => validatePrebaselineBatchReviews(dir, project, largeReference, 0, batchResults[0].reviews), /batch index/);
+  const forgedExcerpt = structuredClone(batchResults); forgedExcerpt[0].reviews[0].sourceExcerpt = 'not present in the source';
+  assert.throws(() => validatePrebaselineReviewCoverage(dir, project, largeReference, forgedExcerpt), /excerpt is not present/);
+  const movedReview = structuredClone(batchResults); [movedReview[0].reviews[0], movedReview[1].reviews[0]] = [movedReview[1].reviews[0], movedReview[0].reviews[0]];
+  assert.throws(() => validatePrebaselineReviewCoverage(dir, project, largeReference, movedReview), /unknown or duplicate/);
   fs.appendFileSync(main, '\n// batch plan becomes stale\n');
   assert.throws(() => prebaselineReviewBatchPlan(dir, project, largeReference), /inspection is not current/, 'batch planning must reject stale source');
+  assert.throws(() => validatePrebaselineReviewCoverage(dir, project, largeReference, batchResults), /inspection is not current/, 'stale evidence cannot yield complete review coverage');
   assert.equal(agentRuntimeStatus(dir).jobs.filter(item => item.stage === 'prebaseline').length, 1, 'an oversized review must not silently create partial jobs');
   fs.writeFileSync(main, beforeLargeReview); assert.equal(inspectionAction().sha256, inspectionResult.sha256);
   const firstAuth = call('apex-router.mjs', ['authorize', project, run, session, 'collect_existing_baseline']);

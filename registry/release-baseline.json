@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-25T01:00:47.876Z",
+  "generatedAt": "2026-11-25T01:10:24.838Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -122,7 +122,7 @@
     "scripts/existing-baseline-browser-test.mjs": "7ae5b6b8fb1685e9755456a553eba9e1d5f75459340ff2d1ff3c63c20f83f461",
     "scripts/existing-code-reference.mjs": "84cafe418606d353acd5e4a01683b23b2807e6e7c86b9b14e7568d04688a24d6",
     "scripts/existing-import-inspection.mjs": "a9b652c92b53f0fca8098278e2da6036f78b8682ff678768a887e8f007a3232c",
-    "scripts/existing-reference-resolution-test.mjs": "0b2d2a9338d693f40d9ee484414626892c48366516ed5dac6af41ec46ed544f9",
+    "scripts/existing-reference-resolution-test.mjs": "05c4c5afe2c3e5ba57551673ef947b6261a1bf4978e59dbe5455e80832592216",
     "scripts/existing-resource-freshness.mjs": "63bcefda9f3169a5310d3cf111d6d365483d786010a4136ccf8a01523aee4004",
     "scripts/existing-resource-runtime.mjs": "f103ed456c99dc108075575bde80e9f05c7933351b0791f5d2e1c08c9f6b1438",
     "scripts/experience-evaluator.mjs": "97034f0159a68bcd3d6cbba36edd8d8d62074879659b24dd38decb77d7e78ea6",
@@ -162,7 +162,7 @@
     "scripts/operation-recovery-test.mjs": "3b2f0d36dfc8bd4deb7c0a6374944432064b086c8e97a35540cb7490fb14cdab",
     "scripts/operation-recovery.mjs": "fcc99bb456da21e942cbcb86e0b1a01a507b37b9f6f5a48b514180ade3e4e1e5",
     "scripts/portable-install-contract-test.mjs": "7909ec69b6983034413e592506a039d7e5077f36df97fd45a9f7ec544a2c7468",
-    "scripts/prebaseline-import-review.mjs": "8fbf25b494edb3e2aee647c0fbec0d85402ac2db8cd67197f6a54900f11d76ad",
+    "scripts/prebaseline-import-review.mjs": "63af6f63534e05f658f8e3f3bea009a7c297f488c842374eed00da3e2c549539",
     "scripts/prebaseline-import-routing-test.mjs": "a1e56ac5048f0a1d379b4a1eb34dcbf136445f26f196eab0c14b23f63b36f1e1",
     "scripts/prebaseline-review-batches-test.mjs": "a4f2d418907b9c1b1dab13ccac481d3cde053864465751a27c235caa89c31089",
     "scripts/preflight-contract-test.mjs": "5acebc66bf723777a7e0b0f3acf9af89c6ef9c9302a25b92b9cb2d1bd296a228",

@@ -72,7 +72,7 @@ export function prebaselineReviewContext(runDir, projectRoot, reference) {
   return { inspection, context };
 }
 
-export function validatePrebaselineImportReviews(runDir, projectRoot, reference, reviews, prepared = null) {
+function validateReviews(runDir, projectRoot, reference, reviews, prepared = null, batchIndex = null) {
   const { inspection } = prepared || prebaselineReviewContext(runDir, projectRoot, reference);
   if (prepared) {
     const root = fs.realpathSync(runDir);
@@ -82,10 +82,12 @@ export function validatePrebaselineImportReviews(runDir, projectRoot, reference,
     const bytes = fs.readFileSync(file);
     if (prepared.context?.inspection !== reference || prepared.context.inspectionSha256 !== hash(bytes) || JSON.stringify(JSON.parse(bytes.toString('utf8'))) !== JSON.stringify(inspection)) throw new Error('prepared prebaseline inspection no longer matches its source');
   }
-  if (!Array.isArray(reviews) || reviews.length !== inspection.unresolvedImports.length) throw new Error('the analyst must review each unresolved import exactly once');
+  const entries = batchIndex === null ? inspection.unresolvedImports : partitionPrebaselineReviewContext({ inspection: reference, inspectionSha256: prepared.context.inspectionSha256, scope: inspection.scope, requirementRevision: inspection.requirementRevision, unresolvedImports: inspection.unresolvedImports })[batchIndex - 1]?.unresolvedImports;
+  if (!entries) throw new Error('prebaseline batch index is invalid');
+  if (!Array.isArray(reviews) || reviews.length !== entries.length) throw new Error('the analyst must review each unresolved import exactly once');
   const sourceHashes = new Map(inspection.sourceObservations.map(item => [item.path, item.sha256]));
-  const expected = new Set(inspection.unresolvedImports.map(item => JSON.stringify([item.source, item.reference]))), seen = new Set();
-  if (expected.size !== inspection.unresolvedImports.length) throw new Error('inspection has duplicate unresolved import identities');
+  const expected = new Set(entries.map(item => JSON.stringify([item.source, item.reference]))), seen = new Set();
+  if (expected.size !== entries.length) throw new Error('inspection has duplicate unresolved import identities');
   const project = fs.realpathSync(projectRoot), sourceContents = new Map();
   for (const item of reviews) {
     const key = JSON.stringify([item?.source, item?.reference]);
@@ -104,4 +106,33 @@ export function validatePrebaselineImportReviews(runDir, projectRoot, reference,
   }
   if (currentImportInspection(runDir, projectRoot, reference).status !== 'current-unverified') throw new Error('prebaseline import inspection changed during review validation');
   return { status: 'professional-judgment-unverified', reviewedCount: seen.size, permitsBaseline: false };
+}
+
+export function validatePrebaselineImportReviews(runDir, projectRoot, reference, reviews, prepared = null) {
+  return validateReviews(runDir, projectRoot, reference, reviews, prepared);
+}
+
+// This checks content against the recomputed plan, not job completion. A
+// caller must separately prove each result's controlled receipt and lease.
+export function validatePrebaselineBatchReviews(runDir, projectRoot, reference, batchIndex, reviews) {
+  if (!Number.isSafeInteger(batchIndex) || batchIndex < 1) throw new Error('prebaseline batch index is invalid');
+  const prepared = prebaselineReviewSource(runDir, projectRoot, reference);
+  return validateReviews(runDir, projectRoot, reference, reviews, prepared, batchIndex);
+}
+
+export function validatePrebaselineReviewCoverage(runDir, projectRoot, reference, results) {
+  const prepared = prebaselineReviewSource(runDir, projectRoot, reference);
+  const batches = partitionPrebaselineReviewContext(prepared.context);
+  if (!Array.isArray(results) || results.length !== batches.length) throw new Error('prebaseline review results do not cover every batch');
+  const indexes = new Set(), allReviews = [];
+  for (const result of results) {
+    if (!Number.isSafeInteger(result?.batchIndex) || result.batchIndex < 1 || result.batchIndex > batches.length || indexes.has(result.batchIndex)) throw new Error('prebaseline review results contain an invalid or duplicate batch');
+    indexes.add(result.batchIndex);
+    const expected = new Set(batches[result.batchIndex - 1].unresolvedImports.map(item => JSON.stringify([item.source, item.reference])));
+    if (!Array.isArray(result.reviews) || result.reviews.length !== expected.size) throw new Error('the analyst must review each unresolved import exactly once');
+    for (const review of result.reviews) if (!expected.delete(JSON.stringify([review?.source, review?.reference]))) throw new Error('import review has an unknown or duplicate reference');
+    allReviews.push(...result.reviews);
+  }
+  validateReviews(runDir, projectRoot, reference, allReviews, prepared);
+  return { status: 'professional-judgment-unverified', reviewedCount: prepared.inspection.unresolvedImports.length, batchCount: batches.length, permitsBaseline: false, controlledExecution: 'not-verified' };
 }
