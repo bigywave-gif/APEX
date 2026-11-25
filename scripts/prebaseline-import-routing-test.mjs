@@ -60,7 +60,7 @@ try {
   assert.equal(status().blockingOperation, null);
   if (process.env.APEX_TEST_PREBASELINE_BROWSER === '1') {
     const serverCode = `const http=require('http'),fs=require('fs'),path=require('path');const root=process.argv[1],broken=process.argv[2]==='1',different=process.argv[3]==='1';http.createServer((req,res)=>{if(req.method==='POST'){fs.writeFileSync(path.join(root,'unexpected-post.txt'),'write');res.end('written');return}if(req.url==='/main.js'&&broken){res.writeHead(404);res.end('missing');return}if(req.url==='/main.js'&&different){res.setHeader('content-type','text/javascript');res.end('console.log("different source")');return}if(req.url==='/main.js'&&process.argv[4]==='1'){fs.writeFileSync(path.join(root,'request-started'),'yes');setTimeout(()=>res.end(fs.readFileSync(path.join(root,'main.js'))),15000);return}const file=req.url==='/main.js'?'main.js':'index.html';res.setHeader('content-type',file.endsWith('.js')?'text/javascript':'text/html');res.end(fs.readFileSync(path.join(root,file)))}).listen(0,'127.0.0.1',function(){console.log('http://127.0.0.1:'+this.address().port+'/')});`;
-    const server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_BROKEN || '0', process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE || '0', process.env.APEX_TEST_PREBASELINE_CANCEL || '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const server = spawn(process.execPath, ['-e', serverCode, project, process.env.APEX_TEST_PREBASELINE_BROKEN || '0', process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE || '0', process.env.APEX_TEST_PREBASELINE_CANCEL || '0'], { cwd: process.env.APEX_TEST_PREBASELINE_OWNERSHIP === '1' ? project : core, stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       const url = await new Promise((resolve, reject) => { let value = ''; server.stdout.on('data', chunk => { value += chunk; if (value.includes('\n')) resolve(value.trim()); }); server.on('error', reject); server.on('exit', code => reject(new Error(`fixture server exited: ${code}`))); });
       if (process.env.APEX_TEST_PREBASELINE_CANCEL === '1') {
@@ -89,7 +89,7 @@ try {
       assert.equal(observed.status, 'observed'); assert.equal(observed.permitsBaseline, false);
       const evidence = JSON.parse(fs.readFileSync(observed.observation)), sourceResult = evidence.sources.find(item => item.source === 'main.js');
       assert.equal(evidence.routes.length, 1, 'duplicate target routes must be observed once');
-      assert.equal(evidence.serviceOwnership, 'unverified'); assert.ok(evidence.limitations.includes('not-a-build-result-or-an-import-exception'));
+      assert.equal(evidence.serviceOwnership, process.env.APEX_TEST_PREBASELINE_OWNERSHIP === '1' && process.platform === 'darwin' ? 'project-cwd-observed' : 'unverified'); assert.ok(evidence.limitations.includes('not-a-build-result-or-an-import-exception'));
       const expectedLoaded = process.env.APEX_TEST_PREBASELINE_BROKEN !== '1' && process.env.APEX_TEST_PREBASELINE_BIG !== '1' && process.env.APEX_TEST_PREBASELINE_WRONG_SOURCE !== '1';
       assert.ok(sourceResult); assert.equal(Boolean(sourceResult.loadedAt.length), expectedLoaded);
       if (process.env.APEX_TEST_PREBASELINE_BROKEN === '1') assert.ok(evidence.routes[0].failedResources.some(item => item.status === 404));

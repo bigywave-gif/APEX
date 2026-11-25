@@ -2123,7 +2123,7 @@ function automaticWorkStep(state, runDir, action) {
               const observation = prebaselineRuntimeObservation(runDir, binding);
               if (!observation) return { ...step('prebaseline-runtime-observe', '观察候选依赖的实际页面加载', ['evidence/prebaseline-runtime/*.json'], '以当前项目的本机 HTTP 服务和检查范围中的全部路由运行受控浏览器观察，记录实际加载源码、失败与控制台错误；观察不等于构建通过或例外许可。'), observationBinding: binding };
               completedReview = { ...completedReview, runtimeObservation: observation };
-              const clean = !observation.incompleteRoutes && !observation.unobservedSources && !observation.failedResources && !observation.pageErrors && !observation.consoleErrors && !observation.blockedRequests;
+              const clean = observation.serviceOwnership !== 'changed-during-observation' && !observation.incompleteRoutes && !observation.unobservedSources && !observation.failedResources && !observation.pageErrors && !observation.consoleErrors && !observation.blockedRequests;
               const build = clean ? prebaselineDeclaredBuild(runDir, state) : null;
               if (build) {
                 const buildObservation = prebaselineBuildObservation(runDir, binding, observation, build);

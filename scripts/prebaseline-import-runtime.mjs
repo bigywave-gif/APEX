@@ -9,6 +9,7 @@ import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { prebaselineObservationBinding } from './prebaseline-import-review.mjs';
 import { prebaselineRuntimeProbeCode } from './prebaseline-runtime-probe.mjs';
 import { runControlledSubprocess } from './controlled-subprocess.mjs';
+import { observeLocalListener } from './local-listener-observation.mjs';
 
 const apex = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const [command, runArg, originArg] = process.argv.slice(2);
@@ -23,6 +24,7 @@ if (step?.id !== 'prebaseline-runtime-observe' || !step.observationBinding) die(
 const project = fs.realpathSync(process.env.APEX_ROUTER_PROJECT_ROOT || ''), root = fs.realpathSync(runDir), binding = step.observationBinding;
 let origin; try { origin = new URL(originArg); } catch { die('invalid origin'); }
 if (origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) die('origin must be an explicit 127.0.0.1 HTTP service root');
+const listenerBefore = observeLocalListener(Number(origin.port), project);
 const stateFile = path.join(root, 'state.json'), stateHash = sha(fs.readFileSync(stateFile));
 const checkBinding = () => JSON.stringify(prebaselineObservationBinding(root, project, binding.inspection)) === JSON.stringify(binding);
 if (!checkBinding()) die('inspection or role evidence changed');
@@ -90,7 +92,9 @@ if (!/^[a-f0-9-]{36}$/.test(token)) die('invalid authorization identity');
 const directory = path.join(root, 'evidence', 'prebaseline-runtime'); fs.mkdirSync(directory, { recursive: true });
 if (fs.realpathSync(directory) !== directory) die('observation directory must be inside the Run without symlinks');
 const output = path.join(directory, `${token}.json`);
-const value = { schemaVersion: '1.0', type: 'prebaseline-runtime-observation', status: 'observed', runId: snapshot.runId, binding, origin: origin.origin, serviceOwnership: 'unverified', routes: sanitizedRoutes, sources: observations, observedAt: new Date().toISOString(), limitations: ['loaded-source-hash-does-not-prove-execution-or-all-interactions', 'not-a-build-result-or-an-import-exception', 'route-interception-does-not-prove-complete-network-isolation'] };
+const listenerAfter = observeLocalListener(Number(origin.port), project);
+const serviceOwnership = listenerBefore && listenerAfter ? (JSON.stringify(listenerBefore) === JSON.stringify(listenerAfter) ? 'project-cwd-observed' : 'changed-during-observation') : (listenerBefore || listenerAfter ? 'changed-during-observation' : 'unverified');
+const value = { schemaVersion: '1.0', type: 'prebaseline-runtime-observation', status: 'observed', runId: snapshot.runId, binding, origin: origin.origin, serviceOwnership, serviceProcess: serviceOwnership === 'project-cwd-observed' ? listenerBefore : null, routes: sanitizedRoutes, sources: observations, observedAt: new Date().toISOString(), limitations: ['project-cwd-does-not-prove-served-content-or-service-ownership', 'loaded-source-hash-does-not-prove-execution-or-all-interactions', 'not-a-build-result-or-an-import-exception', 'route-interception-does-not-prove-complete-network-isolation'] };
 const serialized = `${JSON.stringify(value, null, 2)}\n`;
 if (Buffer.byteLength(serialized) > 4 * 1024 * 1024) die('observation exceeds the bounded evidence size');
 fs.writeFileSync(output, serialized, { flag: 'wx' });
