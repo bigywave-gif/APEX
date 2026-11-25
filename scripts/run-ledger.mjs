@@ -14,6 +14,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
+import { existingRoleContext } from './existing-role-context.mjs';
 import { reserveProjectExternalIntent, releaseUnsubmittedProjectIntent, updateProjectExternalObservation } from './project-external-registry.mjs';
 import { visualRevisionBindingCurrent } from './visual-revision-binding.mjs';
 
@@ -1040,6 +1041,7 @@ export function completeAgentAdvisory(runDir, jobId, { leaseToken, output, conte
         const current = binding.artifact === 'visualRevision' ? visualRevisionBindingCurrent(file, binding.sha256) : hash(fs.readFileSync(file)) === binding.sha256;
         if (!current) throw new Error(`agent job input changed before advisory completion: ${binding.artifact}`);
       }
+      if (jobPayload.existingContext && JSON.stringify(existingRoleContext(root, state)) !== JSON.stringify(jobPayload.existingContext)) throw new Error('Existing role screen evidence changed before advisory completion');
     }
     const destination = path.resolve(output);
     const expected = path.resolve(runDir, 'advisories', job.stage, `${job.agent_id}.json`);
@@ -1119,10 +1121,10 @@ export function publicAgentRuntimeStatus(status, { prebaselineLimit = 20, jobId 
     returned += 1;
     return true;
   }).map(job => {
-    const context = job.stage === 'prebaseline' && job.payload?.reviewContext;
-    if (!context) return job;
-    const { reviewContext, ...payload } = job.payload;
-    return { ...job, payload, reviewContextBinding: { sha256: hash(JSON.stringify(reviewContext)), inspection: reviewContext.inspection || null, inspectionSha256: reviewContext.inspectionSha256 || null, batch: reviewContext.batch || null, referenceCount: Array.isArray(reviewContext.unresolvedImports) ? reviewContext.unresolvedImports.length : null } };
+    const context = job.stage === 'prebaseline' && job.payload?.reviewContext, existing = job.payload?.existingContext;
+    if (!context && !existing) return job;
+    const { reviewContext, existingContext, ...payload } = job.payload;
+    return { ...job, payload, ...(context ? { reviewContextBinding: { sha256: hash(JSON.stringify(reviewContext)), inspection: reviewContext.inspection || null, inspectionSha256: reviewContext.inspectionSha256 || null, batch: reviewContext.batch || null, referenceCount: Array.isArray(reviewContext.unresolvedImports) ? reviewContext.unresolvedImports.length : null } } : {}), ...(existing ? { existingContextBinding: { sha256: hash(JSON.stringify(existingContext)), screenCount: Array.isArray(existingContext.screens) ? existingContext.screens.length : null } } : {}) };
   });
   let sessionTotal = 0, sessionReturned = 0;
   const requestedAgent = jobId ? jobs.find(job => job.jobId === jobId)?.agentId : null;

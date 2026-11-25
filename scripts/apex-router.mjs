@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
 import { observeLocalListener } from './local-listener-observation.mjs';
+import { existingRoleContext } from './existing-role-context.mjs';
 import { controlledOutput, ledgerBoundOutput, declaredVerificationCommand } from './verification-policy.mjs';
 import { qualityVerificationPending } from './quality-workflow.mjs';
 import { industryReviewFailures } from './industry-review-progress.mjs';
@@ -1847,6 +1848,12 @@ function roleStageReady(state, runDir, stage) {
     const selectionFile = path.join(runDir, 'advisories', stage, 'selection.json');
     if (!fs.existsSync(selectionFile)) return false;
     const selection = read(selectionFile);
+    if (usesCombinedPlan(state) && state.track === 'existing' && ['gate1', 'visual'].includes(stage)) {
+      const confirmed = stage === 'gate1' ? state.gates?.gate1?.status === 'passed' : Boolean(state.locks?.visualPlanApproved);
+      if (selection.existingContext || !confirmed) {
+        if (!selection.existingContext || JSON.stringify(selection.existingContext) !== JSON.stringify(existingRoleContext(runDir, state)) || !selection.inputBindings?.some(binding => binding.artifact === 'existingBaseline' && binding.path === state.artifacts?.existingBaseline)) return false;
+      }
+    }
     if (usesCombinedPlan(state) && stage === 'implementation' && ['visualSourceManifest', 'dependencyLock', 'visualBundle', 'implementationMap'].some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return false;
     if (usesCombinedPlan(state) && stage === 'verify' && formalReviewArtifacts.some(artifact => !state.artifacts?.[artifact] || !selection.inputBindings?.some(binding => binding.artifact === artifact && binding.path === state.artifacts[artifact]))) return false;
     if (usesCombinedPlan(state) && stage === 'verify' && fs.existsSync(path.join(runDir, 'prompt-revisions.ndjson')) && !selection.inputBindings?.some(binding => binding.artifact === 'requirementRevisions' && binding.path === 'prompt-revisions.ndjson')) return false;
@@ -1876,7 +1883,7 @@ function roleStageReady(state, runDir, stage) {
     const jobs = new Map(agentRuntimeStatus(runDir).jobs.map(job => [job.jobId, job]));
     return entry.selectedRoles.every(roleId => {
       const job = jobs.get(selection.agentJobs[roleId]);
-      return job?.agentId === roleId && job.stage === stage && job.status === 'succeeded';
+      return job?.agentId === roleId && job.stage === stage && job.status === 'succeeded' && (!selection.existingContext || JSON.stringify(job.payload?.existingContext) === JSON.stringify(selection.existingContext));
     });
   } catch { return false; }
 }
@@ -1903,6 +1910,13 @@ function roleStageState(state, runDir, stage) {
     try {
       const selection = read(selectionFile);
       if (!Array.isArray(selection.selectedRoles) || !selection.selectedRoles.length) return 'select';
+      if (usesCombinedPlan(state) && state.track === 'existing' && ['gate1', 'visual'].includes(stage)) {
+        const confirmed = stage === 'gate1' ? state.gates?.gate1?.status === 'passed' : Boolean(state.locks?.visualPlanApproved);
+        if (selection.existingContext || !confirmed) {
+          try { if (!selection.existingContext || JSON.stringify(selection.existingContext) !== JSON.stringify(existingRoleContext(runDir, state))) return repairState(); }
+          catch { return repairState(); }
+        }
+      }
       if (usesCombinedPlan(state) && stage === 'visual' && selection.selectedRoles.includes('ui-designer')) {
         if (!selection.tasteSkill) return repairState();
         try { loadTasteSkill(selection.tasteSkill); }

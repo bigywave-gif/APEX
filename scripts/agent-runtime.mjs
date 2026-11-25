@@ -4,10 +4,11 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { agentRuntimeStatus, publicAgentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+import { agentRuntimeStatus, publicAgentRuntimeStatus, readRunState, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { availableAgentSkills, loadTasteSkill, loadAgentSkill, requiredTasteLoadCurrent } from './required-visual-skill.mjs';
 import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan } from './prebaseline-import-review.mjs';
 import { controlledOutput } from './verification-policy.mjs';
+import { existingRoleContext } from './existing-role-context.mjs';
 
 const fail = message => { console.error(`APEX agent runtime failed: ${message}`); process.exit(1); };
 const [command, runArg, ...args] = process.argv.slice(2);
@@ -43,6 +44,10 @@ try {
       const expectedAgent = batchIndex === undefined ? PREBASELINE_REVIEWER_ID : `${PREBASELINE_REVIEWER_ID}-batch-${batchIndex}`;
       if (!currentContext || pending.agentId !== expectedAgent || pending.payload?.roleId !== pending.agentId || selection.agentJobs?.[pending.agentId] !== jobId || JSON.stringify(selection.inputBindings) !== JSON.stringify(pending.payload?.inputBindings) || pending.payload?.reviewPolicy !== 'judgment-only-no-baseline-exception' || JSON.stringify(pending.payload?.reviewContext) !== JSON.stringify(currentContext)) throw new Error('prebaseline review job is not bound to the current inspection');
     }
+    if (!replaying && pending.payload?.existingContext) {
+      const selection = JSON.parse(fs.readFileSync(path.join(runDir, 'advisories', stage, 'selection.json'), 'utf8'));
+      if (selection.agentJobs?.[pending.agentId] !== jobId || JSON.stringify(selection.existingContext) !== JSON.stringify(pending.payload.existingContext) || JSON.stringify(existingRoleContext(runDir, readRunState(runDir))) !== JSON.stringify(pending.payload.existingContext)) throw new Error('Existing role job is not bound to current baseline screens');
+    }
     const skillInstructions = !replaying && pending?.payload?.tasteSkill ? loadTasteSkill(pending.payload.tasteSkill) : null;
     const optionalSkills = replaying ? [] : availableAgentSkills(stage, pending.payload?.roleId);
     const claimed = claimAgentJob(runDir, jobId, { claimKey, replayOnly: replaying });
@@ -51,7 +56,8 @@ try {
     const replaySkill = claimed.idempotent && claimed.payload?.tasteSkill;
     const requiredSkillLoad = replaySkill ? { status: requiredTasteLoadCurrent(runDir, jobId, claimed.attempt, claimed.leaseToken, replaySkill) ? 'verified' : 'unverified', note: 'A replay does not load or dispatch the Skill; reconcile the original executor and receipt before proceeding.' } : undefined;
     const replayReview = stage === 'prebaseline' && claimed.idempotent && claimed.payload?.reviewContext;
-    const response = replayReview ? { ...claimed, payload: { ...claimed.payload, reviewContext: undefined }, reviewContextBinding: { sha256: `sha256:${crypto.createHash('sha256').update(JSON.stringify(replayReview)).digest('hex')}`, note: 'Reconcile the existing execution; replay does not resend or redispatch the review context.' } } : claimed;
+    const replayExisting = claimed.idempotent && claimed.payload?.existingContext;
+    const response = replayReview || replayExisting ? { ...claimed, payload: { ...claimed.payload, ...(replayReview ? { reviewContext: undefined } : {}), ...(replayExisting ? { existingContext: undefined } : {}) }, ...(replayReview ? { reviewContextBinding: { sha256: `sha256:${crypto.createHash('sha256').update(JSON.stringify(replayReview)).digest('hex')}`, note: 'Reconcile the existing execution; replay does not resend or redispatch the review context.' } } : {}), ...(replayExisting ? { existingContextBinding: { sha256: `sha256:${crypto.createHash('sha256').update(JSON.stringify(replayExisting)).digest('hex')}`, screenCount: replayExisting.screens.length, note: 'Reconcile the existing execution; replay does not resend or redispatch the screen context.' } } : {}) } : claimed;
     console.log(JSON.stringify({ ...response, ...(claimed.status === 'running' && !claimed.idempotent && skillInstructions ? { requiredSkill: skillInstructions } : {}), ...(replaySkill ? { requiredSkillBinding: replaySkill, requiredSkillLoad } : {}), ...(claimed.status === 'running' && !claimed.idempotent && optionalSkills.length ? { optionalSkills } : {}) }));
   } else if (command === 'skill') {
     const [jobId, stage, leaseToken, name, expectedSha256] = args;

@@ -146,6 +146,7 @@ for (const [name, script] of [
   ['project-scan', 'project-scan-test.mjs'],
   ['project-adapter-integration', 'project-adapter-integration-test.mjs'],
   ['existing-reference-resolution', 'existing-reference-resolution-test.mjs'],
+  ['existing-role-context', 'existing-role-context-test.mjs'],
   ['prebaseline-import-routing', 'prebaseline-import-routing-test.mjs'],
   ['local-listener-observation', 'local-listener-observation-test.mjs'],
   ['prebaseline-review-batches', 'prebaseline-review-batches-test.mjs'],
