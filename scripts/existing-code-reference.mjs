@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { newlyAvailableConfigs, newlyPreferredImports } from './existing-resource-freshness.mjs';
+import { newlyAvailableConfigs, newlyAvailableResources, newlyPreferredImports } from './existing-resource-freshness.mjs';
 import { codePositions, embeddedScriptPositions, unresolvedFailure, unresolvedSnapshot, currentImportInspection, requirementRevisionState } from './existing-import-inspection.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -271,12 +271,12 @@ if (command === 'inspect-imports') {
     const sourceHashes = new Map(sourceObservations.map(item => [item.path, item.sha256]));
     const inputsCurrent = !requirementRevision.observed.startsWith('unavailable:') && requirementRevision.observed === requirementRevision.authorized && requirementRevision.observed === requirementRevisionState(runDir) && process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 === sha(scopeBytes) && sha(fs.readFileSync(scopePath)) === sha(scopeBytes) && sourceObservations.every(item => { const file = path.resolve(projectRoot, item.path), real = fs.realpathSync(file); return inside(realProjectRoot, real) && real !== realProjectRoot && sha(fs.readFileSync(real)) === item.sha256; });
     const configsCurrent = configurationObservations.every(item => item.sha256Versions.length === 1 && sourceHashes.get(item.path) === item.sha256Versions[0]);
-    const newConfigs = newlyAvailableConfigs({ absentConfigCandidates: [...absentConfigCandidates] }, projectRoot), newImports = newlyPreferredImports({ absentImportCandidates: [...absentImportCandidates] }, projectRoot);
+    const newConfigs = newlyAvailableConfigs({ absentConfigCandidates: [...absentConfigCandidates] }, projectRoot), newImports = newlyPreferredImports({ absentImportCandidates: [...absentImportCandidates] }, projectRoot), newResources = newlyAvailableResources({ unresolvedResources: [...missingResources.values()] }, projectRoot);
     const references = missing.map(item => ({ source: item.source, reference: item.reference, candidates: item.candidates.map(candidate => candidate.path) }));
     const unresolvedCurrent = !references.length || JSON.stringify(unresolvedSnapshot(projectRoot, references)) === JSON.stringify(missing);
-    if (!inputsCurrent || !configsCurrent || newConfigs.length || newImports.length || !unresolvedCurrent) observationDrift = 'detected';
+    if (!inputsCurrent || !configsCurrent || newConfigs.length || newImports.length || newResources.length || !unresolvedCurrent) observationDrift = 'detected';
   } catch { observationDrift = 'detected'; }
-  const inspection = { schemaVersion: '1.0', status: 'unverified', observationDrift, projectRoot, requirementRevision, scope: { routes: scope.routes, entrypoints: entries.map(entry => rel(projectRoot, entry)).sort(), inputReference: rel(fs.realpathSync(runDir), scopePath), inputSha256: sha(scopeBytes), authorizedInputSha256: process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 || 'unavailable' }, scanner: 'literal-relative-script-v5', sourceObservations: sourceObservations.sort((a, b) => a.path.localeCompare(b.path)), configurationObservations, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedImports: missing, limitations: ['partial-static-analysis', 'computed-paths-and-build-plugins-not-verified', 'no-drift-detected-is-not-an-atomic-snapshot', 'not-a-review-or-permission-to-proceed'] };
+  const inspection = { schemaVersion: '1.0', status: 'unverified', observationDrift, projectRoot, requirementRevision, scope: { routes: scope.routes, entrypoints: entries.map(entry => rel(projectRoot, entry)).sort(), inputReference: rel(fs.realpathSync(runDir), scopePath), inputSha256: sha(scopeBytes), authorizedInputSha256: process.env.APEX_ROUTER_INSPECTION_SCOPE_SHA256 || 'unavailable' }, scanner: 'literal-relative-script-v5', sourceObservations: sourceObservations.sort((a, b) => a.path.localeCompare(b.path)), configurationObservations, absentConfigCandidates: [...absentConfigCandidates].sort(), absentImportCandidates: [...absentImportCandidates].sort(), unresolvedImports: missing, unresolvedResources: [...missingResources.values()], limitations: ['partial-static-analysis', 'computed-paths-and-build-plugins-not-verified', 'no-drift-detected-is-not-an-atomic-snapshot', 'not-a-review-or-permission-to-proceed'] };
   const serialized = `${JSON.stringify(inspection, null, 2)}\n`;
   if (Buffer.byteLength(serialized) > 4 * 1024 * 1024) die('unresolved import inspection exceeds the 4 MiB evidence limit');
   const inspectionHash = sha(serialized), reference = `inspections/imports-${inspectionHash.slice('sha256:'.length)}.json`, output = path.join(runDir, reference);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { newlyAvailableResources, newlyAvailableConfigs, newlyPreferredImports, assertResourceCoverage, validateResourceReviews } from './existing-resource-freshness.mjs';
+import { legacyExistingInspection } from './legacy-existing-inspection.mjs';
 import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { protectedVisualEvidenceChecks } from './scope-boundary.mjs';
 import { validateMultiStitch } from './stitch-screen-progress.mjs';
@@ -243,7 +244,6 @@ function assertStyleBaseline(style, expectedMode) {
 
 function assertExistingCodeReferenceUnchanged(runDir, state) {
   const reference = validateFile('code-reference.schema.json', requireArtifact(runDir, state, 'codeReference', 'code-reference.json'));
-  if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'literal-relative-script-v5') throw new Error('Existing code reference predates literal local import inspection; its dependency coverage is unverified');
   const projectRoot = path.resolve(reference.projectRoot);
   // Once Gate 2 has opened, the Existing snapshot remains immutable evidence,
   // but files inside the frozen implementation closure are expected to differ.
@@ -260,6 +260,10 @@ function assertExistingCodeReferenceUnchanged(runDir, state) {
     for (const entry of map.entries || []) if ((entry.runtimeTarget || []).some(target => !allowed.has(target))) throw new Error(`Implementation Map escapes the Existing change closure: ${entry.visualNode || '<unknown>'}`);
     return allowed;
   })();
+  if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'literal-relative-script-v5') {
+    const supplement = legacyExistingInspection(runDir, state, { allowedSourceChanges: changedTargets });
+    if (!supplement.ready) throw new Error(`Existing legacy dependency inspection is unavailable: ${supplement.reason}`);
+  }
   const newResources = newlyAvailableResources(reference, projectRoot, changedTargets);
   if (newResources.length) throw new Error(`Existing code changed outside the approved scoped implementation closure: previously unavailable resource ${newResources[0]}`);
   const newConfigs = newlyAvailableConfigs(reference, projectRoot, changedTargets);

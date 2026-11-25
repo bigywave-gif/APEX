@@ -2,6 +2,7 @@
 import { implementationRegistrationCurrent } from './implementation-registration.mjs';
 import { observeLocalListener } from './local-listener-observation.mjs';
 import { existingRoleContext } from './existing-role-context.mjs';
+import { legacyExistingInspection } from './legacy-existing-inspection.mjs';
 import { controlledOutput, ledgerBoundOutput, declaredVerificationCommand } from './verification-policy.mjs';
 import { qualityVerificationPending } from './quality-workflow.mjs';
 import { industryReviewFailures } from './industry-review-progress.mjs';
@@ -1462,6 +1463,21 @@ function changeScopeStatus(runDir, state, reference = null) {
   } catch { return { ready: false, reason: 'change scope artifacts are unreadable' }; }
   return { ready: true, reason: null };
 }
+function legacyConfirmedSnapshot(runDir, state) {
+  try {
+    if (state.track !== 'existing' || !usesCombinedPlan(state) || !state.locks?.visualPlanApproved || state.gates?.gate2?.status === 'passed') return null;
+    const project = fs.realpathSync(path.resolve(runDir, '..', '..', '..')), root = fs.realpathSync(runDir);
+    const file = artifactFile(runDir, state.artifacts?.codeReference), reference = read(file);
+    if (reference.importInspection === 'literal-relative-script-v5') return null;
+    if (!intactVisualPlanDecision(project, { runDir, runId: state.runId }, state)) return { ready: false, reason: 'original visual approval is missing or changed' };
+    if (reference.complete !== true || fs.realpathSync(reference.projectRoot) !== project || !Array.isArray(reference.files) || !reference.files.length || !Array.isArray(reference.scope?.routes) || !reference.scope.routes.length || !Array.isArray(reference.scope?.entrypoints) || !reference.scope.entrypoints.length) return { ready: false, reason: 'original approved source reference is invalid' };
+    for (const item of reference.files) {
+      const source = fs.realpathSync(path.resolve(project, item.path)), copy = fs.realpathSync(path.resolve(root, item.copyPath));
+      if (!source.startsWith(`${project}${path.sep}`) || !copy.startsWith(`${root}${path.sep}`) || sha256File(source) !== item.sha256 || sha256File(copy) !== item.sha256) return { ready: false, reason: `original approved source changed: ${item.path}` };
+    }
+    return { ready: true, routes: reference.scope.routes, entrypoints: reference.scope.entrypoints };
+  } catch (error) { return { ready: false, reason: `original approved source cannot be checked: ${error.message}` }; }
+}
 function existingCodeReferenceFreshness(runDir, state) {
   if (state.track !== 'existing') return { ready: true, reason: null };
   const referenceFile = artifactFile(runDir, state.artifacts?.codeReference);
@@ -1471,7 +1487,11 @@ function existingCodeReferenceFreshness(runDir, state) {
     const reference = read(referenceFile), skeleton = read(skeletonFile);
     const projectRoot = path.resolve(reference.projectRoot || path.join(runDir, '..', '..', '..'));
     if (reference.complete !== true || !reference.sourceTreeHash || !Array.isArray(reference.files) || !reference.files.length) return { ready: false, reason: 'code reference is not a complete source snapshot' };
-    if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'literal-relative-script-v5') return { ready: false, reason: 'code reference predates literal local import inspection; recapture before proceeding' };
+    if (state.roleChain?.confirmationModel === 'two-confirmations' && reference.importInspection !== 'literal-relative-script-v5') {
+      const project = path.dirname(path.dirname(path.dirname(runDir)));
+      const approval = intactVisualPlanDecision(project, { runDir, runId: state.runId }, state);
+      if (!approval || !legacyExistingInspection(runDir, state).ready) return { ready: false, reason: 'code reference predates literal local import inspection; recapture or supplement before proceeding' };
+    }
     const newResources = newlyAvailableResources(reference, projectRoot);
     if (newResources.length) return { ready: false, reason: `scoped source changed after code reference capture: previously unavailable resource ${newResources[0]}` };
     const newConfigs = newlyAvailableConfigs(reference, projectRoot);
@@ -2127,6 +2147,29 @@ function automaticWorkStep(state, runDir, action) {
     if (inventory.scanCoverage && inventory.scanCoverage.complete !== true) return step('expand-project-inventory', '扩大项目扫描范围', ['project-inventory.json'], '扫描结果存在截断。以新的 collect_existing_baseline 授权调用 project-intake.mjs expand <run-dir> <project-root>；脚本按截断情况扩大限制并重扫，达到上限时记录失败回执且保持未验证。不得增加用户确认或重复执行未改变的失败输入。');
     const reference = existingCodeReferenceFreshness(runDir, state);
     if (!reference.ready) {
+      const legacy = legacyConfirmedSnapshot(runDir, state);
+      if (legacy) {
+        const inspectionRunning = operationRecords(runDir).some(item => item.receipt?.status === 'running' && item.receipt.action === 'collect_existing_baseline' && item.receipt.script === 'existing-code-reference.mjs' && item.receipt.prebaselineContext?.command === 'inspect-imports' && item.receipt.authorizationRef !== process.env.APEX_ROUTER_AUTHORIZATION_REF);
+        if (inspectionRunning) return step('prebaseline-operation-wait', '等待已有旧版基线检查', [], '检查已有受控操作及进程；结果未知时不得重复启动，必要时进行受控恢复。');
+        const inspected = state.artifacts?.unresolvedImportInspection ? currentImportInspection(runDir, path.resolve(runDir, '..', '..', '..'), state.artifacts.unresolvedImportInspection) : null;
+        const candidateChanged = inspected?.status === 'stale-or-unverified' && ['unresolved import source or candidate changed', 'previously absent resource candidate appeared'].includes(inspected.reason);
+        let needsResourceCoverage = false;
+        if (inspected?.status === 'current-unverified' && inspected.unresolvedCount === 0) {
+          try { needsResourceCoverage = !Array.isArray(read(artifactFile(runDir, inspected.inspection)).unresolvedResources); } catch { /* Invalid evidence stays blocked. */ }
+        }
+        if (!legacy.ready || (inspected && !candidateChanged && !needsResourceCoverage)) {
+          const reason = !legacy.ready ? legacy.reason : inspected.status !== 'current-unverified' ? inspected.reason : inspected.unresolvedCount ? `supplemental inspection found ${inspected.unresolvedCount} unresolved imports` : legacyExistingInspection(runDir, state).reason;
+          return { ...step('legacy-baseline-blocked', '保留确认并核查旧版基线', [], '保留原视觉确认与原始基线；核对附加检查或源码变化，不能反复扫描或静默撤销用户确认。'), legacyBlock: { kind: 'evidence-blocked', category: 'legacy-baseline-unverified', observedError: reason || 'legacy inspection cannot be reconciled', inspection: inspected?.inspection || null, retryPolicy: 'reconcile the recorded evidence and actual source before retrying', changed: false } };
+        }
+        const scopeValue = { routes: legacy.routes, codeEntrypoints: legacy.entrypoints }, scopeRef = `legacy-baseline-inspection-scope-${sha(JSON.stringify(scopeValue)).slice(0, 20)}.json`, scopeFile = path.join(runDir, scopeRef);
+        let scopeExists = false;
+        try { fs.lstatSync(scopeFile); scopeExists = true; } catch (error) { if (error.code !== 'ENOENT') scopeExists = true; }
+        if (scopeExists) {
+          try { if (!artifactFile(runDir, scopeRef) || JSON.stringify(read(scopeFile)) !== JSON.stringify(scopeValue)) throw new Error('scope input differs'); }
+          catch { return { ...step('legacy-baseline-blocked', '保留确认并核查旧版基线', [], '保留原始确认和现有范围文件；不得覆盖不一致的范围输入。'), legacyBlock: { kind: 'evidence-blocked', category: 'legacy-baseline-unverified', observedError: 'legacy inspection scope input is inconsistent', inspection: null, retryPolicy: 'reconcile the existing scope input without overwriting it', changed: false } }; }
+        }
+        return { ...step('inspect-legacy-code-reference', '补充旧版已确认基线的依赖检查', ['inspections/imports-*.json'], `从原冻结代码引用生成 Run 内 ${scopeRef}，若文件已存在须先核对一致；以 collect_existing_baseline 调用 existing-code-reference.mjs inspect-imports，不得改写原基线、视觉方案或确认。`), legacyInspectionScope: { path: scopeRef, ...scopeValue } };
+      }
       let completedReview = null;
       const failure = latestBlockingOperation(runDir, action);
       if (failure?.category === 'unresolved-local-import' && state.roleChain?.enabled && state.roleChain?.confirmationModel === 'two-confirmations') {
@@ -2437,7 +2480,7 @@ function allowedActions(state, runDir = null) {
   const existingBaseline = runDir ? existingVisualBaselineStatus(runDir, state) : { ready: state.track !== 'existing', reason: 'run directory is required to verify Existing baseline' };
   if (gate1 && !gate2 && !existingBaseline.ready) {
     actions.add('collect_existing_baseline');
-    actions.add('revoke_visual');
+    if (!runDir || !legacyConfirmedSnapshot(runDir, state)) actions.add('revoke_visual');
   } else if (gate1 && !gate2) {
     const technicalRepair = latestTechnicalIdentityRepair(state, runDir);
     if (technicalRepair.ready) {
@@ -2642,9 +2685,9 @@ function executionDirective(state, runDir = null) {
   const reviewStep = currentStep.id === 'inspect-unresolved-imports' || currentStep.id.startsWith('prebaseline-');
   const reviewCanProceed = reviewFailure && !reviewFailure.interrupted && reviewFailure.changed && (reviewStep || currentStep.id === 'freeze-code-reference');
   const safeObservation = currentStep.id === 'prebaseline-operation-wait' || (currentStep.id === 'prebaseline-role-wait' && ['running', 'wait'].includes(prebaselineImportRoleState(runDir, state).status));
-  let blockingOperation = (action === 'recover' ? unresolvedPostGateRecovery(runDir, state) : null) || continuationStall(runDir, action, currentStep.id) || (reviewFailure ? (reviewCanProceed || safeObservation ? null : reviewFailure) : ((automaticallyRemediableFailure || (latestFailure?.category === 'unresolved-local-import' && reviewStep)) ? null : latestFailure));
+  let blockingOperation = currentStep.legacyBlock || (action === 'recover' ? unresolvedPostGateRecovery(runDir, state) : null) || continuationStall(runDir, action, currentStep.id) || (reviewFailure ? (reviewCanProceed || safeObservation ? null : reviewFailure) : ((automaticallyRemediableFailure || (latestFailure?.category === 'unresolved-local-import' && reviewStep)) ? null : latestFailure));
   if (blockingOperation?.category === 'unresolved-local-import' && currentStep.professionalReview) blockingOperation = { ...blockingOperation, professionalReview: currentStep.professionalReview };
-  const { professionalReview: internalReview, ...publicCurrentStep } = currentStep;
+  const { professionalReview: internalReview, legacyBlock: internalLegacyBlock, ...publicCurrentStep } = currentStep;
   return {
     kind: 'must-complete-before-user-response',
     action,
