@@ -5,6 +5,10 @@ import { currentResourceReview } from './existing-resource-freshness.mjs';
 import { controlledOutput } from './verification-policy.mjs';
 
 const digest = file => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+export function eligibleResourceKinds(reference) {
+  const kinds = { 'img-src': 'visible-image', 'css-background-url': 'background-image', 'script-src': 'loaded-script', 'link-href': 'loaded-stylesheet' };
+  return new Map((reference.unresolvedResources || []).filter(item => Array.isArray(item.contexts) && item.contexts.length === 1 && kinds[item.contexts[0]]).map(item => [JSON.stringify([item.source, item.reference]), kinds[item.contexts[0]]]));
+}
 function local(runDir, ref) {
   if (typeof ref !== 'string' || !ref || path.isAbsolute(ref)) throw new Error('resource verification artifact must be Run-local');
   const root = fs.realpathSync(runDir), file = fs.realpathSync(path.resolve(root, ref));
@@ -31,7 +35,7 @@ export function assessResourceVerification(runDir, state) {
     const capture = JSON.parse(fs.readFileSync(local(runDir, ref), 'utf8'));
     if (capture.kind !== 'runtime' || capture.status !== 'passed' || JSON.stringify(capture.resourceReviewBinding) !== JSON.stringify(resourceVerificationBinding(runDir, state))) throw new Error('formal resource capture does not bind the current review and implementation');
     const reference = JSON.parse(fs.readFileSync(local(runDir, state.artifacts.codeReference), 'utf8'));
-    const eligible = new Map((reference.unresolvedResources || []).filter(item => Array.isArray(item.contexts) && item.contexts.length === 1 && ['img-src', 'css-background-url'].includes(item.contexts[0])).map(item => [JSON.stringify([item.source, item.reference]), item.contexts[0] === 'img-src' ? 'visible-image' : 'background-image']));
+    const eligible = eligibleResourceKinds(reference);
     const screens = capture.evidence || [], screenIds = new Set(screens.map(screen => screen.id));
     if (!screens.length || screenIds.size !== screens.length || screens.some(screen => typeof screen.id !== 'string' || !screen.id)) throw new Error('resource coverage requires uniquely identified captured screens');
     const required = new Set(review.pending.map(item => JSON.stringify([item.source, item.reference]))), pairs = new Set(), verified = new Set();
@@ -52,7 +56,8 @@ export function assessResourceVerification(runDir, state) {
       pairs.add(pair);
     }
     const pending = review.pending.filter(item => { const key = JSON.stringify([item.source, item.reference]); return !verified.has(key) || [...screenIds].some(id => !pairs.has(JSON.stringify([key, id]))); });
-    return { status: pending.length ? 'unverified' : 'verified-visible-images', pending, evidence: ref, scope: 'decoded resource on checked screens; explicit non-applicability decisions for remaining screens; captured states only', exemptions: capture.resourceExemptions || [] };
+    const hasLoadedCode = [...required].some(key => ['loaded-script', 'loaded-stylesheet'].includes(eligible.get(key)));
+    return { status: pending.length ? 'unverified' : hasLoadedCode ? 'verified-loaded-resources' : 'verified-visible-images', pending, evidence: ref, scope: 'decoded images or same-origin observed successful resource loads on checked screens; script execution and all runtime states are not established', exemptions: capture.resourceExemptions || [] };
   } catch (error) { return { status: 'unverified', pending: review.pending, reason: error.message }; }
 }
 
@@ -87,6 +92,21 @@ export async function observeBackgroundImages(checks) {
     } catch { return result('unverified'); }
   }));
 }
+
+// A direct same-origin recheck rejects redirects, which resource timing alone
+// cannot reliably distinguish. Loading does not establish script execution.
+export function observeLoadedResources(checks) {
+  return checks.map(check => {
+    try {
+      const expected = new URL(check.reference, location.href), node = document.querySelector(check.selector);
+      const script = check.kind === 'loaded-script';
+      const matches = script ? node instanceof HTMLScriptElement && node.src === expected.href : node instanceof HTMLLinkElement && node.relList.contains('stylesheet') && node.href === expected.href && !node.disabled && Boolean(node.sheet);
+      const entries = performance.getEntriesByName(expected.href, 'resource').filter(entry => entry.initiatorType === (script ? 'script' : 'link'));
+      const loaded = entries.length > 0 && entries.every(entry => Number.isInteger(entry.responseStatus) && entry.responseStatus >= 200 && entry.responseStatus < 300);
+      return { ...check, status: expected.origin === location.origin && matches && loaded ? 'passed' : 'unverified' };
+    } catch { return { ...check, status: 'unverified' }; }
+  });
+}
 export function observeResourceExemptions(checks) {
   const result = (check, status) => ({ ...check, kind: 'not-applicable', status });
   if (!checks.length) return [];
@@ -115,8 +135,10 @@ export function observeResourceExemptions(checks) {
     // visibility is inherited but can be overridden by a descendant. Its
     // computed value on the element, not an ancestor's value, controls it.
     const hidden = node => { const visibility = getComputedStyle(node).visibility; return visibility === 'hidden' || visibility === 'collapse' || suppressed(node); };
-    const images = new Set(), backgrounds = new Set(); let unknownImageCandidates = false;
+    const images = new Set(), backgrounds = new Set(), scripts = new Set(), stylesheets = new Set(); let unknownImageCandidates = false;
     for (const node of nodes) {
+      if (typeof HTMLScriptElement !== 'undefined' && node instanceof HTMLScriptElement && node.src) scripts.add(new URL(node.src, location.href).href);
+      if (typeof HTMLLinkElement !== 'undefined' && node instanceof HTMLLinkElement && node.relList.contains('stylesheet') && node.href) stylesheets.add(new URL(node.href, location.href).href);
       if (hidden(node)) continue;
       if (node instanceof HTMLImageElement) {
         for (const source of [node.currentSrc, node.src]) if (source) images.add(new URL(source, location.href).href);
@@ -127,14 +149,21 @@ export function observeResourceExemptions(checks) {
         for (const match of value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi)) backgrounds.add(new URL((match[1] ?? match[2] ?? match[3]).trim(), location.href).href);
       }
     }
+    const loadedURLs = new Set(), resourceEntries = performance.getEntriesByType('resource');
+    const resourceTimingMayBeTruncated = resourceEntries.length >= 250;
+    for (const entry of resourceEntries) {
+      loadedURLs.add(entry.name);
+      if (entry.initiatorType === 'script') scripts.add(entry.name);
+      if (entry.initiatorType === 'link') stylesheets.add(entry.name);
+    }
     return checks.map(check => {
       try {
         const expected = new URL(check.reference, location.href);
         const matches = roots.flatMap(root => [...root.querySelectorAll(check.selector)]);
-        const present = check.resourceKind === 'visible-image' ? unknownImageCandidates || images.has(expected.href) : check.resourceKind === 'background-image' ? backgrounds.has(expected.href) : true;
+        const present = check.resourceKind === 'visible-image' ? unknownImageCandidates || images.has(expected.href) : check.resourceKind === 'background-image' ? backgrounds.has(expected.href) : check.resourceKind === 'loaded-script' ? resourceTimingMayBeTruncated || scripts.has(expected.href) || loadedURLs.has(expected.href) : check.resourceKind === 'loaded-stylesheet' ? resourceTimingMayBeTruncated || stylesheets.has(expected.href) || loadedURLs.has(expected.href) : true;
         return result(check, expected.origin === location.origin && matches.every(hidden) && !present ? 'not-rendered' : 'unverified');
       } catch { return result(check, 'unverified'); }
     });
   } catch { return checks.map(check => result(check, 'unverified')); }
 }
-export const resourceImageProbeCode = checks => `async (page) => { const checks = ${JSON.stringify(checks)}; let topologySafe = true; if (checks.some(item => item.kind === 'not-applicable')) { let cdp; try { cdp = await page.context().newCDPSession(page); const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }); const pending = [root]; let count = 0; while (pending.length) { const node = pending.pop(); if (++count > 10000 || ['IFRAME', 'FRAME'].includes(node.nodeName) || (node.shadowRoots || []).some(root => root.shadowRootType === 'closed')) { topologySafe = false; break; } pending.push(...(node.children || []), ...(node.shadowRoots || []).filter(root => root.shadowRootType !== 'user-agent')); } } catch { topologySafe = false; } finally { if (cdp) await cdp.detach().catch(() => {}); } } return JSON.stringify(await page.evaluate(async ({ checks, topologySafe }) => { const images = ${observeResourceImages.toString()}; const backgrounds = ${observeBackgroundImages.toString()}; const exemptions = ${observeResourceExemptions.toString()}; const exemptChecks = checks.filter(item => item.kind === 'not-applicable'); const exemptResults = topologySafe ? exemptions(exemptChecks) : exemptChecks.map(item => ({ ...item, status: 'unverified' })); let nextExemption = 0; const result = []; for (let i = 0; i < checks.length; i += 4) result.push(...await Promise.all(checks.slice(i, i + 4).map(async item => item.kind === 'background-image' ? (await backgrounds([item]))[0] : item.kind === 'not-applicable' ? exemptResults[nextExemption++] : images([item])[0]))); return result; }, { checks, topologySafe })); }`;
+export const resourceImageProbeCode = checks => `async (page) => { const checks = ${JSON.stringify(checks)}; let topologySafe = true; if (checks.some(item => item.kind === 'not-applicable')) { let cdp; try { cdp = await page.context().newCDPSession(page); const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true }); const pending = [root]; let count = 0; while (pending.length) { const node = pending.pop(); if (++count > 10000 || ['IFRAME', 'FRAME'].includes(node.nodeName) || (node.shadowRoots || []).some(root => root.shadowRootType === 'closed')) { topologySafe = false; break; } pending.push(...(node.children || []), ...(node.shadowRoots || []).filter(root => root.shadowRootType !== 'user-agent')); } } catch { topologySafe = false; } finally { if (cdp) await cdp.detach().catch(() => {}); } } const observations = await page.evaluate(async ({ checks, topologySafe }) => { const images = ${observeResourceImages.toString()}; const backgrounds = ${observeBackgroundImages.toString()}; const loaded = ${observeLoadedResources.toString()}; const exemptions = ${observeResourceExemptions.toString()}; const exemptChecks = checks.filter(item => item.kind === 'not-applicable'); const exemptResults = topologySafe ? exemptions(exemptChecks) : exemptChecks.map(item => ({ ...item, status: 'unverified' })); let nextExemption = 0; const result = []; for (let i = 0; i < checks.length; i += 4) result.push(...await Promise.all(checks.slice(i, i + 4).map(async item => item.kind === 'background-image' ? (await backgrounds([item]))[0] : item.kind === 'not-applicable' ? exemptResults[nextExemption++] : ['loaded-script', 'loaded-stylesheet'].includes(item.kind) ? loaded([item])[0] : images([item])[0]))); return result; }, { checks, topologySafe }); for (let i = 0; i < observations.length; i += 4) await Promise.all(observations.slice(i, i + 4).map(async item => { if (!['loaded-script', 'loaded-stylesheet'].includes(item.kind) || item.status !== 'passed') return; try { const target = new URL(item.reference, page.url()); if (target.origin !== new URL(page.url()).origin) throw new Error('cross origin'); const response = await page.context().request.get(target.href, { maxRedirects: 0, timeout: 5000, headers: { 'Cache-Control': 'no-cache' } }); const valid = response.status() >= 200 && response.status() < 300 && response.url() === target.href; await response.dispose(); if (!valid) item.status = 'unverified'; } catch { item.status = 'unverified'; } })); return JSON.stringify(observations); }`;

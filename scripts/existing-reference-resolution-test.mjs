@@ -388,6 +388,13 @@ try {
   writeCapture(backgroundCapture); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'verified-visible-images');
   writeReview('reference.json', { ...initial, unresolvedResources: initial.unresolvedResources.map(item => ({ ...item, contexts: ['css-url'] })) }); writeDecision(review);
   writeCapture({ ...backgroundCapture, resourceReviewBinding: resourceVerificationBinding(reviewDir, reviewState) }); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'unverified', 'font and unknown CSS URLs cannot use background evidence');
+  for (const [context, kind] of [['script-src', 'loaded-script'], ['link-href', 'loaded-stylesheet']]) {
+    writeReview('reference.json', { ...initial, unresolvedResources: initial.unresolvedResources.map(item => ({ ...item, contexts: [context] })) }); writeDecision(review);
+    const loadedCapture = { ...runtimeCapture, resourceReviewBinding: resourceVerificationBinding(reviewDir, reviewState), evidence: [{ ...runtimeCapture.evidence[0], resourceChecks: [{ ...imageCheck, kind, status: 'passed' }] }] };
+    writeCapture(loadedCapture); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'verified-loaded-resources');
+    writeCapture({ ...loadedCapture, evidence: [{ ...loadedCapture.evidence[0], resourceChecks: [{ ...imageCheck, kind, status: 'unverified' }] }] });
+    assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'unverified', 'missing or failed resource observations must not clear the review');
+  }
   writeReview('reference.json', reviewReference); writeDecision(review); writeCapture(runtimeCapture);
   writeReview('evidence/page.html', { fixture: 'changed' }); assert.equal(assessResourceVerification(reviewDir, reviewState).status, 'unverified');
   writeReview('evidence/page.html', { fixture: 'dom' });

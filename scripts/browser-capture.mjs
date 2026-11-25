@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
 import { newlyAvailableResources } from './existing-resource-freshness.mjs';
 import { currentResourceReview } from './existing-resource-freshness.mjs';
-import { resourceImageProbeCode, resourceVerificationBinding } from './existing-resource-runtime.mjs';
+import { eligibleResourceKinds, resourceImageProbeCode, resourceVerificationBinding } from './existing-resource-runtime.mjs';
 import { archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -129,13 +129,13 @@ if (spec.resourceChecks !== undefined) {
   let review; try { review = currentResourceReview(runDir, state); resourceReviewBinding = resourceVerificationBinding(runDir, state); } catch (error) { die(error.message); }
   if (review.status !== 'unverified') die('resourceChecks require current in-scope unresolved resources');
   const reference = read(path.join(runDir, state.artifacts.codeReference));
-  const eligible = new Map((reference.unresolvedResources || []).filter(item => Array.isArray(item.contexts) && item.contexts.length === 1 && ['img-src', 'css-background-url'].includes(item.contexts[0])).map(item => [JSON.stringify([item.source, item.reference]), item.contexts[0] === 'img-src' ? 'visible-image' : 'background-image']));
+  const eligible = eligibleResourceKinds(reference);
   const pending = new Set(review.pending.map(item => JSON.stringify([item.source, item.reference]))), covered = new Set(), pairs = new Set(), screens = new Set(spec.screens.map(item => item.id));
   if (screens.size !== spec.screens.length) die('resourceChecks require unique screen IDs');
   if (pending.size * screens.size > 1000) die('resource screen coverage exceeds the bounded verification limit');
   resourceChecks = spec.resourceChecks.map(item => {
     const key = JSON.stringify([item?.source, item?.reference]);
-    if (!pending.has(key) || !eligible.has(key) || !screens.has(item.screenId) || typeof item.selector !== 'string' || !item.selector.trim() || typeof item.reference !== 'string' || !item.reference.startsWith('/') || item.reference.startsWith('//')) die('resourceChecks require an in-scope image or CSS URL, a current screen, a selector and a same-origin root path');
+    if (!pending.has(key) || !eligible.has(key) || !screens.has(item.screenId) || typeof item.selector !== 'string' || !item.selector.trim() || typeof item.reference !== 'string' || !item.reference.startsWith('/') || item.reference.startsWith('//')) die('resourceChecks require a supported in-scope resource, a current screen, a selector and a same-origin root path');
     const pair = JSON.stringify([key, item.screenId]); if (pairs.has(pair)) die('resource screen coverage contains a duplicate decision'); pairs.add(pair);
     covered.add(key); return { source: item.source, reference: item.reference, screenId: item.screenId, selector: item.selector, kind: eligible.get(key) };
   });
