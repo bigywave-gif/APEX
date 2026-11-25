@@ -83,7 +83,7 @@ if (command === 'serve') {
       response.end(content);
     } catch { response.writeHead(400); response.end('Bad request'); }
   });
-  server.listen(port, host);
+  server.listen(port, host, () => { if (process.env.APEX_LEGACY_CAPTURE_SERVER === '1') console.log('APEX_LEGACY_CAPTURE_SERVER_READY'); });
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
   process.on('SIGINT', () => server.close(() => process.exit(0)));
 } else {

@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { demoPresentation, verifyChatPresentation } from './chat-demo.mjs';
 import { observedControlCoverageStatus, validateInteractionContract, verifyDemoInteractions } from './interactive-demo.mjs';
+import { validateLegacyDemoRecapture } from './legacy-demo-recapture.mjs';
 import { acquireRuntimeStartLock, runtimeStartLockAvailable } from './runtime-start-lock.mjs';
 import { readRuntimeLaunchIntent, findRuntimeLaunchProcess, recoveredRuntimeReady } from './runtime-launch-intent.mjs';
 import fs from 'node:fs';
@@ -1017,6 +1018,40 @@ function intactRecordedDemoDecision(root, run, state) {
   } catch { /* Missing or invalid historical evidence never grants authority. */ }
   return false;
 }
+function legacyDemoRecaptureCurrent(state, runDir) {
+  if (!runDir || state.gates?.gate2?.status !== 'passed' || !usesCombinedPlan(state)) return false;
+  try {
+    const root = path.dirname(path.dirname(path.dirname(runDir))), run = { runDir, runId: state.runId };
+    const approval = intactRecordedDemoDecision(root, run, state);
+    if (!approval) return false;
+    const demoFile = artifactFile(runDir, state.artifacts?.runtimeDemo), demo = read(demoFile);
+    const originalFile = artifactFile(runDir, demo.interactionEvidence?.path);
+    if (!originalFile || sha256File(originalFile) !== demo.interactionEvidence.sha256) return false;
+    for (const { receipt } of operationRecords(runDir)) {
+      if (receipt.action !== 'recapture_legacy_demo' || receipt.script !== 'legacy-demo-recapture-run.mjs' || receipt.status !== 'succeeded') continue;
+      for (const [reference, digest] of Object.entries(receipt.outputFileHashes || {})) {
+        if (!/^evidence\/legacy-demo-recapture\/[a-f0-9-]{36}\/binding\.json$/.test(reference.split(path.sep).join('/'))) continue;
+        const file = artifactFile(runDir, reference); if (!file || sha256File(file) !== digest || !ledgerBoundOutput(runDir, receipt, reference, digest, true)) continue;
+        const binding = read(file), captureFile = artifactFile(runDir, binding.recapture?.path), approvalFile = artifactFile(runDir, approval);
+        if (binding.schemaVersion !== '1.0' || binding.type !== 'legacy-demo-recapture' || binding.status !== 'captured' || binding.runId !== state.runId || binding.approval?.path !== approval || binding.approval.sha256 !== sha256File(approvalFile) || binding.originalDemo?.path !== state.artifacts.runtimeDemo || binding.originalDemo.sha256 !== sha256File(demoFile) || binding.originalCapture?.path !== demo.interactionEvidence.path || binding.originalCapture.sha256 !== sha256File(originalFile) || !captureFile || binding.recapture.sha256 !== sha256File(captureFile) || receipt.outputFileHashes?.[binding.recapture.path] !== binding.recapture.sha256 || !ledgerBoundOutput(runDir, receipt, binding.recapture.path, binding.recapture.sha256, true)) continue;
+        try { validateLegacyDemoRecapture(runDir, read(originalFile), read(captureFile)); return true; }
+        catch { /* An invalid older recapture must not hide a later valid one. */ }
+      }
+    }
+  } catch { /* Missing, stale or uncontrolled supplemental evidence grants nothing. */ }
+  return false;
+}
+function legacyDemoRecaptureRequired(state, runDir) {
+  try {
+    if (legacyDemoRecaptureCurrent(state, runDir)) return false;
+    const demo = read(artifactFile(runDir, state.artifacts?.runtimeDemo));
+    const capture = read(artifactFile(runDir, demo.interactionEvidence?.path));
+    const journeys = capture.interactiveDemo?.journeys, screens = capture.evidence;
+    if (!Array.isArray(journeys) || !journeys.length || !Array.isArray(screens) || !screens.length) return false;
+    if (journeys.some(item => item.failedResources !== undefined && (!Array.isArray(item.failedResources) || item.failedResources.length)) || screens.some(item => item.resourceObservation && (item.resourceObservation.status !== 'passed' || !Array.isArray(item.resourceObservation.failedResources) || item.resourceObservation.failedResources.length || !Array.isArray(item.resourceObservation.blockedRequests) || item.resourceObservation.blockedRequests.length))) return false;
+    return journeys.some(item => item.failedResources === undefined || item.controlInventoryVersion !== '1.2') || screens.some(item => !item.resourceObservation || !item.controlInventory);
+  } catch { return false; }
+}
 function unresolvedPostGateRecovery(runDir, state) {
   if (!runDir || !usesCombinedPlan(state) || state.gates?.gate2?.status !== 'passed' || !state.locks?.implementationAllowed || postGateImplementationCurrent(state, runDir)) return null;
   const root = path.dirname(path.dirname(path.dirname(runDir)));
@@ -1554,7 +1589,7 @@ function interactiveDemoReady(state, runDir) {
     if (demo.kind !== 'interactive-ui-prototype' || demo.interactionEvidence?.sha256 !== sha256File(captureFile)) return false;
     verifyDemoInteractions(runDir, read(captureFile), demo.url, { requireJourneyLocation: usesCombinedPlan(state) });
     return true;
-  } catch { return false; }
+  } catch { return legacyDemoRecaptureCurrent(state, runDir); }
 }
 function interactiveDemoRefreshRequired(state, runDir) {
   if (!runDir || !state.locks?.effectApproved || state.gates?.gate2?.status === 'passed') return false;
@@ -1973,6 +2008,7 @@ function automaticWorkStep(state, runDir, action) {
       }
     };
   };
+  if (action === 'recapture_legacy_demo') return step('recapture-legacy-demo', '补采已确认 Demo 的浏览器证据', ['evidence/legacy-demo-recapture/*/binding.json'], '从原确认绑定的 Demo 源码启动隔离服务，重新采集原页面、视口与交互；保留原确认和截图，并以受控操作回执绑定新增证据。');
   if (action === 'recover') {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
     const retainedDecision = state.gates?.gate2?.status === 'passed' && !postGateImplementationCurrent(state, runDir) && intactRecordedDemoDecision(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
@@ -2262,6 +2298,7 @@ function allowedActions(state, runDir = null) {
     const approval = runDir && confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
     const retainedDecision = runDir && intactRecordedDemoDecision(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
     if (!approval && !retainedDecision) actions.add('revoke_visual');
+    if (retainedDecision && unresolvedPostGateRecovery(runDir, state) && legacyDemoRecaptureRequired(state, runDir)) actions.add('recapture_legacy_demo');
     return [...actions].sort();
   }
   if (!gate1) {
@@ -2347,6 +2384,7 @@ function nextRequiredAction(state, runDir = null) {
   if (state.lifecycle === 'active' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed && usesCombinedPlan(state) && !postGateImplementationCurrent(state, runDir)) {
     const approval = runDir && confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
     const retainedDecision = runDir && intactRecordedDemoDecision(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+    if (retainedDecision && unresolvedPostGateRecovery(runDir, state) && legacyDemoRecaptureRequired(state, runDir)) return 'recapture_legacy_demo';
     return approval || retainedDecision ? 'recover' : 'revoke_visual';
   }
   if (state.lifecycle === 'active' && state.gates?.gate1?.status !== 'passed') {
@@ -2421,7 +2459,7 @@ function runtimeDemoPresentationReadyForState(state, runDir) {
 }
 function executionDirective(state, runDir = null) {
   const action = nextRequiredAction(state, runDir);
-  if (!['recover', 'analyze_requirement', 'collect_existing_baseline', 'plan_visual', 'generate_visual', 'revoke_visual', 'repair_visual_source_identity', 'register_runtime_demo', 'present_runtime_demo', 'sync_stitch', 'compile_visual_bundle', 'open_gate2', 'implement', 'verify', 'pass_proof', 'open_gate3'].includes(action)) return null;
+  if (!['recover', 'recapture_legacy_demo', 'analyze_requirement', 'collect_existing_baseline', 'plan_visual', 'generate_visual', 'revoke_visual', 'repair_visual_source_identity', 'register_runtime_demo', 'present_runtime_demo', 'sync_stitch', 'compile_visual_bundle', 'open_gate2', 'implement', 'verify', 'pass_proof', 'open_gate3'].includes(action)) return null;
   const requiresApiContracts = action === 'analyze_requirement' && deliveryRequiresApiContracts(state, runDir);
   // This is deliberately structured rather than prose.  A host must not turn
   // a confirmed visual plan into a generic chat "continue" affordance.
@@ -2525,8 +2563,8 @@ function executionDirective(state, runDir = null) {
       terminalRule: 'progress is commentary only; continue the chain until a complete presentation, route decision, or observed blocking report is available',
       forbiddenDuringProgress: ['confirmation-button', 'generic-continue', 'file-card-only-terminal-response']
     },
-    afterSuccess: action === 'collect_existing_baseline' ? (usesCombinedPlan(state) ? 'analyze_requirement_then_prepare_visual_plan' : 'analyze_requirement_and_present_complete_gate1_confirmation') : action === 'analyze_requirement' ? (usesCombinedPlan(state) ? 'continue_to_visual_plan_without_separate_product_confirmation' : 'present_complete_gate1_direction_and_delivery_confirmation') : action === 'plan_visual' ? 'present_complete_visual_plan_and_request_visual_plan_confirmation' : action === 'revoke_visual' ? 'rebuild_complete_visual_plan_with_page_skeleton_mapping' : action === 'repair_visual_source_identity' ? 'continue_existing_visual_plan_without_reconfirmation' : action === 'generate_visual' ? 'register_runtime_demo' : action === 'register_runtime_demo' ? 'render_and_record_current_run_runtime_demo' : action === 'present_runtime_demo' ? (usesCombinedPlan(state) ? 'request_explicit_demo_confirmation_before_route_choice' : 'request_delivery_route_after_verified_demo_presentation') : action === 'sync_stitch' ? (usesCombinedPlan(state) ? 'seal_unchanged_candidate_or_request_difference_decision' : 'present_complete_stitch_candidate_and_request_stitch_confirmation') : action === 'compile_visual_bundle' ? (usesCombinedPlan(state) ? 'validate_and_machine_seal_implementation_then_open_gate2' : 'present_complete_implementation_freeze_and_request_implementation_confirmation') : action === 'open_gate2' ? 'continue_to_controlled_implementation' : action === 'implement' ? 'run_full_verification_chain' : action === 'verify' ? 'pass_proof_with_controlled_evidence' : action === 'pass_proof' ? 'open_gate3' : 'present_delivery_evidence',
-    requiredChain: action === 'collect_existing_baseline'
+    afterSuccess: action === 'recapture_legacy_demo' ? 'recheck_router_and_resume_confirmed_run' : action === 'collect_existing_baseline' ? (usesCombinedPlan(state) ? 'analyze_requirement_then_prepare_visual_plan' : 'analyze_requirement_and_present_complete_gate1_confirmation') : action === 'analyze_requirement' ? (usesCombinedPlan(state) ? 'continue_to_visual_plan_without_separate_product_confirmation' : 'present_complete_gate1_direction_and_delivery_confirmation') : action === 'plan_visual' ? 'present_complete_visual_plan_and_request_visual_plan_confirmation' : action === 'revoke_visual' ? 'rebuild_complete_visual_plan_with_page_skeleton_mapping' : action === 'repair_visual_source_identity' ? 'continue_existing_visual_plan_without_reconfirmation' : action === 'generate_visual' ? 'register_runtime_demo' : action === 'register_runtime_demo' ? 'render_and_record_current_run_runtime_demo' : action === 'present_runtime_demo' ? (usesCombinedPlan(state) ? 'request_explicit_demo_confirmation_before_route_choice' : 'request_delivery_route_after_verified_demo_presentation') : action === 'sync_stitch' ? (usesCombinedPlan(state) ? 'seal_unchanged_candidate_or_request_difference_decision' : 'present_complete_stitch_candidate_and_request_stitch_confirmation') : action === 'compile_visual_bundle' ? (usesCombinedPlan(state) ? 'validate_and_machine_seal_implementation_then_open_gate2' : 'present_complete_implementation_freeze_and_request_implementation_confirmation') : action === 'open_gate2' ? 'continue_to_controlled_implementation' : action === 'implement' ? 'run_full_verification_chain' : action === 'verify' ? 'pass_proof_with_controlled_evidence' : action === 'pass_proof' ? 'open_gate3' : 'present_delivery_evidence',
+    requiredChain: action === 'recapture_legacy_demo' ? ['preserve_confirmed_demo', 'recapture_original_screens_and_journeys', 'bind_controlled_supplemental_evidence', 'recheck_router'] : action === 'collect_existing_baseline'
       ? ['scan_formal_project_inventory', 'freeze_code_reference_and_page_skeleton', 'capture_real_browser_baseline', 'bind_existing_baseline', 'freeze_change_scope', 'compile_functional_freeze', 'select_and_run_baseline_role_advisories', 'analyze_requirement_and_emit_complete_gate1_presentation']
       : action === 'analyze_requirement'
       ? ['derive_requirement_and_delivery_contract', ...(requiresApiContracts ? ['derive_and_record_domain_model_from_current_scope', 'derive_and_record_api_contract_from_current_scope'] : []), 'evaluate_experience_strategy', 'select_and_run_gate1_role_advisories', 'synthesize_role_decisions_into_gate1_presentation', 'emit_complete_8_section_gate1_presentation', 'register_complete_gate1_presentation', ...(usesCombinedPlan(state) ? ['continue_to_visual_plan_without_separate_product_confirmation'] : ['render_chat_orientation_and_full_eight_section_plan', 'request_named_gate1_confirmation'])]
@@ -2555,7 +2593,7 @@ function executionDirective(state, runDir = null) {
       : action === 'pass_proof'
       ? ['pass_proof', 'open_gate3']
       : ['open_gate3', 'present_delivery_evidence'],
-    completionEvidence: action === 'collect_existing_baseline' ? ['project-inventory.json', 'code-reference.json', 'page-skeleton.json', 'existing-baseline.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'analyze_requirement' ? ['intent-brief.json', 'delivery-contract.json', ...(requiresApiContracts ? ['domain-model.json', 'api-contract.json'] : []), 'experience-strategy.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'plan_visual' || action === 'revoke_visual' ? ['visual-execution-plan.json', 'visual-plan-presentation.md'] : action === 'generate_visual' ? ['runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json'] : action === 'register_runtime_demo' ? ['registrations/runtime-demo-*.json'] : action === 'present_runtime_demo' ? ['presentations/runtime-demo-*.json'] : action === 'sync_stitch' ? [state.artifacts?.stitchFreeze || 'evidence/stitch/freezes/stitch-freeze-*.json', 'stitch-parity-evidence.json', 'stitch-presentation.md', 'stitch-presentation-manifest.json'] : action === 'compile_visual_bundle' ? ['site-contract.json', 'visual-bundle.json', 'implementation-map.json', 'implementation-presentation.md', 'implementation-presentation-manifest.json'] : action === 'open_gate2' ? ['Gate 2 passed machine evidence'] : action === 'implement' ? ['page-delta.json'] : action === 'verify' ? ['verification-bundle.json', 'proof evidence', 'industry-benchmark-review.json', 'industry-benchmark-evidence.json'] : action === 'pass_proof' ? ['passed proof evidence'] : ['Gate 3 delivery evidence'],
+    completionEvidence: action === 'recapture_legacy_demo' ? ['evidence/legacy-demo-recapture/*/binding.json'] : action === 'collect_existing_baseline' ? ['project-inventory.json', 'code-reference.json', 'page-skeleton.json', 'existing-baseline.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'analyze_requirement' ? ['intent-brief.json', 'delivery-contract.json', ...(requiresApiContracts ? ['domain-model.json', 'api-contract.json'] : []), 'experience-strategy.json', 'gate1-presentation.md', 'registrations/gate1-presentation-*.json'] : action === 'plan_visual' || action === 'revoke_visual' ? ['visual-execution-plan.json', 'visual-plan-presentation.md'] : action === 'generate_visual' ? ['runtime-demo.json', 'runtime-source-lock.json', 'runtime-visual-baseline.json', 'visual-reference.json', 'gate1-visual-output.json', 'design-candidates.json'] : action === 'register_runtime_demo' ? ['registrations/runtime-demo-*.json'] : action === 'present_runtime_demo' ? ['presentations/runtime-demo-*.json'] : action === 'sync_stitch' ? [state.artifacts?.stitchFreeze || 'evidence/stitch/freezes/stitch-freeze-*.json', 'stitch-parity-evidence.json', 'stitch-presentation.md', 'stitch-presentation-manifest.json'] : action === 'compile_visual_bundle' ? ['site-contract.json', 'visual-bundle.json', 'implementation-map.json', 'implementation-presentation.md', 'implementation-presentation-manifest.json'] : action === 'open_gate2' ? ['Gate 2 passed machine evidence'] : action === 'implement' ? ['page-delta.json'] : action === 'verify' ? ['verification-bundle.json', 'proof evidence', 'industry-benchmark-review.json', 'industry-benchmark-evidence.json'] : action === 'pass_proof' ? ['passed proof evidence'] : ['Gate 3 delivery evidence'],
     userVisibleResults: action === 'collect_existing_baseline' || action === 'analyze_requirement' ? (usesCombinedPlan(state) ? ['combined-visual-plan-confirmation', 'blocking-report'] : ['full-gate1-presentation-and-confirmation', 'blocking-report']) : action === 'plan_visual' ? ['full-visual-plan-presentation-and-confirmation', 'blocking-report'] : action === 'generate_visual' || action === 'register_runtime_demo' || action === 'present_runtime_demo' ? ['runtime-demo', 'blocking-report'] : action === 'sync_stitch' ? (usesCombinedPlan(state) ? ['stitch-difference-decision-if-needed', 'blocking-report'] : ['full-stitch-presentation-and-confirmation', 'blocking-report']) : action === 'compile_visual_bundle' ? (usesCombinedPlan(state) ? ['automatic-gate2-and-implementation', 'blocking-report'] : ['full-implementation-freeze-presentation-and-confirmation', 'blocking-report']) : action === 'open_gate3' ? ['delivery-evidence', 'blocking-report'] : ['automatic-chain-progress', 'blocking-report'],
     forbiddenTerminalResults: ['stage-status-only', 'generation-progress-only', 'artifact-file-list-only', ...(action === 'plan_visual' ? ['one-sentence-plan-summary'] : [])],
     prohibitedUserPrompts: ['continue', ...(!usesCombinedPlan(state) ? ['confirm-runtime-demo'] : []), 'poll-for-progress', ...(action === 'plan_visual' ? ['generate-visual-plan', 'report-missing-visual-execution-plan-before-attempt'] : []), ...(action === 'sync_stitch' ? ['confirm-stitch-before-candidate-is-ready'] : []), ...(action === 'compile_visual_bundle' ? ['confirm-implementation-before-freeze-is-ready'] : [])]
@@ -2884,7 +2922,7 @@ function acquireLease(root, run, sessionId, durationMs) {
 }
 function authorize(root, run, sessionId, action, leaseId) {
   const response = routerState(root, run, sessionId);
-  if (action === 'recover' && response.executionDirective?.blockingOperation?.category === 'post-gate-evidence-migration') {
+  if (action === 'recover' && unresolvedPostGateRecovery(run.runDir, stateOf(run.runDir))) {
     json({ status: 'denied', reason: 'the previous recovery did not resolve the historical post-Gate evidence gap; reconcile the missing evidence before another recovery attempt', ...response }); process.exit(3);
   }
   if (action === 'generate_visual' && response.existingVisualBaseline && !response.existingVisualBaseline.ready) {

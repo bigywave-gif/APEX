@@ -83,7 +83,8 @@ const guardedActionScripts = {
   implement: ['asset-materializer.mjs', 'runtime-materializer.mjs'],
   verify: ['browser-capture.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'api-contract-capture.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs'],
   'record_context': ['contract-recorder.mjs', 'context-compiler.mjs', 'evidence-provenance.mjs'],
-  recover: ['apex-recover.mjs', 'run-migrate.mjs']
+  recover: ['apex-recover.mjs', 'run-migrate.mjs'],
+  recapture_legacy_demo: ['legacy-demo-recapture-run.mjs']
 };
 for (const [action, scripts] of Object.entries(guardedActionScripts)) {
   const missingGuards = scripts.filter(script => {

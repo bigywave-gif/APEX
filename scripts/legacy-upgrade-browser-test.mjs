@@ -38,18 +38,31 @@ try {
  const authorization=ok(run('apex-router.mjs',['authorize',project,id,session,'recover']),'authorize recovery');
  ok(run('apex-action.mjs',['run',project,id,session,authorization.authorizationRef,'recover','apex-recover.mjs',dir]),'recover');
  const blocked=ok(run('apex-router.mjs',['status',project,id,session]),'recovery status');
- assert.equal(blocked.executionDirective?.blockingOperation?.category,'post-gate-evidence-migration');
- assert.match(blocked.executionDirective.blockingOperation.verificationGap, /resource observations/);
- assert.equal(blocked.executionDirective.blockingOperation.exitCode,0); assert.equal(blocked.terminalResponseContract.allowed,true);
+ assert.equal(blocked.nextRequiredAction,'recapture_legacy_demo');
+ assert.equal(blocked.executionDirective?.currentStep?.id,'recapture-legacy-demo');
  assert.deepEqual(fs.readFileSync(approval),receiptBefore); assert.equal(blocked.gates.gate2,'passed');
  const repeated=run('apex-router.mjs',['authorize',project,id,session,'recover']);
  assert.notEqual(repeated.status,0,'unchanged migration recovery must not receive another authorization');
+ const recaptureAuthorization=ok(run('apex-router.mjs',['authorize',project,id,session,'recapture_legacy_demo']),'authorize recapture');
+ const result=ok(run('apex-action.mjs',['run',project,id,session,recaptureAuthorization.authorizationRef,'recapture_legacy_demo','legacy-demo-recapture-run.mjs',dir],600000),'recapture');
+ assert.equal(result.status,'captured');
+ const migrated=ok(run('apex-router.mjs',['status',project,id,session]),'migrated status');
+ assert.notEqual(migrated.nextRequiredAction,'recapture_legacy_demo'); assert.notEqual(migrated.nextRequiredAction,'revoke_visual');
+ assert.ok(migrated.allowedActions.includes('verify') || migrated.allowedActions.includes('implement')); assert.equal(migrated.gates.gate2,'passed');
+ assert.deepEqual(fs.readFileSync(approval),receiptBefore);
+ const binding=JSON.parse(fs.readFileSync(result.binding)), supplemental=JSON.parse(fs.readFileSync(result.capture));
+ for (const reference of [result.binding, result.capture, path.join(dir,supplemental.evidence[0].screenshot)]) {
+  const original=fs.readFileSync(reference);
+  try { fs.appendFileSync(reference,'fixture-tampering'); const tampered=ok(run('apex-router.mjs',['status',project,id,session]),'supplemental evidence status'); assert.ok(!tampered.allowedActions.includes('verify') && !tampered.allowedActions.includes('implement')); }
+  finally { fs.writeFileSync(reference,original); }
+ }
+ assert.equal(binding.approval.path,path.relative(dir,approval));
  const record=JSON.parse(receiptBefore), screenshot=record.artifactHashes.find(item=>item.path.endsWith('.png'));
  assert.ok(screenshot);const target=path.join(dir,screenshot.path), bytes=fs.readFileSync(target);
  try {
   fs.appendFileSync(target,'fixture-tampering');
   const changed=ok(run('apex-router.mjs',['status',project,id,session]),'changed evidence status');
-  assert.ok(!changed.allowedActions.includes('verify'));assert.notEqual(changed.executionDirective?.blockingOperation?.category,'post-gate-evidence-migration');
+  assert.ok(!changed.allowedActions.includes('verify')); assert.ok(!changed.allowedActions.includes('implement'));
  } finally { fs.writeFileSync(target,bytes); }
- console.log(JSON.stringify({status:'passed',scope:'4.44.1 fixture through Gate 2; preserved confirmed Demo, controlled recovery, no unchanged retry, changed evidence blocks verification',legacyVersion:before.apexVersion,candidateVersion:after.apexVersion}));
+ console.log(JSON.stringify({status:'passed',scope:'4.44.1 fixture through Gate 2; controlled supplemental browser capture resumes without replacing approval; changed evidence blocks verification',legacyVersion:before.apexVersion,candidateVersion:after.apexVersion}));
 } finally { if (process.env.APEX_KEEP_LEGACY_TEST_FIXTURE === '1') console.error(`legacy-test-root=${root}`); else fs.rmSync(root,{recursive:true,force:true}); }

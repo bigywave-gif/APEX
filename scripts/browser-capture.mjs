@@ -87,13 +87,21 @@ if (!fs.existsSync(pwcli) && !cachedCli()) die(`Playwright bridge is unavailable
 const runDir = path.resolve(runArg); const spec = read(path.resolve(specArg));
 const controlInventoryLimit = spec.controlInventoryLimit ?? 500;
 if (!Number.isInteger(controlInventoryLimit) || controlInventoryLimit < 1 || controlInventoryLimit > 5000) die('controlInventoryLimit must be an integer between 1 and 5000');
-try { requireRouterAction(runDir, ['verify', 'collect_existing_baseline', 'generate_visual']); } catch (error) { die(error.message); }
+try { requireRouterAction(runDir, ['verify', 'collect_existing_baseline', 'generate_visual', 'recapture_legacy_demo']); } catch (error) { die(error.message); }
 // A captured Existing baseline must remain immutable while later Demo and
 // verification captures are produced.  Keeping all captures in one generic
 // file silently overwrote the evidence that Gate 1 was bound to.
 const captureAction = process.env.APEX_ROUTER_ACTION;
-const evidenceKind = captureAction === 'collect_existing_baseline' ? 'existing' : 'runtime';
-const evidenceFile = path.join(runDir, 'evidence', `${evidenceKind}-browser-capture.json`);
+const legacyRecapture = captureAction === 'recapture_legacy_demo';
+const tokenId = path.basename(process.env.APEX_ROUTER_AUTHORIZATION_REF || '', '.json');
+if (legacyRecapture) {
+  try {
+    const receipt = read(path.join(runDir, process.env.APEX_ROUTER_OPERATION_RECEIPT || ''));
+    if (!/^[a-f0-9-]{36}$/.test(tokenId) || process.env.APEX_ROUTER_OPERATION_RECEIPT !== path.join('operations', `${tokenId}.json`) || receipt.status !== 'running' || receipt.action !== captureAction || receipt.script !== 'legacy-demo-recapture-run.mjs' || receipt.authorizationRef !== process.env.APEX_ROUTER_AUTHORIZATION_REF) die('legacy recapture requires its controlled running operation');
+  } catch { die('legacy recapture operation receipt is unavailable'); }
+}
+const evidenceKind = legacyRecapture ? 'legacy-demo-recapture' : captureAction === 'collect_existing_baseline' ? 'existing' : 'runtime';
+const evidenceFile = legacyRecapture ? path.join(runDir, 'evidence', evidenceKind, tokenId, 'capture.json') : path.join(runDir, 'evidence', `${evidenceKind}-browser-capture.json`);
 // Existing browser evidence must identify the exact frozen source snapshot it
 // was captured for.  Without this binding a changed code reference could be
 // paired with an earlier screenshot/DOM capture and appear internally valid.
@@ -155,7 +163,7 @@ if (authentication && (!authentication.usernameEnv || !authentication.passwordEn
 const authCredentials = authentication ? { username: process.env[authentication.usernameEnv], password: process.env[authentication.passwordEnv] } : null;
 if (authentication && (!authCredentials.username || !authCredentials.password)) die(`authentication credentials are unavailable from ${authentication.usernameEnv}/${authentication.passwordEnv}`);
 let demoSource = null;
-if (captureAction === 'generate_visual') {
+if (captureAction === 'generate_visual' || legacyRecapture) {
   try { demoSource = interactionSource(runDir); } catch (error) { die(error.message); }
   if (authentication) die('interactive prototypes use sample data, not real authentication credentials');
 }
@@ -167,7 +175,7 @@ const requiredSourceSelectionIds = [...new Set([...(spec.requiredSourceSelection
 if (!Array.isArray(requiredSourceSelectionIds) || requiredSourceSelectionIds.some(item => typeof item !== 'string' || !item)) die('requiredSourceSelectionIds must be an array of concrete visual-plan selection IDs');
 const requiredSourceFiles = spec.requiredSourceFiles || [];
 if (!Array.isArray(requiredSourceFiles) || requiredSourceFiles.some(item => !item?.selectionId || !item?.path || !/^sha256:[a-f0-9]{64}$/.test(item.sha256 || ''))) die('requiredSourceFiles must contain concrete selectionId, path, and sha256 values');
-const artifactDir = path.join(runDir, 'evidence', captureAction === 'generate_visual' ? 'demo' : evidenceKind, 'browser'); fs.mkdirSync(artifactDir, { recursive: true });
+const artifactDir = legacyRecapture ? path.join(path.dirname(evidenceFile), 'browser') : path.join(runDir, 'evidence', captureAction === 'generate_visual' ? 'demo' : evidenceKind, 'browser'); fs.mkdirSync(artifactDir, { recursive: true });
 const captured = [];
 const motionSamples = [];
 for (const screen of spec.screens) {

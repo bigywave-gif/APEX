@@ -35,7 +35,8 @@ const permitted = {
   implement: new Set(['asset-materializer.mjs', 'runtime-materializer.mjs']),
   verify: new Set(['project-intake.mjs', 'browser-capture.mjs', 'visual-reference-compiler.mjs', 'strict-replica.mjs', 'structure-contract.mjs', 'visual-parity.mjs', 'implementation-audit.mjs', 'asset-materializer.mjs', 'runtime-materializer.mjs', 'verification-planner.mjs', 'verification-orchestrator.mjs', 'contract-verifier.mjs', 'api-contract-capture.mjs', 'quality-measurement.mjs', 'quality-evidence.mjs', 'trajectory-evaluator.mjs', 'stability-evidence.mjs', 'motion-contract.mjs', 'three-d-evidence.mjs', 'industry-benchmark.mjs', 'role-advisory.mjs', 'agent-runtime.mjs']),
   record_context: new Set(['contract-recorder.mjs', 'context-compiler.mjs', 'evidence-provenance.mjs']),
-  recover: new Set(['apex-recover.mjs', 'run-migrate.mjs', 'role-advisory.mjs'])
+  recover: new Set(['apex-recover.mjs', 'run-migrate.mjs', 'role-advisory.mjs']),
+  recapture_legacy_demo: new Set(['legacy-demo-recapture-run.mjs'])
 };
 function fail(message) { console.error(`APEX action failed: ${message}`); process.exit(1); }
 if (!isCanonicalApexRoot(apexRoot)) fail(`APEX must run from canonical root: ${canonicalApexRoot}`);
