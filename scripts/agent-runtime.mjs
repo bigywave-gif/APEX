@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { requireRouterAction } from './apex-runtime-guard.mjs';
-import { agentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
+import { agentRuntimeStatus, publicAgentRuntimeStatus, appendLedgerEvent, claimAgentJob, configureRunTokenBudget, enqueueAgentJob, endTraceSpan, reconcileAgentAttemptUsage, reconcileObservedTokenUsage, recordTokenUsage, recordObservedTokenUsage, registerAgent, renewAgentJobLease, settleAgentJob, startTraceSpan } from './run-ledger.mjs';
 import { availableAgentSkills, loadTasteSkill, loadAgentSkill, requiredTasteLoadCurrent } from './required-visual-skill.mjs';
 import { PREBASELINE_REVIEWER_ID, prebaselineReviewContext, prebaselineReviewBatchPlan } from './prebaseline-import-review.mjs';
 import { controlledOutput } from './verification-policy.mjs';
@@ -17,7 +17,7 @@ const stageAction = { prebaseline: 'collect_existing_baseline', baseline: 'colle
 const readJson = value => { try { return JSON.parse(value); } catch { fail('JSON argument is invalid'); } };
 const tokenInteger = (value, name) => { if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error(`${name} must be a non-negative safe integer`); return Number(value); };
 try {
-  if (command === 'status') { requireRouterAction(runDir, Object.values(stageAction)); console.log(JSON.stringify(agentRuntimeStatus(runDir), null, 2)); }
+  if (command === 'status') { requireRouterAction(runDir, Object.values(stageAction)); console.log(JSON.stringify(publicAgentRuntimeStatus(agentRuntimeStatus(runDir)), null, 2)); }
   else if (command === 'register') {
     const [agentId, vocation, stage, capabilityVersion = '1.0', metadata = '{}'] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     requireRouterAction(runDir, action); registerAgent(runDir, { agentId, vocation, stage, capabilityVersion, metadata: readJson(metadata) }); console.log(JSON.stringify({ status: 'registered', agentId, vocation, stage }));
@@ -72,7 +72,7 @@ try {
     console.log(JSON.stringify(renewAgentJobLease(runDir, jobId, leaseToken)));
   } else if (command === 'succeed' || command === 'fail') {
     const [jobId, stage, detail = '{}', leaseToken = null, usageJson = null] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
-    requireRouterAction(runDir, action); const usage = usageJson ? readJson(usageJson) : null; const value = command === 'succeed' ? { status: 'succeeded', result: readJson(detail), leaseToken, usage } : { status: 'failed', error: detail, leaseToken, usage }; const outcome = settleAgentJob(runDir, jobId, { ...value, expectedStage: stage, directCompletion: command === 'succeed' }); console.log(JSON.stringify(outcome)); if (command === 'succeed' && outcome.jobs[0]?.status !== 'succeeded') fail(`agent job was not accepted as succeeded: ${outcome.jobs[0]?.status || 'unknown'}`);
+    requireRouterAction(runDir, action); const usage = usageJson ? readJson(usageJson) : null; const value = command === 'succeed' ? { status: 'succeeded', result: readJson(detail), leaseToken, usage } : { status: 'failed', error: detail, leaseToken, usage }; const outcome = settleAgentJob(runDir, jobId, { ...value, expectedStage: stage, directCompletion: command === 'succeed' }); console.log(JSON.stringify(publicAgentRuntimeStatus(outcome))); if (command === 'succeed' && outcome.jobs[0]?.status !== 'succeeded') fail(`agent job was not accepted as succeeded: ${outcome.jobs[0]?.status || 'unknown'}`);
   } else if (command === 'tokens') {
     const [stage, input = '0', output = '0', limit = 'null', agentId = ''] = args; const action = stageAction[stage]; if (!action) fail(`unsupported stage: ${stage}`);
     requireRouterAction(runDir, action); console.log(JSON.stringify(recordTokenUsage(runDir, { stage, agentId: agentId || null, inputTokens: Number(input), outputTokens: Number(output), limit: limit === 'null' ? null : Number(limit), legacyOnly: true })));

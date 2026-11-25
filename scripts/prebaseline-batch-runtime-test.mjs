@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { agentRuntimeStatus } from './run-ledger.mjs';
@@ -30,6 +31,16 @@ try {
   action('role-advisory.mjs', ['select', dir, 'prebaseline']);
   const selection = JSON.parse(fs.readFileSync(path.join(dir, 'advisories/prebaseline/selection.json')));
   assert.equal(selection.selectedRoles.length, 2);
+  const routerStatus = call('apex-router.mjs', ['status', project, run, session]);
+  for (const job of routerStatus.agentRuntime.jobs.filter(item => item.stage === 'prebaseline')) {
+    assert.equal(job.payload.reviewContext, undefined, 'Router status must not repeat bounded Agent contexts');
+    assert.match(job.reviewContextBinding.sha256, /^sha256:[a-f0-9]{64}$/);
+    const context = agentRuntimeStatus(dir, job.jobId).jobs[0].payload.reviewContext;
+    assert.equal(job.reviewContextBinding.sha256, `sha256:${crypto.createHash('sha256').update(JSON.stringify(context)).digest('hex')}`);
+    assert.ok(job.reviewContextBinding.referenceCount > 0);
+  }
+  const runtimeStatus = action('agent-runtime.mjs', ['status', dir]);
+  for (const job of runtimeStatus.jobs.filter(item => item.stage === 'prebaseline')) assert.equal(job.payload.reviewContext, undefined, 'runtime status must not repeat Agent contexts');
   assert.equal(action('role-advisory.mjs', ['select', dir, 'prebaseline']).idempotent, true);
   assert.equal(agentRuntimeStatus(dir).jobs.filter(job => job.stage === 'prebaseline').length, 2);
   for (const [i, roleId] of selection.selectedRoles.entries()) {

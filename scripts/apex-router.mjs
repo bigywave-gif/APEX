@@ -40,7 +40,7 @@ import { assessResourceVerification } from './existing-resource-runtime.mjs';
 import { assertWorkflowNode } from './workflow-node-registry.mjs';
 import { preserveRoleManifest } from './role-manifest-archive.mjs';
 import { loadTasteSkill, resolveTasteSkill, availableAgentSkills } from './required-visual-skill.mjs';
-import { agentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, pendingRevisionTransactions, readRunState, reconcileRun, recordArtifact, revisionInvalidationEvents, archiveArtifacts } from './run-ledger.mjs';
+import { agentRuntimeStatus, publicAgentRuntimeStatus, appendLedgerEvent, beginRevisionTransaction, commitRunState, externalSubmissionIntents, fenceRunCancellation, finalizeCommittedRevision, initializeLedger, pendingRevisionTransactions, readRunState, reconcileRun, recordArtifact, revisionInvalidationEvents, archiveArtifacts } from './run-ledger.mjs';
 
 const apexRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bridgeSource = path.join(apexRoot, 'runtime', 'host-bridges', 'codex-skill', 'SKILL.md');
@@ -2801,7 +2801,7 @@ function routerState(root, run, sessionId) {
   const baseline = existingVisualBaselineStatus(run.runDir, state);
   let integrity; try { integrity = reconcileRun(run.runDir); } catch (error) { integrity = { status: 'repair-required', issues: [{ type: 'reconciliation-unavailable', error: error.message }] }; }
   const sessionContext = sessionContextStatus(root, sessionId);
-  let agentRuntime = null; try { agentRuntime = agentRuntimeStatus(run.runDir); } catch (error) { agentRuntime = { status: 'unavailable', error: error.message }; }
+  let agentRuntime = null; try { agentRuntime = publicAgentRuntimeStatus(agentRuntimeStatus(run.runDir)); } catch (error) { agentRuntime = { status: 'unavailable', error: error.message }; }
   return { schemaVersion: '3.5', apexVersion: apexVersion(), bridgeHash: hashFile(bridgeSource), projectId: projectId(root), projectRoot: root, runId: run.runId, runDir: run.runDir, sessionId: sessionId || null, sessionContext, track: state.track, scope: state.scope, authorization: state.authorization, confirmationModel: state.roleChain?.confirmationModel || 'gate-summary-only', lifecycle: state.lifecycle || 'active', phase: state.phase, gates: Object.fromEntries(Object.entries(state.gates || {}).map(([key, value]) => [key, value.status])), handoff: state.handoff || null, integrity, agentRuntime, existingVisualBaseline: state.track === 'existing' ? baseline : null, allowedActions: allowedActions(state, run.runDir), nextRequiredAction: nextRequiredAction(state, run.runDir), nextRequiredDecision: nextRequiredDecision(state, run.runDir), responsePolicy: responsePolicy(state, run.runDir), executionDirective: executionDirective(state, run.runDir), terminalResponseContract: terminalResponseContract(state, run.runDir), capabilityExecution: capabilityExecutionDirective(), operatingConstraints: operatingConstraints(state), userInteraction: userInteractionDirective(state, run.runDir), nextRequiredGate: ['cancelled', 'handed-off'].includes(state.lifecycle) ? null : state.gates?.gate1?.status !== 'passed' ? 'gate1' : state.gates?.gate2?.status !== 'passed' ? 'gate2' : state.gates?.gate3?.status !== 'passed' ? 'gate3' : null };
 }
 function leaseDirectory(root) { return path.join(root, '.apex', 'locks', 'project-mutation.lock'); }

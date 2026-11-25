@@ -1107,6 +1107,18 @@ export function agentRuntimeStatus(runDir, jobId = null) {
   } finally { database.close(); }
 }
 
+// A status response must not retransmit the complete frozen review context
+// for every queued batch. Internal ledger callers still receive the original
+// payload; a first authorized claim remains the delivery boundary.
+export function publicAgentRuntimeStatus(status) {
+  return { ...status, jobs: (status.jobs || []).map(job => {
+    const context = job.stage === 'prebaseline' && job.payload?.reviewContext;
+    if (!context) return job;
+    const { reviewContext, ...payload } = job.payload;
+    return { ...job, payload, reviewContextBinding: { sha256: hash(JSON.stringify(reviewContext)), inspection: reviewContext.inspection || null, inspectionSha256: reviewContext.inspectionSha256 || null, batch: reviewContext.batch || null, referenceCount: Array.isArray(reviewContext.unresolvedImports) ? reviewContext.unresolvedImports.length : null } };
+  }) };
+}
+
 export function recoverAgentJobs(runDir, { force = false } = {}) {
   const database = open(runDir), timestamp = now(), recovered = [];
   try {
