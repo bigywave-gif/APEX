@@ -9,7 +9,7 @@ import { newlyAvailableConfigs, newlyPreferredImports } from './existing-resourc
 // own runtime/build evidence.
 export function codePositions(text) {
   const code = new Uint8Array(text.length);
-  const stack = [{ kind: 'code', braces: null }];
+  const stack = [{ kind: 'code', braces: null, previous: null }];
   let escaped = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i], next = text[i + 1], frame = stack[stack.length - 1];
@@ -19,7 +19,15 @@ export function codePositions(text) {
       if (escaped) escaped = false;
       else if (ch === '\\') escaped = true;
       else if (ch === '`') stack.pop();
-      else if (ch === '$' && next === '{') { i++; stack.push({ kind: 'code', braces: 1 }); }
+      else if (ch === '$' && next === '{') { i++; stack.push({ kind: 'code', braces: 1, previous: null }); }
+      continue;
+    }
+    else if (frame.kind === 'regex') {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '[') frame.characterClass = true;
+      else if (ch === ']' && frame.characterClass) frame.characterClass = false;
+      else if (ch === '/' && !frame.characterClass) stack.pop();
       continue;
     }
     else if (frame.kind === 'quote') {
@@ -33,8 +41,14 @@ export function codePositions(text) {
     else if (current.braces !== null && ch === '{') current.braces++;
     if (ch === '/' && next === '/') { i++; stack.push({ kind: 'line' }); continue; }
     if (ch === '/' && next === '*') { i++; stack.push({ kind: 'block' }); continue; }
-    if (ch === '"' || ch === "'") { stack.push({ kind: 'quote', quote: ch }); continue; }
-    if (ch === '`') { stack.push({ kind: 'template' }); continue; }
+    if (ch === '/' && (current.previous === null || /^(?:[([{,:;=!?&|+*%^~<>-]|return|throw|case|delete|void|typeof|instanceof|in|of|yield|await|else|do)$/.test(current.previous))) { current.previous = 'value'; stack.push({ kind: 'regex', characterClass: false }); continue; }
+    if (ch === '"' || ch === "'") { current.previous = 'value'; stack.push({ kind: 'quote', quote: ch }); continue; }
+    if (ch === '`') { current.previous = 'value'; stack.push({ kind: 'template' }); continue; }
+    if (/[A-Za-z_$]/.test(ch)) {
+      let end = i + 1; while (end < text.length && /[\w$]/.test(text[end])) end++;
+      code.fill(1, i, end); current.previous = text.slice(i, end); i = end - 1; continue;
+    }
+    if (!/\s/.test(ch)) current.previous = /\d/.test(ch) ? 'value' : ch;
     code[i] = 1;
   }
   return code;
@@ -150,7 +164,7 @@ export function currentImportInspection(runDir, projectRoot, reference) {
     const inspection = JSON.parse(fs.readFileSync(file, 'utf8'));
     const state = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
     if (state.artifacts?.unresolvedImportInspection !== reference) throw new Error('inspection is not the current Run artifact');
-    if (inspection.schemaVersion !== '1.0' || inspection.status !== 'unverified' || inspection.scanner !== 'literal-relative-script-v4' || inspection.observationDrift !== 'no-drift-detected') throw new Error('inspection is invalid or recorded drift');
+    if (inspection.schemaVersion !== '1.0' || inspection.status !== 'unverified' || inspection.scanner !== 'literal-relative-script-v5' || inspection.observationDrift !== 'no-drift-detected') throw new Error('inspection is invalid or recorded drift');
     if (fs.realpathSync(inspection.projectRoot) !== project) throw new Error('inspection belongs to another project');
     const revision = requirementRevisionState(root);
     if (revision.startsWith('unavailable:') || inspection.requirementRevision?.observed !== revision || inspection.requirementRevision?.authorized !== revision) throw new Error('requirement revision record changed or is unavailable');
