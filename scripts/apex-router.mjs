@@ -988,6 +988,54 @@ function confirmedDemoReceipt(root, run, state, sessionId = null) {
   }
   return null;
 }
+// This is only a reason to preserve an existing decision during recovery;
+// it never grants implementation or Gate authority under the new contract.
+function intactRecordedDemoDecision(root, run, state) {
+  try {
+    const presentation = read(artifactFile(run.runDir, state.artifacts?.runtimeDemoPresentation));
+    const required = demoConfirmationReferences(run, state);
+    if (!required) return false;
+    const directory = path.join(run.runDir, 'approvals');
+    for (const name of fs.readdirSync(directory).filter(item => /^demo-.*\.json$/.test(item))) {
+      const file = artifactFile(run.runDir, path.join('approvals', name)); if (!file) continue;
+      const receipt = read(file), entries = receipt.artifactHashes;
+      if (receipt.schemaVersion !== '3.0' || receipt.type !== 'runtime-demo-confirmation' || receipt.status !== 'approved' || receipt.projectId !== projectId(root) || receipt.runId !== run.runId || receipt.sessionId !== presentation.sessionId || Number(receipt.confirmationEpoch || 0) !== confirmationEpoch(state, 'demo') || !/^(?:确认(?:交互式)?\s*demo(?:\s*(?:无问题|没问题|符合预期))?|demo\s*(?:确认|无问题|没问题|符合预期)|确认(?:交互式)?原型)$/i.test(String(receipt.userUtterance || '').trim()) || !Array.isArray(entries) || !entries.length) continue;
+      const hashes = new Map(); let valid = true;
+      for (const item of entries) { const target = artifactFile(run.runDir, item?.path); if (!target || hashes.has(item.path) || item.sha256 !== hashFile(target)) { valid = false; break; } hashes.set(item.path, item.sha256); }
+      // References derived later from the already approved screenshots were
+      // never part of the original decision. Their integrity was checked by
+      // demoConfirmationReferences; do not require a retroactive signature.
+      let requiredRefs = required;
+      const indexRef = state.artifacts?.visualScreenReferences;
+      if (valid && indexRef && !hashes.has(indexRef)) {
+        const index = read(artifactFile(run.runDir, indexRef));
+        const derived = new Set([indexRef, ...(index.entries || []).map(item => item.path)]);
+        requiredRefs = required.filter(ref => !derived.has(ref));
+      }
+      if (valid && requiredRefs.every(ref => hashes.has(ref))) return path.join('approvals', name);
+    }
+  } catch { /* Missing or invalid historical evidence never grants authority. */ }
+  return false;
+}
+function unresolvedPostGateRecovery(runDir, state) {
+  if (!runDir || !usesCombinedPlan(state) || state.gates?.gate2?.status !== 'passed' || !state.locks?.implementationAllowed || postGateImplementationCurrent(state, runDir)) return null;
+  const root = path.dirname(path.dirname(path.dirname(runDir)));
+  const decision = intactRecordedDemoDecision(root, { runDir, runId: state.runId }, state);
+  if (!decision) return null;
+  const latest = operationRecords(runDir).filter(item => item.receipt?.action === 'recover' && item.receipt?.script === 'apex-recover.mjs' && ['succeeded', 'failed', 'interrupted'].includes(item.receipt.status)).sort((a, b) => String(b.receipt.finishedAt || b.receipt.startedAt || '').localeCompare(String(a.receipt.finishedAt || a.receipt.startedAt || '')))[0];
+  if (!latest || latest.receipt.status !== 'succeeded') return null;
+  try {
+    const outcome = JSON.parse(latest.receipt.stdout);
+    if (outcome.reconciliation?.status !== 'consistent' || Number(outcome.reconciliation.revision) !== Number(state.revision)) return null;
+    let verificationGap = 'current Demo presentation or implementation seal evidence is incomplete';
+    try {
+      const demo = read(artifactFile(runDir, state.artifacts?.runtimeDemo));
+      const capture = read(artifactFile(runDir, demo.interactionEvidence?.path));
+      verifyDemoInteractions(runDir, capture, demo.url, { requireJourneyLocation: true });
+    } catch (error) { verificationGap = String(error.message || error).slice(0, 300); }
+    return { kind: 'recovery-incomplete', category: 'post-gate-evidence-migration', action: 'recover', script: 'apex-recover.mjs', operationReceipt: path.relative(runDir, latest.path), exitCode: 0, observedError: 'The recorded Demo decision and its bound files are intact, but the current post-Gate evidence requirements remain unsatisfied after recovery. Preserve the existing decision and inspect the missing evidence before continuing.', verificationGap, retainedDecision: decision, retryPolicy: 'do not repeat an unchanged recovery or revoke the existing decision automatically; reconcile or rebuild the missing evidence without changing the confirmed Demo' };
+  } catch { return null; }
+}
 function confirmRuntimeDemo(root, run, sessionId, confirmationId, utterance) {
   const state = stateOf(run.runDir);
   const accepted = /^(?:确认(?:交互式)?\s*demo(?:\s*(?:无问题|没问题|符合预期))?|demo\s*(?:确认|无问题|没问题|符合预期)|确认(?:交互式)?原型)$/i;
@@ -1927,7 +1975,8 @@ function automaticWorkStep(state, runDir, action) {
   };
   if (action === 'recover') {
     const provenance = formalRuntimeSourceProvenanceStatus(state, runDir);
-    const cause = provenance.needsRecovery ? `当前原因：${provenance.reason}。须核对已确认来源锁及其账本记录，不得将其他项目的来源作为当前项目证据。` : '';
+    const retainedDecision = state.gates?.gate2?.status === 'passed' && !postGateImplementationCurrent(state, runDir) && intactRecordedDemoDecision(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+    const cause = retainedDecision ? `已确认 Demo 的原始回执 ${retainedDecision} 及其绑定工件仍完整，但新版后置证据尚未通过；须保留原确认并核对缺失证据，不得自动撤销或重新要求用户确认。` : provenance.needsRecovery ? `当前原因：${provenance.reason}。须核对已确认来源锁及其账本记录，不得将其他项目的来源作为当前项目证据。` : '';
     return step('reconcile-run-integrity', '修复并重新对账当前 Run 的完整性', ['run-ledger.sqlite', 'state.json'], `当前 Run 的产物、谱系或 Agent 作业存在不一致。${cause}通过 recover 调用 apex-recover.mjs；无法自动修复时必须保留失败回执，禁止继续 Gate。`);
   }
   if (action === 'collect_existing_baseline') {
@@ -2211,7 +2260,8 @@ function allowedActions(state, runDir = null) {
   // Gate 2 authority depends on the current Demo and machine-sealed implementation artifacts.
   if (gate2 && usesCombinedPlan(state) && !postGateImplementationCurrent(state, runDir)) {
     const approval = runDir && confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
-    if (!approval) actions.add('revoke_visual');
+    const retainedDecision = runDir && intactRecordedDemoDecision(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+    if (!approval && !retainedDecision) actions.add('revoke_visual');
     return [...actions].sort();
   }
   if (!gate1) {
@@ -2296,7 +2346,8 @@ function nextRequiredAction(state, runDir = null) {
   }
   if (state.lifecycle === 'active' && state.gates?.gate2?.status === 'passed' && state.locks?.implementationAllowed && usesCombinedPlan(state) && !postGateImplementationCurrent(state, runDir)) {
     const approval = runDir && confirmedDemoReceipt(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
-    return approval ? 'recover' : 'revoke_visual';
+    const retainedDecision = runDir && intactRecordedDemoDecision(path.dirname(path.dirname(path.dirname(runDir))), { runDir, runId: state.runId }, state);
+    return approval || retainedDecision ? 'recover' : 'revoke_visual';
   }
   if (state.lifecycle === 'active' && state.gates?.gate1?.status !== 'passed') {
     const existingBaseline = runDir ? existingVisualBaselineStatus(runDir, state) : { ready: state.track !== 'existing' };
@@ -2428,7 +2479,7 @@ function executionDirective(state, runDir = null) {
   const reviewStep = currentStep.id === 'inspect-unresolved-imports' || currentStep.id.startsWith('prebaseline-');
   const reviewCanProceed = reviewFailure && !reviewFailure.interrupted && reviewFailure.changed && (reviewStep || currentStep.id === 'freeze-code-reference');
   const safeObservation = currentStep.id === 'prebaseline-operation-wait' || (currentStep.id === 'prebaseline-role-wait' && ['running', 'wait'].includes(prebaselineImportRoleState(runDir, state).status));
-  const blockingOperation = continuationStall(runDir, action, currentStep.id) || (reviewFailure ? (reviewCanProceed || safeObservation ? null : reviewFailure) : ((automaticallyRemediableFailure || (latestFailure?.category === 'unresolved-local-import' && reviewStep)) ? null : latestFailure));
+  const blockingOperation = (action === 'recover' ? unresolvedPostGateRecovery(runDir, state) : null) || continuationStall(runDir, action, currentStep.id) || (reviewFailure ? (reviewCanProceed || safeObservation ? null : reviewFailure) : ((automaticallyRemediableFailure || (latestFailure?.category === 'unresolved-local-import' && reviewStep)) ? null : latestFailure));
   return {
     kind: 'must-complete-before-user-response',
     action,
@@ -2833,6 +2884,9 @@ function acquireLease(root, run, sessionId, durationMs) {
 }
 function authorize(root, run, sessionId, action, leaseId) {
   const response = routerState(root, run, sessionId);
+  if (action === 'recover' && response.executionDirective?.blockingOperation?.category === 'post-gate-evidence-migration') {
+    json({ status: 'denied', reason: 'the previous recovery did not resolve the historical post-Gate evidence gap; reconcile the missing evidence before another recovery attempt', ...response }); process.exit(3);
+  }
   if (action === 'generate_visual' && response.existingVisualBaseline && !response.existingVisualBaseline.ready) {
     json({ status: 'denied', reason: `Existing generate_visual requires a bound real-code/runtime baseline: ${response.existingVisualBaseline.reason}`, ...response }); process.exit(3);
   }

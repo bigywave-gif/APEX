@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "version": "4.45.0",
-  "generatedAt": "2026-11-25T02:50:46.449Z",
+  "generatedAt": "2026-11-25T03:37:22.827Z",
   "files": {
     "core/runtime/schemas/api-contract.schema.json": "e5f4a73562622f54a13c3018e8ecc9c5e33003cf99a278ff217e6d280935c3f5",
     "core/runtime/schemas/approval-receipt.schema.json": "f4963356e64f2a779a052d2eacf2da7752cc9f186fa02e21ab2c892cde8de3f4",
@@ -69,7 +69,7 @@
     "scripts/apex-paths.mjs": "893823bb437e2011c6041c0a993425e6ae40ce18f2f19d58bc4445b1176b8f91",
     "scripts/apex-reconcile.mjs": "b827d327e518916fa6187df1e4a1f52c8d49bdffe1bd4402e944b13ed5c5877a",
     "scripts/apex-recover.mjs": "52424517bbe1cc1677999b89c9ce686cf84fc2195992357f04671f69cafa9279",
-    "scripts/apex-router.mjs": "0034b97a6178f0533bd6c9568bf6cd5adec6b79fde35c036170a986e60273d4a",
+    "scripts/apex-router.mjs": "ae4095f30e52bb2ab092534576300033be21fa9435dcc4205f62b57e7729125d",
     "scripts/apex-run.mjs": "46e1524c809022d0d2cb58ea2bc0db8bfe6a746f8d8b0b7f2c53b4b9e19225df",
     "scripts/apex-runtime-guard.mjs": "86f7341158c31e5566dbecaf0a3de446e7b624680d40d9586ce819441ac1e9fe",
     "scripts/apex-validate.mjs": "1feba6e48eb7b60eaf5e6c8a7f7f010f80eb830b900cbe0f69e3aa0c24d8bf3d",
@@ -157,6 +157,7 @@
     "scripts/interactive-demo-test-fixture.mjs": "f4c436ec536caf6fd26c0227cbac5af9e29d3d7ff1ce4aa2bd821ac6e4345b56",
     "scripts/interactive-demo.mjs": "eda42f22223983bba5721c7f48a6f05c4812e0033364bfcd1dbcd52cc507d680",
     "scripts/ledger-marker-test.mjs": "cebfdf18a47002b689bd8ab087a69d0385c19fd23dd04af6589bf372b7778c87",
+    "scripts/legacy-upgrade-browser-test.mjs": "6a03cc185406259f145515bc5ebf12a6e1c335c7b2c1586b5b87035d986dba85",
     "scripts/materialization-current.mjs": "9deb907f7edab687cf4de2a29d6cff77cd8a4fc255058809ad6f9cb57bfbd485",
     "scripts/motion-capability.mjs": "fa7859ee77018cc023703654e16ee04d76e0f535b5162b738277e81712882902",
     "scripts/motion-contract.mjs": "1bcdb0b5c1230002c4b6a8d9fccde2d5f528a46a2e56deec22bf68bfc1d7c788",
